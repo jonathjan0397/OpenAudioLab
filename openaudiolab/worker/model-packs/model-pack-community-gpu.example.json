@@ -1,0 +1,35 @@
+{
+  "model_pack_id": "model-pack-community-gpu",
+  "display_name": "OpenAudiolab Community GPU Pack",
+  "description": "Batteries-included Community Edition GPU worker with verified redistributable models.",
+  "models": [
+    {
+      "id": "ace-step-primary",
+      "task": "audio_generation",
+      "path": "/models/ace-step",
+      "required": true,
+      "min_vram_gb": 12,
+      "commercial_safe": "needs_review",
+      "redistributable": "needs_review",
+      "note": "License verification required before official release"
+    },
+    {
+      "id": "demucs-stem-sep",
+      "task": "stem_separation",
+      "path": "/models/demucs",
+      "required": false,
+      "min_vram_gb": 4,
+      "commercial_safe": "verified",
+      "redistributable": "verified"
+    },
+    {
+      "id": "dsp-mastering-stack",
+      "task": "mastering",
+      "path": "internal",
+      "required": true,
+      "min_vram_gb": 0,
+      "commercial_safe": true,
+      "redistributable": true
+    }
+  ]
+}

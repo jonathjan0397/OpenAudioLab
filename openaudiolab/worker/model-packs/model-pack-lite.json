@@ -1,0 +1,25 @@
+{
+  "model_pack_id": "model-pack-lite",
+  "display_name": "OpenAudiolab Lite Test Pack",
+  "description": "CPU-safe test pack for validating the full pipeline without GPU generation.",
+  "models": [
+    {
+      "id": "cpu-test-audio-generator",
+      "task": "audio_generation",
+      "path": "internal",
+      "required": true,
+      "min_vram_gb": 0,
+      "commercial_safe": true,
+      "redistributable": true
+    },
+    {
+      "id": "rule-based-lyric-structure-validator",
+      "task": "lyrics_structure_validation",
+      "path": "internal",
+      "required": true,
+      "min_vram_gb": 0,
+      "commercial_safe": true,
+      "redistributable": true
+    }
+  ]
+}

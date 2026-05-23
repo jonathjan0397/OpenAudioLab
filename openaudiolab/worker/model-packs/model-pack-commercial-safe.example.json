@@ -1,0 +1,26 @@
+{
+  "model_pack_id": "model-pack-commercial-safe",
+  "display_name": "OpenAudiolab Commercial Safe Pack",
+  "description": "Models verified for commercial use. Only models with verified commercial-safe licenses are included.",
+  "models": [
+    {
+      "id": "commercial-audio-generator",
+      "task": "audio_generation",
+      "path": "/models/commercial-gen",
+      "required": true,
+      "min_vram_gb": 12,
+      "commercial_safe": "verified",
+      "redistributable": "verified",
+      "note": "Commercial license verified"
+    },
+    {
+      "id": "dsp-mastering-stack",
+      "task": "mastering",
+      "path": "internal",
+      "required": true,
+      "min_vram_gb": 0,
+      "commercial_safe": true,
+      "redistributable": true
+    }
+  ]
+}

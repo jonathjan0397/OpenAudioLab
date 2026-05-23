@@ -1,0 +1,52 @@
+{
+  "model_pack_id": "model-pack-studio-cloud",
+  "display_name": "OpenAudiolab Studio Cloud Pack",
+  "description": "High-quality worker for cloud GPUs and commercial installations. Target 24 GB VRAM minimum.",
+  "models": [
+    {
+      "id": "ace-step-1.5",
+      "task": "audio_generation",
+      "path": "/models/ace-step-1.5",
+      "required": true,
+      "min_vram_gb": 12,
+      "commercial_safe": "needs_review",
+      "redistributable": "needs_review"
+    },
+    {
+      "id": "yue-longform",
+      "task": "lyrics_to_song",
+      "path": "/models/yue",
+      "required": false,
+      "min_vram_gb": 24,
+      "commercial_safe": "needs_review",
+      "redistributable": "needs_review"
+    },
+    {
+      "id": "stable-audio-open",
+      "task": "sound_design",
+      "path": "/models/stable-audio",
+      "required": false,
+      "min_vram_gb": 8,
+      "commercial_safe": "needs_review",
+      "redistributable": "needs_review"
+    },
+    {
+      "id": "local-reasoning-llm",
+      "task": "lyric_reasoning",
+      "path": "/models/reasoning-llm",
+      "required": false,
+      "min_vram_gb": 16,
+      "commercial_safe": "needs_review",
+      "redistributable": "needs_review"
+    },
+    {
+      "id": "dsp-mastering-stack",
+      "task": "mastering",
+      "path": "internal",
+      "required": true,
+      "min_vram_gb": 0,
+      "commercial_safe": true,
+      "redistributable": true
+    }
+  ]
+}
