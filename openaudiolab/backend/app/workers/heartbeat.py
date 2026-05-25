@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from app.db.models import WorkerNode
+from app.db.models import AgentNode
 from app.db.session import SessionLocal
 
 HEARTBEAT_TIMEOUT_MINUTES = 5
@@ -8,19 +8,19 @@ HEARTBEAT_TIMEOUT_MINUTES = 5
 
 class HeartbeatMonitor:
     @staticmethod
-    def check_stale_workers() -> list[str]:
+    def check_stale_agents() -> list[str]:
         db = SessionLocal()
         try:
             threshold = datetime.now(timezone.utc) - timedelta(minutes=HEARTBEAT_TIMEOUT_MINUTES)
-            stale_workers = db.query(WorkerNode).filter(
-                WorkerNode.status != "offline",
-                WorkerNode.last_heartbeat_at < threshold,
+            stale_agents = db.query(AgentNode).filter(
+                AgentNode.status != "offline",
+                AgentNode.last_heartbeat_at < threshold,
             ).all()
 
             stale_ids = []
-            for worker in stale_workers:
-                worker.status = "offline"
-                stale_ids.append(worker.id)
+            for agent in stale_agents:
+                agent.status = "offline"
+                stale_ids.append(agent.id)
 
             if stale_ids:
                 db.commit()
@@ -30,15 +30,15 @@ class HeartbeatMonitor:
             db.close()
 
     @staticmethod
-    def is_worker_alive(worker_id: str) -> bool:
+    def is_agent_alive(agent_id: str) -> bool:
         db = SessionLocal()
         try:
-            worker = db.query(WorkerNode).filter(WorkerNode.id == worker_id).first()
-            if not worker:
+            agent = db.query(AgentNode).filter(AgentNode.id == agent_id).first()
+            if not agent:
                 return False
-            if not worker.last_heartbeat_at:
+            if not agent.last_heartbeat_at:
                 return False
             threshold = datetime.now(timezone.utc) - timedelta(minutes=HEARTBEAT_TIMEOUT_MINUTES)
-            return worker.last_heartbeat_at >= threshold
+            return agent.last_heartbeat_at >= threshold
         finally:
             db.close()

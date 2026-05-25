@@ -3,10 +3,10 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
-class WorkerRegistrationRequest(BaseModel):
-    worker_id: Optional[str] = None
-    worker_name: str = Field(..., min_length=1, max_length=255)
-    worker_mode: str = Field(default="lite", max_length=30)
+class AgentRegistrationRequest(BaseModel):
+    agent_id: Optional[str] = None
+    agent_name: str = Field(..., min_length=1, max_length=255)
+    agent_mode: str = Field(default="lite", max_length=30)
     hostname: Optional[str] = None
     registration_token: str = Field(..., min_length=1)
     gpu: dict = Field(default_factory=lambda: {
@@ -29,15 +29,15 @@ class WorkerRegistrationRequest(BaseModel):
     container_version: str = Field(default="0.1.0")
 
 
-class WorkerRegistrationResponse(BaseModel):
+class AgentRegistrationResponse(BaseModel):
     accepted: bool
-    worker_id: Optional[str] = None
-    worker_api_token: Optional[str] = None
+    agent_id: Optional[str] = None
+    agent_api_token: Optional[str] = None
     message: Optional[str] = None
 
 
 class HeartbeatRequest(BaseModel):
-    worker_id: str
+    agent_id: str
     status: str = "idle"
     active_job_id: Optional[str] = None
     gpu_utilization: Optional[float] = None
@@ -53,11 +53,11 @@ class HeartbeatResponse(BaseModel):
     drain_requested: bool = False
 
 
-class WorkerResponse(BaseModel):
+class AgentResponse(BaseModel):
     id: str
-    worker_name: str
+    agent_name: str
     status: str
-    worker_mode: str
+    agent_mode: str
     hostname: Optional[str] = None
     gpu_available: bool
     gpu_name: Optional[str] = None

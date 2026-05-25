@@ -3,25 +3,25 @@ import time
 
 import requests
 
-from worker_app.config import BACKEND_URL, HEARTBEAT_INTERVAL, WORKER_VERSION
+from agent_app.config import BACKEND_URL, HEARTBEAT_INTERVAL, AGENT_VERSION
 
-logger = logging.getLogger("worker.heartbeat")
+logger = logging.getLogger("agent.heartbeat")
 
 
-def send_heartbeat(worker_id: str, worker_api_token: str, status: str = "idle", active_job_id: str = None, draining: bool = False) -> dict:
+def send_heartbeat(agent_id: str, agent_api_token: str, status: str = "idle", active_job_id: str = None, draining: bool = False) -> dict:
     payload = {
-        "worker_id": worker_id,
+        "agent_id": agent_id,
         "status": status,
         "active_job_id": active_job_id,
-        "container_version": WORKER_VERSION,
+        "container_version": AGENT_VERSION,
         "draining": draining,
     }
 
     try:
         response = requests.post(
-            f"{BACKEND_URL}/api/workers/heartbeat",
+            f"{BACKEND_URL}/api/agents/heartbeat",
             json=payload,
-            headers={"X-Worker-Token": worker_api_token},
+            headers={"X-Agent-Token": agent_api_token},
             timeout=10,
         )
         if response.status_code == 200:
@@ -32,10 +32,10 @@ def send_heartbeat(worker_id: str, worker_api_token: str, status: str = "idle", 
     return {"accepted": False}
 
 
-def heartbeat_loop(worker_id: str, worker_api_token: str, stop_event):
+def heartbeat_loop(agent_id: str, agent_api_token: str, stop_event):
     logger.info(f"Starting heartbeat loop (interval={HEARTBEAT_INTERVAL}s)")
     while not stop_event.is_set():
-        result = send_heartbeat(worker_id, worker_api_token)
+        result = send_heartbeat(agent_id, agent_api_token)
         if result.get("drain_requested"):
             logger.info("Drain requested by backend")
         if result.get("update_required"):

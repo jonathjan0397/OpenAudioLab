@@ -15,7 +15,7 @@ class SetupInitializeRequest(BaseModel):
     storage_provider: str = Field(default="local")
     default_retention_days: int = Field(default=7, ge=1, le=365)
     enable_cpu_test_mode: bool = Field(default=True)
-    enable_cloud_workers: bool = Field(default=False)
+    enable_cloud_agents: bool = Field(default=False)
 
 
 @router.get("/status")
@@ -36,7 +36,7 @@ async def initialize_setup(request: SetupInitializeRequest):
         storage_provider=request.storage_provider,
         default_retention_days=request.default_retention_days,
         enable_cpu_test_mode=request.enable_cpu_test_mode,
-        enable_cloud_workers=request.enable_cloud_workers,
+        enable_cloud_agents=request.enable_cloud_agents,
     )
 
     if not success:

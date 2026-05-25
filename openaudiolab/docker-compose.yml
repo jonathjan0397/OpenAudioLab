@@ -1,4 +1,5 @@
 services:
+  # ── Infrastructure ──────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     environment:
@@ -44,6 +45,21 @@ services:
       timeout: 5s
       retries: 5
 
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 openaudiolab openaudiolab-secret;
+      mc mb --ignore-existing local/openaudiolab-jobs;
+      exit 0;
+      "
+
+  # ── Backend (Orchestration Only) ────────────────────────────────
+  # Handles: auth, setup, job queue, storage, dispatch, downloads
+  # Does NOT run generation pipeline
   backend:
     build:
       context: ./backend
@@ -64,13 +80,13 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-openaudiolab}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-openaudiolab-secret}
       MINIO_BUCKET: ${MINIO_BUCKET:-openaudiolab-jobs}
-      WORKER_REGISTRATION_TOKEN: ${WORKER_REGISTRATION_TOKEN:-change-this-worker-token}
+      AGENT_REGISTRATION_TOKEN: ${AGENT_REGISTRATION_TOKEN:-change-this-agent-token}
       ENABLE_CPU_TEST_GENERATION: ${ENABLE_CPU_TEST_GENERATION:-true}
       CPU_TEST_MAX_DURATION_SECONDS: ${CPU_TEST_MAX_DURATION_SECONDS:-15}
       SEED_DEV_ADMIN: ${SEED_DEV_ADMIN:-false}
       RUNPOD_API_KEY: ${RUNPOD_API_KEY:-}
       VASTAI_API_KEY: ${VASTAI_API_KEY:-}
-      ENABLE_CLOUD_WORKERS: ${ENABLE_CLOUD_WORKERS:-false}
+      ENABLE_CLOUD_AGENTS: ${ENABLE_CLOUD_AGENTS:-false}
     volumes:
       - local_storage:/data/openaudiolab/storage
     depends_on:
@@ -81,6 +97,9 @@ services:
       minio:
         condition: service_healthy
 
+  # ── Frontend (UI Only) ──────────────────────────────────────────
+  # Completely separate from agent. Only talks to backend API.
+  # Can be deployed on any machine, independently of backend or agent.
   frontend:
     build:
       context: ./frontend
@@ -92,17 +111,21 @@ services:
     depends_on:
       - backend
 
-  worker-lite:
+  # ── Agent Framework (Generation Pipeline) ───────────────────────
+  # Runs ALL generation stages: lyrics, composition, audio, effects, mastering, stems
+  # Returns artifacts to backend. Backend handles storage.
+  # Can run on same machine as backend, or on remote GPU (RunPod, Vast.ai).
+  agent-lite:
     build:
-      context: ./worker
+      context: ./agent
       dockerfile: Dockerfile.lite
     environment:
       BACKEND_URL: http://backend:8000
-      WORKER_REGISTRATION_TOKEN: ${WORKER_REGISTRATION_TOKEN:-change-this-worker-token}
-      WORKER_NAME: local-test-worker
-      WORKER_MODE: lite
+      AGENT_REGISTRATION_TOKEN: ${AGENT_REGISTRATION_TOKEN:-change-this-agent-token}
+      AGENT_NAME: local-test-agent
+      AGENT_MODE: lite
       MODEL_PACK_PATH: /app/model-packs/model-pack-lite.json
-      WORKER_VERSION: ${WORKER_VERSION:-0.1.0}
+      AGENT_VERSION: ${AGENT_VERSION:-0.1.0}
       ENABLE_CPU_TEST_GENERATION: ${ENABLE_CPU_TEST_GENERATION:-true}
       CPU_TEST_MAX_DURATION_SECONDS: ${CPU_TEST_MAX_DURATION_SECONDS:-15}
     volumes:

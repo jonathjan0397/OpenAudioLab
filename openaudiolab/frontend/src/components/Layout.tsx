@@ -21,7 +21,7 @@ export default function Layout() {
           <Link to="/dashboard" style={{ color: "#eee", textDecoration: "none", fontWeight: "bold", fontSize: "18px" }}>OpenAudiolab</Link>
           <Link to="/dashboard" style={{ color: "#aaa", textDecoration: "none" }}>Dashboard</Link>
           <Link to="/jobs/new" style={{ color: "#aaa", textDecoration: "none" }}>Create Job</Link>
-          <Link to="/workers" style={{ color: "#aaa", textDecoration: "none" }}>Workers</Link>
+          <Link to="/agents" style={{ color: "#aaa", textDecoration: "none" }}>Agents</Link>
           <Link to="/system" style={{ color: "#aaa", textDecoration: "none" }}>System</Link>
           <Link to="/settings" style={{ color: "#aaa", textDecoration: "none" }}>Settings</Link>
         </div>

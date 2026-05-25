@@ -50,7 +50,7 @@ class SetupService:
         storage_provider: str,
         default_retention_days: int,
         enable_cpu_test_mode: bool,
-        enable_cloud_workers: bool,
+        enable_cloud_agents: bool,
     ) -> tuple[bool, dict]:
         if SetupService.is_setup_complete():
             return False, {"error": "Setup has already been completed"}
@@ -83,16 +83,16 @@ class SetupService:
             db.add(SystemSetting(key="storage_provider", value_json={"value": storage_provider}))
             db.add(SystemSetting(key="default_retention_days", value_json={"value": default_retention_days}))
             db.add(SystemSetting(key="enable_cpu_test_mode", value_json={"value": enable_cpu_test_mode}))
-            db.add(SystemSetting(key="enable_cloud_workers", value_json={"value": enable_cloud_workers}))
+            db.add(SystemSetting(key="enable_cloud_agents", value_json={"value": enable_cloud_agents}))
 
-            worker_token = generate_secure_token(48)
-            db.add(SystemSetting(key="worker_registration_token", value_json={"value": worker_token, "created_at": now}))
+            agent_token = generate_secure_token(48)
+            db.add(SystemSetting(key="agent_registration_token", value_json={"value": agent_token, "created_at": now}))
 
             db.commit()
 
             return True, {
                 "message": "Setup completed successfully",
-                "worker_registration_token": worker_token,
+                "agent_registration_token": agent_token,
                 "setup_completed_at": now,
             }
         except Exception as e:

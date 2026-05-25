@@ -3,14 +3,14 @@ import logging
 
 import requests
 
-from worker_app.config import BACKEND_URL
+from agent_app.config import BACKEND_URL
 
-logger = logging.getLogger("worker.storage")
+logger = logging.getLogger("agent.storage")
 
 
 class StorageUploadClient:
-    def __init__(self, worker_api_token: str):
-        self.worker_api_token = worker_api_token
+    def __init__(self, agent_api_token: str):
+        self.agent_api_token = agent_api_token
 
     def upload(self, local_path: str, remote_key: str) -> bool:
         if not os.path.exists(local_path):

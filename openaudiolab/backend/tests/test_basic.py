@@ -32,11 +32,11 @@ def test_setup_initialize():
         "storage_provider": "local",
         "default_retention_days": 7,
         "enable_cpu_test_mode": True,
-        "enable_cloud_workers": False,
+        "ENABLE_CLOUD_AGENTS": False,
     })
     assert response.status_code == 200
     data = response.json()
-    assert "worker_registration_token" in data
+    assert "AGENT_REGISTRATION_TOKEN" in data
 
 
 def test_login():
@@ -49,7 +49,7 @@ def test_login():
         "storage_provider": "local",
         "default_retention_days": 7,
         "enable_cpu_test_mode": True,
-        "enable_cloud_workers": False,
+        "ENABLE_CLOUD_AGENTS": False,
     })
     response = client.post("/api/auth/login", json={
         "email": "test@example.com",
@@ -63,7 +63,7 @@ def test_login():
 def test_worker_registration_rejects_invalid_token():
     response = client.post("/api/workers/register", json={
         "worker_name": "test-worker",
-        "worker_mode": "lite",
+        "AGENT_MODE": "lite",
         "registration_token": "invalid-token",
     })
     data = response.json()

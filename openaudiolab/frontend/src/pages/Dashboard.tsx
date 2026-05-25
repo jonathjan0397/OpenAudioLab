@@ -44,7 +44,7 @@ export default function Dashboard() {
             <span>Backend: {system.backend_online ? "Online" : "Offline"}</span>
             <span>Storage: {system.storage_provider}</span>
             <span>GPU: {system.local_gpu_status}</span>
-            <span>Workers: {system.active_workers} active / {system.total_workers} total</span>
+            <span>Agents: {system.active_agents} active / {system.total_agents} total</span>
           </div>
         </div>
       )}

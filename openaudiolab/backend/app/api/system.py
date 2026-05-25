@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from app.core.config import settings
 from app.setup.service import SetupService
-from app.workers.service import WorkerService
+from app.workers.service import AgentService
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -10,13 +10,13 @@ router = APIRouter(prefix="/api/system", tags=["system"])
 @router.get("/status")
 async def system_status():
     setup_status = SetupService.get_setup_status()
-    workers = WorkerService.list_workers()
+    agents = AgentService.list_agents()
 
-    gpu_available = any(w.gpu_available for w in workers)
+    gpu_available = any(a.gpu_available for a in agents)
     gpu_info = None
-    for w in workers:
-        if w.gpu_available:
-            gpu_info = {"name": w.gpu_name, "vram_gb": w.vram_gb}
+    for a in agents:
+        if a.gpu_available:
+            gpu_info = {"name": a.gpu_name, "vram_gb": a.vram_gb}
             break
 
     return {
@@ -27,10 +27,10 @@ async def system_status():
         "storage_provider": settings.STORAGE_PROVIDER,
         "local_gpu_status": "available" if gpu_available else "unavailable",
         "gpu_info": gpu_info,
-        "configured_cloud_providers": ["vastai", "runpod"] if settings.ENABLE_CLOUD_WORKERS else [],
+        "configured_cloud_providers": ["vastai", "runpod"] if settings.ENABLE_CLOUD_AGENTS else [],
         "default_retention_days": settings.DEFAULT_RETENTION_DAYS,
         "setup_status": setup_status,
-        "active_workers": len([w for w in workers if w.status == "idle"]),
-        "total_workers": len(workers),
+        "active_agents": len([a for a in agents if a.status == "idle"]),
+        "total_agents": len(agents),
         "security_warnings": settings.validate_production_secrets(),
     }

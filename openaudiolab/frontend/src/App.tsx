@@ -7,7 +7,7 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import CreateJob from "./pages/CreateJob";
 import JobDetail from "./pages/JobDetail";
-import Workers from "./pages/Workers";
+import Agents from "./pages/Agents";
 import SystemStatus from "./pages/SystemStatus";
 import Settings from "./pages/Settings";
 
@@ -23,7 +23,7 @@ function AppRoutes() {
         <Route path="dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
         <Route path="jobs/new" element={<ProtectedRoute><CreateJob /></ProtectedRoute>} />
         <Route path="jobs/:jobId" element={<ProtectedRoute><JobDetail /></ProtectedRoute>} />
-        <Route path="workers" element={<ProtectedRoute><Workers /></ProtectedRoute>} />
+        <Route path="agents" element={<ProtectedRoute><Agents /></ProtectedRoute>} />
         <Route path="system" element={<ProtectedRoute><SystemStatus /></ProtectedRoute>} />
         <Route path="settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
       </Route>

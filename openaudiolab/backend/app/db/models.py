@@ -54,7 +54,7 @@ class GenerationJob(Base):
     dispatch_preference = Column(String(30), nullable=False, default="auto")
     lyric_reasoning_mode = Column(String(20), nullable=True, default="balanced")
     storage_retention_days = Column(Integer, default=7, nullable=False)
-    assigned_worker_id = Column(String(36), ForeignKey("worker_nodes.id"), nullable=True)
+    assigned_agent_id = Column(String(36), ForeignKey("agent_nodes.id"), nullable=True)
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
@@ -63,7 +63,7 @@ class GenerationJob(Base):
     user = relationship("User", back_populates="jobs")
     stages = relationship("JobStage", back_populates="job", cascade="all, delete-orphan")
     assets = relationship("StorageAsset", back_populates="job", cascade="all, delete-orphan")
-    assigned_worker = relationship("WorkerNode", back_populates="jobs")
+    assigned_agent = relationship("AgentNode", back_populates="jobs")
 
 
 class JobStage(Base):
@@ -82,13 +82,13 @@ class JobStage(Base):
     job = relationship("GenerationJob", back_populates="stages")
 
 
-class WorkerNode(Base):
-    __tablename__ = "worker_nodes"
+class AgentNode(Base):
+    __tablename__ = "agent_nodes"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    worker_name = Column(String(255), nullable=False, index=True)
+    agent_name = Column(String(255), nullable=False, index=True)
     status = Column(String(20), nullable=False, default="registering")
-    worker_mode = Column(String(30), nullable=False, default="lite")
+    agent_mode = Column(String(30), nullable=False, default="lite")
     hostname = Column(String(255), nullable=True)
     gpu_available = Column(Boolean, default=False, nullable=False)
     gpu_name = Column(String(255), nullable=True)
@@ -99,19 +99,19 @@ class WorkerNode(Base):
     container_version = Column(String(20), nullable=True)
     last_heartbeat_at = Column(DateTime(timezone=True), nullable=True)
     draining = Column(Boolean, default=False, nullable=False)
-    worker_api_token = Column(String(255), nullable=True)
+    agent_api_token = Column(String(255), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
-    jobs = relationship("GenerationJob", back_populates="assigned_worker")
-    heartbeats = relationship("WorkerHeartbeat", back_populates="worker", cascade="all, delete-orphan")
+    jobs = relationship("GenerationJob", back_populates="assigned_agent")
+    heartbeats = relationship("AgentHeartbeat", back_populates="agent", cascade="all, delete-orphan")
 
 
-class WorkerHeartbeat(Base):
-    __tablename__ = "worker_heartbeats"
+class AgentHeartbeat(Base):
+    __tablename__ = "agent_heartbeats"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    worker_id = Column(String(36), ForeignKey("worker_nodes.id"), nullable=False, index=True)
+    agent_id = Column(String(36), ForeignKey("agent_nodes.id"), nullable=False, index=True)
     status = Column(String(20), nullable=False)
     active_job_id = Column(String(36), nullable=True)
     gpu_utilization = Column(Float, nullable=True)
@@ -121,7 +121,7 @@ class WorkerHeartbeat(Base):
     draining = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
-    worker = relationship("WorkerNode", back_populates="heartbeats")
+    agent = relationship("AgentNode", back_populates="heartbeats")
 
 
 class StorageAsset(Base):

@@ -6,19 +6,19 @@ import time
 
 import requests
 
-from worker_app.audio.cpu_test_generator import CPUTestAudioGenerator
-from worker_app.config import BACKEND_URL, CPU_TEST_MAX_DURATION_SECONDS, ENABLE_CPU_TEST_GENERATION
-from worker_app.stages import lyrics as lyrics_stage
-from worker_app.stages import lyric_structure_validation as structure_stage
-from worker_app.stages import lyric_reasoning as reasoning_stage
-from worker_app.stages import humanization as humanization_stage
-from worker_app.stages import composition as composition_stage
-from worker_app.stages import generation as generation_stage
-from worker_app.stages import daw as daw_stage
-from worker_app.stages import effects as effects_stage
-from worker_app.stages import mastering as mastering_stage
-from worker_app.stages import export as export_stage
-from worker_app.storage.upload_client import StorageUploadClient
+from agent_app.audio.cpu_test_generator import CPUTestAudioGenerator
+from agent_app.config import BACKEND_URL, CPU_TEST_MAX_DURATION_SECONDS, ENABLE_CPU_TEST_GENERATION
+from agent_app.stages import lyrics as lyrics_stage
+from agent_app.stages import lyric_structure_validation as structure_stage
+from agent_app.stages import lyric_reasoning as reasoning_stage
+from agent_app.stages import humanization as humanization_stage
+from agent_app.stages import composition as composition_stage
+from agent_app.stages import generation as generation_stage
+from agent_app.stages import daw as daw_stage
+from agent_app.stages import effects as effects_stage
+from agent_app.stages import mastering as mastering_stage
+from agent_app.stages import export as export_stage
+from agent_app.storage.upload_client import StorageUploadClient
 
 logger = logging.getLogger("worker.pipeline")
 
@@ -222,7 +222,7 @@ class PipelineRunner:
     def _update_stage(self, stage_name: str, status: str, metadata: dict = None, error: str = None):
         try:
             requests.post(
-                f"{BACKEND_URL}/api/workers/jobs/{self.job_id}/stage-update",
+                f"{BACKEND_URL}/api/agents/jobs/{self.job_id}/stage-update",
                 json={"stage_name": stage_name, "status": status, "metadata": metadata, "error_message": error},
                 headers={"X-Worker-Token": self.worker_api_token},
                 timeout=10,

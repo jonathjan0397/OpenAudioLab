@@ -3,20 +3,20 @@ import time
 
 import requests
 
-from worker_app.config import BACKEND_URL, WORKER_NAME, WORKER_MODE, WORKER_REGISTRATION_TOKEN, WORKER_VERSION
-from worker_app.gpu_detect import detect_gpu
+from agent_app.config import BACKEND_URL, AGENT_NAME, AGENT_MODE, AGENT_REGISTRATION_TOKEN, AGENT_VERSION
+from agent_app.gpu_detect import detect_gpu
 
-logger = logging.getLogger("worker.registration")
+logger = logging.getLogger("agent.registration")
 
 
-def register_worker() -> dict:
+def register_agent() -> dict:
     gpu_info = detect_gpu()
 
     payload = {
-        "worker_name": WORKER_NAME,
-        "worker_mode": WORKER_MODE,
-        "hostname": WORKER_NAME,
-        "registration_token": WORKER_REGISTRATION_TOKEN,
+        "agent_name": AGENT_NAME,
+        "agent_mode": AGENT_MODE,
+        "hostname": AGENT_NAME,
+        "registration_token": AGENT_REGISTRATION_TOKEN,
         "gpu": gpu_info,
         "capabilities": {
             "lyrics": True,
@@ -29,19 +29,19 @@ def register_worker() -> dict:
             "zip_export": True,
         },
         "model_packs": ["model-pack-lite"],
-        "container_version": WORKER_VERSION,
+        "container_version": AGENT_VERSION,
     }
 
     for attempt in range(5):
         try:
             response = requests.post(
-                f"{BACKEND_URL}/api/workers/register",
+                f"{BACKEND_URL}/api/agents/register",
                 json=payload,
                 timeout=10,
             )
             if response.status_code == 200:
                 result = response.json()
-                logger.info(f"Worker registered: {result.get('worker_id')}")
+                logger.info(f"Agent registered: {result.get('agent_id')}")
                 return result
             logger.warning(f"Registration attempt {attempt + 1} failed: {response.status_code}")
         except Exception as e:
@@ -49,5 +49,5 @@ def register_worker() -> dict:
 
         time.sleep(5)
 
-    logger.error("Failed to register worker after 5 attempts")
+    logger.error("Failed to register agent after 5 attempts")
     return {}

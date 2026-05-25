@@ -3,44 +3,44 @@ from fastapi import APIRouter, Header, HTTPException
 from app.workers.schemas import (
     HeartbeatRequest,
     StageUpdateRequest,
-    WorkerRegistrationRequest,
+    AgentRegistrationRequest,
 )
-from app.workers.service import WorkerService
+from app.workers.service import AgentService
 
-router = APIRouter(prefix="/api/workers", tags=["workers"])
+router = APIRouter(prefix="/api/agents", tags=["agents"])
 
 
 @router.get("")
-async def list_workers():
-    return WorkerService.list_workers()
+async def list_agents():
+    return AgentService.list_agents()
 
 
 @router.post("/register")
-async def register_worker(request: WorkerRegistrationRequest):
-    return WorkerService.register_worker(request)
+async def register_agent(request: AgentRegistrationRequest):
+    return AgentService.register_agent(request)
 
 
 @router.post("/heartbeat")
-async def worker_heartbeat(
+async def agent_heartbeat(
     request: HeartbeatRequest,
-    x_worker_token: str = Header(..., alias="X-Worker-Token"),
+    x_agent_token: str = Header(..., alias="X-Agent-Token"),
 ):
-    return WorkerService.process_heartbeat(request, x_worker_token)
+    return AgentService.process_heartbeat(request, x_agent_token)
 
 
 @router.post("/request-job")
 async def request_job(
-    worker_id: str,
-    x_worker_token: str = Header(..., alias="X-Worker-Token"),
+    agent_id: str,
+    x_agent_token: str = Header(..., alias="X-Agent-Token"),
 ):
-    return WorkerService.request_job(worker_id, x_worker_token)
+    return AgentService.request_job(agent_id, x_agent_token)
 
 
 @router.post("/jobs/{job_id}/stage-update")
 async def update_stage(
     job_id: str,
     request: StageUpdateRequest,
-    x_worker_token: str = Header(..., alias="X-Worker-Token"),
+    x_agent_token: str = Header(..., alias="X-Agent-Token"),
 ):
     from app.jobs.state_machine import StateMachine
     from app.core.enums import StageStatus, JobStatus
@@ -80,7 +80,7 @@ async def update_stage(
 @router.post("/jobs/{job_id}/complete")
 async def complete_job(
     job_id: str,
-    x_worker_token: str = Header(..., alias="X-Worker-Token"),
+    x_agent_token: str = Header(..., alias="X-Agent-Token"),
 ):
     from app.jobs.state_machine import StateMachine
     from app.core.enums import JobStatus
@@ -92,8 +92,8 @@ async def complete_job(
 @router.post("/jobs/{job_id}/fail")
 async def fail_job(
     job_id: str,
-    error_message: str = "Worker reported failure",
-    x_worker_token: str = Header(..., alias="X-Worker-Token"),
+    error_message: str = "Agent reported failure",
+    x_agent_token: str = Header(..., alias="X-Agent-Token"),
 ):
     from app.jobs.state_machine import StateMachine
     from app.core.enums import JobStatus

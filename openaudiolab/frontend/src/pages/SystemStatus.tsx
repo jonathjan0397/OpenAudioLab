@@ -23,8 +23,8 @@ export default function SystemStatus() {
           <span>Local GPU: <strong>{system.local_gpu_status}</strong></span>
           <span>Cloud Providers: <strong>{system.configured_cloud_providers.join(", ") || "None"}</strong></span>
           <span>Default Retention: <strong>{system.default_retention_days} days</strong></span>
-          <span>Active Workers: <strong>{system.active_workers}</strong></span>
-          <span>Total Workers: <strong>{system.total_workers}</strong></span>
+          <span>Active Agents: <strong>{system.active_agents}</strong></span>
+          <span>Total Agents: <strong>{system.total_agents}</strong></span>
           <span>Setup: <strong>{system.setup_status?.setup_completed ? "Completed" : "Not completed"}</strong></span>
         </div>
         {system.security_warnings && system.security_warnings.length > 0 && (

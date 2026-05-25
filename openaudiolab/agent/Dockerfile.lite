@@ -5,9 +5,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY worker_app/ ./worker_app/
+COPY agent_app/ ./agent_app/
 COPY model-packs/ ./model-packs/
 
 ENV PYTHONPATH=/app
 
-CMD ["python", "-m", "worker_app.main"]
+CMD ["python", "-m", "agent_app.main"]

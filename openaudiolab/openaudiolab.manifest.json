@@ -10,12 +10,12 @@
     "no_gpu_backend_mode": true,
     "local_gpu_generation": true,
     "local_gpu_min_vram_gb": 12,
-    "cloud_gpu_workers": true
+    "cloud_gpu_agents": true
   },
   "security": {
     "first_run_setup_required": true,
     "default_production_credentials_forbidden": true,
-    "worker_registration_token_required": true,
+    "agent_registration_token_required": true,
     "private_storage_by_default": true,
     "signed_downloads_required": true
   },
@@ -82,7 +82,7 @@
       "skip_all_lyrics_stages": true
     }
   },
-  "worker": {
+  "agent": {
     "unified_container": true,
     "requires_registration": true,
     "requires_heartbeat": true,
@@ -92,11 +92,11 @@
     "supports_draining": true,
     "supports_update_signaling": true
   },
-  "worker_images": [
-    "worker-lite",
-    "worker-gpu-base",
-    "worker-community-full",
-    "worker-studio-full"
+  "agent_images": [
+    "agent-lite",
+    "agent-gpu-base",
+    "agent-community-full",
+    "agent-studio-full"
   ],
   "model_packs": [
     "model-pack-lite",

@@ -24,9 +24,9 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: str = "openaudiolab-secret"
     MINIO_BUCKET: str = "openaudiolab-jobs"
 
-    WORKER_REGISTRATION_TOKEN: str = "change-this-worker-token"
-    WORKER_VERSION: str = "0.1.0"
-    WORKER_MODE: str = "lite"
+    AGENT_REGISTRATION_TOKEN: str = "change-this-agent-token"
+    AGENT_VERSION: str = "0.1.0"
+    AGENT_MODE: str = "lite"
 
     ENABLE_CPU_TEST_GENERATION: bool = True
     CPU_TEST_MAX_DURATION_SECONDS: int = 15
@@ -35,7 +35,7 @@ class Settings(BaseSettings):
 
     RUNPOD_API_KEY: Optional[str] = None
     VASTAI_API_KEY: Optional[str] = None
-    ENABLE_CLOUD_WORKERS: bool = False
+    ENABLE_CLOUD_AGENTS: bool = False
 
     @property
     def is_production(self) -> bool:
@@ -52,8 +52,8 @@ class Settings(BaseSettings):
                 warnings.append("SECRET_KEY is using default value")
             if self.JWT_SECRET == "change-this-before-production":
                 warnings.append("JWT_SECRET is using default value")
-            if self.WORKER_REGISTRATION_TOKEN == "change-this-worker-token":
-                warnings.append("WORKER_REGISTRATION_TOKEN is using default value")
+            if self.AGENT_REGISTRATION_TOKEN == "change-this-agent-token":
+                warnings.append("AGENT_REGISTRATION_TOKEN is using default value")
             if self.STORAGE_PROVIDER != "local":
                 if not self.MINIO_ACCESS_KEY or self.MINIO_ACCESS_KEY == "openaudiolab":
                     warnings.append("Storage credentials may be missing for cloud storage")
