@@ -14,6 +14,7 @@ def _build_pipeline(request: JobCreateRequest) -> list[str]:
     if request.instrumental or request.lyrics_mode == LyricsMode.INSTRUMENTAL:
         skip_stages = {
             "lyrics_generation_or_ingestion",
+            "lyric_brainstorm",
             "lyrics_structure_validation",
             "lyrics_reasoning",
             "lyrics_revision",
@@ -29,7 +30,10 @@ def _build_pipeline(request: JobCreateRequest) -> list[str]:
         }
         pipeline = [s for s in pipeline if s not in skip_stages]
     elif request.lyrics_mode == LyricsMode.HYBRID:
-        pass
+        skip_stages = {
+            "lyrics_generation_or_ingestion",
+        }
+        pipeline = [s for s in pipeline if s not in skip_stages]
     elif request.lyrics_mode == LyricsMode.AI:
         pass
 
@@ -105,7 +109,7 @@ class JobService:
                 quality=job.quality,
                 dispatch_preference=job.dispatch_preference,
                 lyric_reasoning_mode=job.lyric_reasoning_mode,
-                assigned_worker_id=job.assigned_worker_id,
+                assigned_agent_id=job.assigned_agent_id,
                 error_message=job.error_message,
                 created_at=job.created_at.isoformat() if job.created_at else None,
                 updated_at=job.updated_at.isoformat() if job.updated_at else None,

@@ -9,25 +9,29 @@ import requests
 from agent_app.audio.cpu_test_generator import CPUTestAudioGenerator
 from agent_app.config import BACKEND_URL, CPU_TEST_MAX_DURATION_SECONDS, ENABLE_CPU_TEST_GENERATION
 from agent_app.stages import lyrics as lyrics_stage
+from agent_app.stages import lyric_brainstorm as brainstorm_stage
 from agent_app.stages import lyric_structure_validation as structure_stage
 from agent_app.stages import lyric_reasoning as reasoning_stage
 from agent_app.stages import humanization as humanization_stage
+from agent_app.stages import genre_style_control as genre_stage
 from agent_app.stages import composition as composition_stage
+from agent_app.stages import persona_selection as persona_stage
 from agent_app.stages import generation as generation_stage
 from agent_app.stages import daw as daw_stage
 from agent_app.stages import effects as effects_stage
 from agent_app.stages import mastering as mastering_stage
+from agent_app.stages import stem_separation as stem_stage
 from agent_app.stages import export as export_stage
 from agent_app.storage.upload_client import StorageUploadClient
 
-logger = logging.getLogger("worker.pipeline")
+logger = logging.getLogger("agent.pipeline")
 
 
 class PipelineRunner:
-    def __init__(self, job_id: str, request: dict, worker_api_token: str):
+    def __init__(self, job_id: str, request: dict, agent_api_token: str):
         self.job_id = job_id
         self.request = request
-        self.worker_api_token = worker_api_token
+        self.agent_api_token = agent_api_token
         self.temp_dir = tempfile.mkdtemp(prefix=f"job_{job_id}_")
         self.pipeline_log = []
 
@@ -36,11 +40,15 @@ class PipelineRunner:
             pipeline = self.request.get("pipeline", [])
             if not pipeline:
                 pipeline = [
-                    "job_intake", "prompt_validation", "lyrics_generation_or_ingestion",
-                    "lyrics_structure_validation", "lyrics_reasoning", "lyrics_revision",
-                    "lyrics_humanization", "composition_planning", "audio_generation",
+                    "job_intake", "prompt_validation",
+                    "lyrics_generation_or_ingestion", "lyric_brainstorm",
+                    "lyrics_structure_validation", "lyrics_reasoning",
+                    "lyrics_revision", "lyrics_humanization",
+                    "genre_style_control", "composition_planning",
+                    "persona_selection", "audio_generation",
                     "daw_processing", "effects_processing", "mastering",
-                    "preview_waveform_generation", "zip_export", "storage_upload",
+                    "stem_separation", "preview_waveform_generation",
+                    "zip_export", "storage_upload",
                     "signed_download_url", "retention_cleanup",
                 ]
 
@@ -110,6 +118,13 @@ class PipelineRunner:
                 return {"success": True, "lyrics": lyrics_content, "metadata": {"mode": "hybrid"}}
             return {"success": True, "metadata": {"mode": lyrics_mode}}
 
+        elif stage_name == "lyric_brainstorm":
+            if instrumental or lyrics_mode == "instrumental":
+                return {"skipped": True, "reason": "Instrumental mode"}
+            suggestions = brainstorm_stage.suggest(self.request, lyrics_content)
+            metadata["lyric_brainstorm.json"] = suggestions
+            return {"success": True, "metadata": {"brainstorm": suggestions}}
+
         elif stage_name == "lyrics_structure_validation":
             all_lyrics = "\n".join(lyrics_content.values()) if lyrics_content else ""
             if not all_lyrics and lyrics_mode != "instrumental":
@@ -139,10 +154,20 @@ class PipelineRunner:
             lyrics_content["lyrics_humanized.txt"] = humanized
             return {"success": True, "lyrics": {"lyrics_humanized.txt": humanized}}
 
+        elif stage_name == "genre_style_control":
+            genre_params = genre_stage.resolve(self.request)
+            metadata["genre_style_params.json"] = genre_params
+            return {"success": True, "metadata": genre_params}
+
         elif stage_name == "composition_planning":
             plan = composition_stage.plan(self.request)
             metadata["composition_plan.json"] = plan
             return {"success": True, "metadata": {"composition_plan.json": plan}}
+
+        elif stage_name == "persona_selection":
+            persona = persona_stage.select(self.request)
+            metadata["persona.json"] = persona
+            return {"success": True, "metadata": persona}
 
         elif stage_name == "audio_generation":
             draft_path = os.path.join(self.temp_dir, "draft.wav")
@@ -181,6 +206,15 @@ class PipelineRunner:
                     return {"success": True, "artifacts": {"final_master.wav": output_path}, "metadata": result}
             return {"success": True, "metadata": {"mastering_stub": True}}
 
+        elif stage_name == "stem_separation":
+            input_path = artifacts.get("final_master.wav", artifacts.get("draft.wav", ""))
+            if input_path and os.path.exists(input_path):
+                stems = stem_stage.separate(input_path, self.temp_dir)
+                if stems:
+                    artifacts.update(stems)
+                    return {"success": True, "artifacts": stems, "metadata": {"stems": list(stems.keys())}}
+            return {"success": True, "metadata": {"stem_separation_stub": True}}
+
         elif stage_name == "preview_waveform_generation":
             audio_path = artifacts.get("final_master.wav", artifacts.get("draft.wav", ""))
             if audio_path and os.path.exists(audio_path):
@@ -198,20 +232,21 @@ class PipelineRunner:
             return {"success": True, "metadata": {"zip_stub": True}}
 
         elif stage_name == "storage_upload":
-            upload_client = StorageUploadClient(self.worker_api_token)
+            upload_client = StorageUploadClient(self.agent_api_token)
             for name, path in artifacts.items():
                 if os.path.exists(path):
+                    asset_type = "audio_draft" if ".wav" in name else "audio_mp3" if ".mp3" in name else "export_zip"
                     remote_key = f"/jobs/{self.job_id}/{'audio' if '.wav' in name or '.mp3' in name else 'exports'}/{name}"
-                    upload_client.upload(path, remote_key)
+                    upload_client.upload(path, remote_key, asset_type=asset_type)
             for name, content in lyrics_content.items():
                 remote_key = f"/jobs/{self.job_id}/lyrics/{name}"
-                upload_client.upload_content(content, remote_key)
+                upload_client.upload_content(content, remote_key, asset_type="lyrics")
             for name, data in metadata.items():
                 remote_key = f"/jobs/{self.job_id}/metadata/{name}"
                 if isinstance(data, str) and os.path.exists(data):
-                    upload_client.upload(data, remote_key)
+                    upload_client.upload(data, remote_key, asset_type="metadata")
                 else:
-                    upload_client.upload_content(json.dumps(data, indent=2) if isinstance(data, dict) else str(data), remote_key)
+                    upload_client.upload_content(json.dumps(data, indent=2) if isinstance(data, dict) else str(data), remote_key, asset_type="metadata")
             return {"success": True, "metadata": {"uploaded": True}}
 
         elif stage_name in ("signed_download_url", "retention_cleanup"):
@@ -224,7 +259,7 @@ class PipelineRunner:
             requests.post(
                 f"{BACKEND_URL}/api/agents/jobs/{self.job_id}/stage-update",
                 json={"stage_name": stage_name, "status": status, "metadata": metadata, "error_message": error},
-                headers={"X-Worker-Token": self.worker_api_token},
+                headers={"X-Agent-Token": self.agent_api_token},
                 timeout=10,
             )
         except Exception:

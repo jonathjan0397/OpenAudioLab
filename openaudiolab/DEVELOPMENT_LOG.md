@@ -209,3 +209,81 @@ A task is not considered complete until this file has been updated.
 - `OPENAUDIOLAB_MASTER_PLAN.md`: updated
 - `AGENTS.md`: updated
 - `openaudiolab.manifest.json`: updated
+
+---
+
+## 2026-05-26 12:00 UTC — Complete Outstanding Issues: Pipeline Stages, Artifact Upload, Frontend Proxy
+
+**Developer/Agent:** AI Development Agent
+**Task Type:** Backend / Worker / Frontend / Infra / Bugfix
+**Task Objective:** Fix the three remaining operational issues blocking `docker compose up`:
+1) Missing pipeline stages (lyric_brainstorm, genre_style_control, persona_selection, stem_separation),
+2) Agent artifact upload flow was a no-op stub,
+3) Frontend Docker proxy target was `localhost:8000` instead of `backend:8000`.
+
+### Files Created
+
+- `agent/agent_app/stages/lyric_brainstorm.py`
+- `agent/agent_app/stages/genre_style_control.py`
+- `agent/agent_app/stages/persona_selection.py`
+- `agent/agent_app/stages/stem_separation.py`
+
+### Files Modified
+
+- `backend/app/core/enums.py` — added 4 new PipelineStage entries and updated DEFAULT_PIPELINE
+- `backend/app/jobs/pipeline.py` — updated skip logic for instrumental/hybrid modes with new stages
+- `backend/app/jobs/service.py` — fixed `assigned_worker_id` → `assigned_agent_id`; updated duplicate pipeline logic
+- `backend/app/jobs/schemas.py` — fixed `assigned_worker_id` → `assigned_agent_id`
+- `backend/app/api/agents.py` — added `POST /jobs/{job_id}/artifacts` endpoint; added imports
+- `agent/agent_app/pipeline_runner.py` — fixed `X-Worker-Token` → `X-Agent-Token`; fixed `worker_api_token` → `agent_api_token`; added execution handlers for 4 new stages; updated default pipeline; fixed `worker.pipeline` → `agent.pipeline` logger name
+- `agent/agent_app/storage/upload_client.py` — implemented real multipart upload to backend artifacts endpoint
+- `frontend/src/components/StageProgress.tsx` — added labels for 4 new stages
+- `frontend/vite.config.ts` — made proxy target configurable via `VITE_API_PROXY_TARGET` env var
+- `docker-compose.yml` — set `VITE_API_PROXY_TARGET: http://backend:8000` for frontend service
+
+### Files Deleted
+
+- None
+
+### Summary of Changes
+
+- Added 4 new pipeline stages to `PipelineStage` enum and reordered `DEFAULT_PIPELINE` to 21 stages total
+- `lyric_brainstorm` runs after lyrics ingestion; generates structure/suggestion notes for provided lyrics
+- `genre_style_control` runs before composition planning; resolves BPM, key, time signature from genre/mood
+- `persona_selection` runs before audio generation; selects vocal persona (male/female/robotic/spoken/instrumental)
+- `stem_separation` runs after mastering; separates final mix into vocals/drums/bass/other stems (stub)
+- `assigned_worker_id` → `assigned_agent_id` in schemas and service (missed during rename)
+- `X-Worker-Token` → `X-Agent-Token` in pipeline runner headers (missed during rename)
+- Agent upload client now POSTs multipart files to `POST /api/agents/jobs/{job_id}/artifacts` with proper `asset_type` and `X-Agent-Token` auth
+- Backend artifacts endpoint verifies agent token, checks job assignment, stores file via StorageService, creates StorageAsset record, returns asset_id
+- Stage labels updated in frontend for all 21 pipeline stages
+
+### Architecture / Pipeline Impact
+
+- Pipeline grows from 17 to 21 stages with better genre, persona, and stem separation boundaries
+- Agent-to-backend artifact upload is now a real HTTP multipart flow: agent sends file + asset_type, backend stores and records asset
+- Storage remains fully abstracted; backend controls all write paths via StorageService/StorageAsset
+
+### Tests / Checks Performed
+
+- Structural review of all modified files for import correctness and naming consistency
+- Result: passed (syntax verified)
+
+### Known Issues
+
+- `python-magic` not available in backend — MIME type guessed from file extension (acceptable for MVP)
+- Stem separation is a file-copy stub (no real Demucs integration)
+- Upload client sends one file per HTTP request (could batch multiple files for performance later)
+- Frontend proxy env var only affects dev server; production builds use VITE_API_URL directly
+
+### Follow-Up Tasks
+
+- Run `docker compose up` end-to-end test: setup → login → create job → agent picks up → stages execute → artifacts upload → download URL
+- Update `worker-protocol.md` docs to reflect X-Agent-Token header and new artifact upload endpoint
+- Add `python-magic` as optional dependency for accurate MIME detection
+
+### Source-of-Truth Updates
+
+- `OPENAUDIOLAB_MASTER_PLAN.md`: not updated
+- `AGENTS.md`: not updated
+- `openaudiolab.manifest.json`: not updated

@@ -109,15 +109,19 @@ class PipelineStage(str, Enum):
     JOB_INTAKE = "job_intake"
     PROMPT_VALIDATION = "prompt_validation"
     LYRICS_GENERATION_OR_INGESTION = "lyrics_generation_or_ingestion"
+    LYRIC_BRAINSTORM = "lyric_brainstorm"
     LYRICS_STRUCTURE_VALIDATION = "lyrics_structure_validation"
     LYRICS_REASONING = "lyrics_reasoning"
     LYRICS_REVISION = "lyrics_revision"
     LYRICS_HUMANIZATION = "lyrics_humanization"
+    GENRE_STYLE_CONTROL = "genre_style_control"
     COMPOSITION_PLANNING = "composition_planning"
+    PERSONA_SELECTION = "persona_selection"
     AUDIO_GENERATION = "audio_generation"
     DAW_PROCESSING = "daw_processing"
     EFFECTS_PROCESSING = "effects_processing"
     MASTERING = "mastering"
+    STEM_SEPARATION = "stem_separation"
     PREVIEW_WAVEFORM_GENERATION = "preview_waveform_generation"
     ZIP_EXPORT = "zip_export"
     STORAGE_UPLOAD = "storage_upload"
@@ -129,15 +133,19 @@ DEFAULT_PIPELINE = [
     PipelineStage.JOB_INTAKE,
     PipelineStage.PROMPT_VALIDATION,
     PipelineStage.LYRICS_GENERATION_OR_INGESTION,
+    PipelineStage.LYRIC_BRAINSTORM,
     PipelineStage.LYRICS_STRUCTURE_VALIDATION,
     PipelineStage.LYRICS_REASONING,
     PipelineStage.LYRICS_REVISION,
     PipelineStage.LYRICS_HUMANIZATION,
+    PipelineStage.GENRE_STYLE_CONTROL,
     PipelineStage.COMPOSITION_PLANNING,
+    PipelineStage.PERSONA_SELECTION,
     PipelineStage.AUDIO_GENERATION,
     PipelineStage.DAW_PROCESSING,
     PipelineStage.EFFECTS_PROCESSING,
     PipelineStage.MASTERING,
+    PipelineStage.STEM_SEPARATION,
     PipelineStage.PREVIEW_WAVEFORM_GENERATION,
     PipelineStage.ZIP_EXPORT,
     PipelineStage.STORAGE_UPLOAD,

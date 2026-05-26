@@ -7,6 +7,7 @@ def get_pipeline_for_job(lyrics_mode: str, instrumental: bool) -> list[str]:
     if instrumental or lyrics_mode == LyricsMode.INSTRUMENTAL.value:
         skip_stages = {
             "lyrics_generation_or_ingestion",
+            "lyric_brainstorm",
             "lyrics_structure_validation",
             "lyrics_reasoning",
             "lyrics_revision",
@@ -22,7 +23,10 @@ def get_pipeline_for_job(lyrics_mode: str, instrumental: bool) -> list[str]:
         }
         pipeline = [s for s in pipeline if s not in skip_stages]
     elif lyrics_mode == LyricsMode.HYBRID.value:
-        pass
+        skip_stages = {
+            "lyrics_generation_or_ingestion",
+        }
+        pipeline = [s for s in pipeline if s not in skip_stages]
     elif lyrics_mode == LyricsMode.AI.value:
         pass
 

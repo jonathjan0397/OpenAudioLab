@@ -44,7 +44,7 @@ class JobResponse(BaseModel):
     quality: str
     dispatch_preference: str
     lyric_reasoning_mode: Optional[str] = None
-    assigned_worker_id: Optional[str] = None
+    assigned_agent_id: Optional[str] = None
     error_message: Optional[str] = None
     created_at: str
     updated_at: Optional[str] = None
