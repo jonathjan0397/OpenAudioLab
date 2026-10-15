@@ -29,6 +29,20 @@ Status: capability specification and coding-agent handoff only (v0.3-container-p
 9. `docs/CONTAINER_RUNTIME_PLAN.md` — Docker services, model runtimes and deployment profiles
 10. `CODING_AGENT_HANDOFF.md`
 
+## Implementation status
+
+Runtime implementation is tracked separately from the planning baseline above:
+
+- `CHANGELOG.md` — chronological record of every milestone.
+- `docs/MILESTONE_1.md`, `docs/MILESTONE_2.md`, … — per-milestone acceptance
+  records (scope, gates, validation evidence, known limits).
+- `DEVELOPMENT_LOG.md` — append-only engineering log with decisions and evidence.
+
+Milestone 1 (contract-first API on 50555) is complete on branch
+`impl/milestone-1`. Milestone 2 (durable orchestration and the deterministic WAV
+fixture worker) follows. `master` remains the planning baseline until the owner
+approves a merge.
+
 The owner requested capability planning before implementation. This revision records the expanded scope and leaves runtime implementation for the coding-agent phase. Advanced/model-dependent services are planned targets, not currently available features.
 
 The previous scaffold is abandoned by the owner. This baseline replaces its files on the existing `master` branch; the previous implementation remains recoverable in Git history. Do not restore or continue the old pipeline. In particular, its backend lyric-generation/reasoning requirement is superseded by the frontend's separate LLM connection.
