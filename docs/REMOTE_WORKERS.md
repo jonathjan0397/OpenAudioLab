@@ -1,7 +1,9 @@
 # Remote worker deployments (ephemeral GPU nodes over WireGuard)
 
-Status: mechanism implemented and validated on this host; real Vast.ai node
-provisioning is the capstone. Branch `impl/milestone-1`. Date: 2026-10-15.
+Status: mechanism implemented and validated on this host; a real Vast.ai node
+was provisioned and confirmed to run the pushed image (see findings below).
+Remaining capstone: go-live over the WireGuard tunnel. Branch `impl/milestone-1`.
+Date: 2026-10-15.
 
 ## Model
 
@@ -78,6 +80,28 @@ S3/DB/Redis/bundle at the hub, **no shared artifacts volume**):
 | Generation job | succeeded (engine worker in the container) |
 | Artifact push-back | `owners/<owner>/jobs/<job>/<attempt>/mix_wav.wav` in S3 |
 | API delivery from S3 | 200, valid RIFF, 2,304,044 bytes |
+
+## Vast.ai provisioning findings (2026-10-15)
+
+Provisioned a real on-demand instance (contract `56151437`) and confirmed it
+loads and runs the pushed image on remote hardware, then destroyed it to avoid
+idle spend. Findings for the go-live pass:
+
+- **Offer class**: an RTX PRO 4000 (24 GB — same class as the dev host), Ontario
+  CA, driver 590, reliability 1.00, ran at ~$0.285/hr on-demand. `vastai` CLI
+  (`pip install vastai`) reads the key from `~/.config/vastai/vast_api_key`.
+- **Image gaps**: the worker image has **no `sshd`** (so Vast's SSH launch mode
+  refused) and **no `wireguard-tools`**. Go-live should either bake
+  `wireguard-tools` into the image or run the container with `NET_ADMIN` + a
+  `wg0.conf` and bring the tunnel up in the entrypoint.
+- **Transport**: the hub is reachable only on the mesh address (`10.201.0.2`);
+  the router does **not** forward 50555, so the public IP is not a fallback —
+  the node must be on the WireGuard mesh.
+- **Remaining go-live steps**: (1) add `wireguard-tools` to the image (or
+  `NET_ADMIN` + entrypoint `wg-quick up`); (2) add the node as a peer on the
+  mercury hub; (3) expose hub PostgreSQL/Redis on the tunnel (they are
+  loopback-bound today); (4) run the container pointed at `10.201.0.2` and
+  validate one real generation end-to-end.
 
 ## Known limits / deferred
 
