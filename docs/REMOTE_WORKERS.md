@@ -2,7 +2,7 @@
 
 Status: mechanism implemented and validated on this host; a real Vast.ai node
 was provisioned and confirmed to run the pushed image (see findings below).
-Remaining capstone: go-live over the WireGuard tunnel. Branch `impl/milestone-1`.
+Hub finalized on the home server (WireGuard hub + containerized backend, reachable over the tunnel).
 Date: 2026-10-15.
 
 ## Model
@@ -114,3 +114,33 @@ idle spend. Findings for the go-live pass:
   `wait`; a full process supervisor (restart/backoff) is a later hardening step.
 - Checkpoints download to a volume on first boot (slower cold start, smaller
   image); a pre-baked volume is an option for faster scale-out.
+
+## Finalized hub configuration (home server)
+
+Decision: the **home server** (`192.151.156.124`) is the WireGuard hub and hosts
+the containerized backend; ephemeral worker nodes are WireGuard **clients** of
+the home server (star topology), so they never need to be mercury peers.
+
+- **Hub interface**: `wg2` on the home server, subnet **`10.203.0.0/24`**, hub
+  address **`10.203.0.1`**, **UDP 51822** (UFW-allowed). `ip_forward` is already
+  on; clients reach hub-local services directly (no NAT needed).
+- **Worker client config**: `Endpoint = 192.151.156.124:51822`,
+  `AllowedIPs = 10.203.0.0/24`, `PersistentKeepalive = 25`; the hub adds each
+  node as a peer (`AllowedIPs = <node>/32`). See
+  `deploy/wireguard/worker-peer.conf.template`.
+- **Backend (containerized)**: `docker-compose.backend.yml` runs api, dispatcher,
+  postgres, redis, object-storage (S3), migrate, bucket-init and maintenance on
+  the hub, published on `10.203.0.1` — API `:50555`, Postgres `:5432`, Redis
+  `:6379`, S3 `:9000`. Image `stratastack/oal-backend:<rev>` (slim FastAPI, no
+  torch). Workers point `OAL_*` at `10.203.0.1`.
+- **S3 note**: localstack 3.8.1 is used here because MinIO is not pullable on
+  these hosts (removed from Docker Hub; quay.io anonymous pulls 401; localstack
+  2026.x needs a license token). Production should use MinIO (with a quay login)
+  or managed S3.
+
+Validation (2026-10-15): the dev host joined as a client (`10.203.0.2`),
+handshook and pinged the hub (~42 ms); the containerized backend came up on the
+home server and `GET /api/v1/health/live` and `/api/v1/health/ready` both
+returned **200 over the tunnel** from the dev host (API + Postgres + Redis
+reachable from a remote node). Remaining: run a full generation with a worker
+node over the tunnel.

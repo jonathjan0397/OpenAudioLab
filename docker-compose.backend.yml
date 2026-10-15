@@ -1,0 +1,112 @@
+name: oal-backend
+
+# Home-server hub deployment of the OpenAudioLab control plane, reachable by
+# ephemeral worker nodes over the WireGuard overlay (hub 10.203.0.1, UDP 51822).
+# GPU engine/training workers run on the nodes, not in this stack. Services are
+# published on the hub's tunnel address so nodes reach them without public ports.
+# S3 is localstack 3.x here (MinIO is not pullable on these hosts: gone from
+# Docker Hub, quay.io anonymous pulls 401; localstack 2026.x needs a license).
+# Swap object-storage for MinIO/managed S3 in production.
+# Bring up: docker compose --env-file .env.backend up -d
+
+x-app-env: &app-env
+  OAL_DATABASE_URL: postgresql+psycopg2://oal:${OAL_POSTGRES_PASSWORD}@postgres:5432/oal
+  OAL_REDIS_URL: redis://redis:6379/0
+  OAL_SECRET_KEY: ${OAL_SECRET_KEY}
+  OAL_STORAGE_BACKEND: s3
+  OAL_S3_ENDPOINT_URL: http://object-storage:4566
+  OAL_S3_BUCKET: ${OAL_S3_BUCKET}
+  OAL_S3_REGION: ${OAL_S3_REGION:-us-east-1}
+  OAL_S3_ACCESS_KEY: ${OAL_S3_ACCESS_KEY}
+  OAL_S3_SECRET_KEY: ${OAL_S3_SECRET_KEY}
+  OAL_S3_PREFIX: ${OAL_S3_PREFIX:-}
+  OAL_BUILD_REVISION: ${OAL_BUILD_REVISION:-dev}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports: ["10.203.0.1:5432:5432"]
+    environment:
+      POSTGRES_DB: oal
+      POSTGRES_USER: oal
+      POSTGRES_PASSWORD: ${OAL_POSTGRES_PASSWORD}
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oal -d oal"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports: ["10.203.0.1:6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  object-storage:
+    image: docker.io/localstack/localstack:3.8.1
+    restart: unless-stopped
+    environment:
+      SERVICES: s3
+      AWS_DEFAULT_REGION: ${OAL_S3_REGION:-us-east-1}
+    ports: ["10.203.0.1:9000:4566"]
+    volumes: ["object-storage-data:/var/lib/localstack"]
+
+  bucket-init:
+    image: stratastack/oal-backend:${OAL_IMAGE_TAG:-dev}
+    restart: "no"
+    depends_on: [object-storage]
+    environment:
+      OAL_S3_BUCKET: ${OAL_S3_BUCKET}
+    command: ["python","-c","import os,time,boto3\nfrom botocore.config import Config\nfrom botocore.exceptions import ClientError\nc=boto3.client('s3',endpoint_url='http://object-storage:4566',region_name='us-east-1',aws_access_key_id='x',aws_secret_access_key='x',config=Config(s3={'addressing_style':'path'}))\nb=os.environ['OAL_S3_BUCKET']\nok=False\nfor _ in range(30):\n    try:\n        c.create_bucket(Bucket=b);ok=True;break\n    except ClientError as e:\n        if e.response['Error']['Code'] in ('BucketAlreadyOwnedByYou','BucketAlreadyExists'):ok=True;break\n        time.sleep(2)\n    except Exception:\n        time.sleep(2)\nprint('bucket ready' if ok else 'bucket init failed')\nraise SystemExit(0 if ok else 1)\n"]
+
+  migrate:
+    image: stratastack/oal-backend:${OAL_IMAGE_TAG:-dev}
+    restart: "no"
+    command: alembic upgrade head
+    environment:
+      OAL_DATABASE_URL: postgresql+psycopg2://oal:${OAL_POSTGRES_PASSWORD}@postgres:5432/oal
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    image: stratastack/oal-backend:${OAL_IMAGE_TAG:-dev}
+    restart: unless-stopped
+    ports: ["10.203.0.1:50555:50555"]
+    environment: *app-env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+      bucket-init: {condition: service_completed_successfully}
+
+  dispatcher:
+    image: stratastack/oal-backend:${OAL_IMAGE_TAG:-dev}
+    restart: unless-stopped
+    command: python -m app.dispatcher
+    healthcheck: {disable: true}
+    environment: *app-env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+
+  maintenance:
+    image: stratastack/oal-backend:${OAL_IMAGE_TAG:-dev}
+    restart: unless-stopped
+    command: python -m app.maintenance --interval 600
+    healthcheck: {disable: true}
+    environment: *app-env
+    depends_on:
+      postgres: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+
+volumes:
+  postgres-data:
+  object-storage-data:
