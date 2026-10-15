@@ -55,3 +55,8 @@ Generation compatibility does not establish trainability. None of the candidates
 Registry capabilities separately report `reference_conditioning`, `style_analysis`, `fine_tuning`, `singer_adaptation`, `style_adaptation`, `extension`, `section_replacement`, `remix`, `native_stems` and compatible external separation/export services. Each includes implementation status and tested constraints. Do not mark all true from a generic model-family description. Commercial fine-tuning and serving of trained derivatives require their own evidence; permissive runtime code alone is insufficient.
 
 The actual training engine is a feasibility decision for the implementation phase. If ACE-Step or MiniMax generation works but no verified training recipe is available, the backend must report training unavailable and preserve the unmet requirement. It must not present an extracted style vector, stored prompt, or reference clip as a fine-tuned artist model.
+
+
+## Runtime research update — 2026-10-15
+
+ACE-Step 1.5's official REST and LoRA tutorial now establish a documented headless training path (LoRA and LoKr). This makes ACE-Step the initial training implementation candidate; no release/recipe is yet operationally verified. The previous statement that candidates are not training-ready means not deployment-validated, not an absence of upstream training support. Follow CONTAINER_RUNTIME_PLAN.md for source evidence, dependency isolation and pinned recipe acceptance. MiniMax training remains unestablished in the reviewed documentation; no cross-engine adapter compatibility is implied.

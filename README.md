@@ -2,7 +2,7 @@
 
 Backend planning baseline for OpenAudioLab.io in `jonathjan0397/OpenAudioLab`.
 
-Status: capability specification and coding-agent handoff only (v0.2-capabilities). No running API, model adapter, deployment, or GPU benchmark is claimed.
+Status: capability specification and coding-agent handoff only (v0.3-container-plan). No running API, model adapter, deployment, or GPU benchmark is claimed.
 
 ## Fixed requirements
 
@@ -26,10 +26,13 @@ Status: capability specification and coding-agent handoff only (v0.2-capabilitie
 6. `docs/ARTIST_TRAINING.md`
 7. `docs/MODEL_POLICY.md`
 8. `docs/IMPLEMENTATION_PLAN.md`
-9. `CODING_AGENT_HANDOFF.md`
+9. `docs/CONTAINER_RUNTIME_PLAN.md` — Docker services, model runtimes and deployment profiles
+10. `CODING_AGENT_HANDOFF.md`
 
 The owner requested capability planning before implementation. This revision records the expanded scope and leaves runtime implementation for the coding-agent phase. Advanced/model-dependent services are planned targets, not currently available features.
 
 The previous scaffold is abandoned by the owner. This baseline replaces its files on the existing `master` branch; the previous implementation remains recoverable in Git history. Do not restore or continue the old pipeline. In particular, its backend lyric-generation/reasoning requirement is superseded by the frontend's separate LLM connection.
 
 Repository visibility is unchanged from the existing repository. No new project-wide source license is selected by this reset; audit any prior licensing obligations before reusing historical code. Model licenses are separate from application-source licensing.
+
+Docker containers are the required deployment format. Core API/infrastructure, audio processing, model inference and artist training are independent services; local Compose is first, remote/cloud worker deployment uses the same images. ACE-Step has a documented headless training path to validate; optional engines remain separately gated.

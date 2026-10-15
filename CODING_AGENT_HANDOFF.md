@@ -1,6 +1,6 @@
 # Master handoff to the implementation agent
 
-You are implementing the standalone OpenAudioLab music-generation backend. Repository: `jonathjan0397/OpenAudioLab`, default branch `master`. Read `AGENTS.md`, all `docs/` planning documents, and `DEVELOPMENT_LOG.md` first. Capability baseline: v0.2-capabilities. The owner required finishing capabilities before implementation; this commit is specification only.
+You are implementing the standalone OpenAudioLab music-generation backend. Repository: `jonathjan0397/OpenAudioLab`, default branch `master`. Read `AGENTS.md`, all `docs/` planning documents, and `DEVELOPMENT_LOG.md` first. Capability baseline: v0.3-container-plan. The owner required finishing capabilities before implementation; this commit is specification only.
 
 ## User-approved scope
 
@@ -38,3 +38,8 @@ Create an implementation branch and deliver milestone-sized commits/PRs. Keep de
 ## Definition of done
 
 Every acceptance gate in `docs/IMPLEMENTATION_PLAN.md` is either demonstrated or explicitly blocked with a concrete reason; blocked gates remain unmet requirements. At least one actual music model must generate valid audio through the API before calling music generation implemented. At least one real custom-track fine-tuning/evaluation/inference cycle is required before calling artist training implemented. The final report identifies remaining adapters/stubs, training feasibility gaps, operating instructions and settings for the separate frontend. Documentation and generated OpenAPI agree.
+
+
+## Mandatory container and runtime decision
+
+Read docs/CONTAINER_RUNTIME_PLAN.md. Build a Docker service stack, not a single all-model environment. Deliver core/API on 50555 plus isolated audio, separation, dataset, inference and training workers with Compose deployment profiles. ACE-Step 1.5 is the primary generation and documented headless LoRA/LoKr training candidate. HeartMuLa uses its own heartlib/codec worker; MiniMax optionally uses SGLang-Omni under conditional policy and documented GPU allocation. Additional engines remain deferred unless selected. Keep upstream UIs disabled and engine endpoints private. Benchmark/pin before declaring any training or generation production-ready. Internal music-engine LMs must never replace the frontend lyric LLM or rewrite approved lyrics.

@@ -73,3 +73,8 @@ Generation freezes model and profile versions. Dataset preparation freezes origi
 Full mixes export as WAV and MP3. Native or separated stems export as aligned WAV and optionally ZIP. Preserve native originals and label processing. Store waveform peaks and analysis results for the frontend; do not render frontend controls. Store validated session/edit graphs and execute offline renders; responsive live playback stays in the frontend.
 
 Retention is class-based: generated outputs retain the existing seven-day default unless deployment policy changes; active profile artifacts and required manifests remain while active; source training data follows explicit owner retention, not automatic output expiry; temporary preparation segments/checkpoints have bounded cleanup. Deletion revokes access first, then removes objects/caches under recorded policy. Saved song permanence has not been confirmed and is not implied by project metadata persistence.
+
+
+## Container deployment decision
+
+Docker is mandatory. Follow CONTAINER_RUNTIME_PLAN.md for independent core, audio, dataset, inference, training and evaluation services. Single-host Compose is the first target; remote GPU workers use the same image contract and object storage without shared host-path assumptions. ACE-Step's documented headless API/training runtime is the first implementation target; HeartMuLa is isolated; MiniMax uses optional SGLang-Omni. Internal musical-planning models are engine components and cannot mutate frontend-approved lyrics. Only the OpenAudioLab API is the frontend-facing application endpoint on 50555. Build and pin each GPU environment independently; no single universal model container.

@@ -56,3 +56,8 @@ For each milestone list: changed files, commands run and results, actual engine/
 ## Planning versus implementation
 
 The user directed completing capabilities first. This revision updates documentation only. No application, UI, inference, fine-tuning, paid cloud provisioning or production deployment is performed by this planning update. During a subsequently assigned coding phase, execute this plan in milestone-sized feature-branch commits and report blocked gates explicitly.
+
+
+## Required Docker deliverables for every milestone
+
+Implement CONTAINER_RUNTIME_PLAN.md: per-service Dockerfiles/lockfiles, Compose profiles, private internal ports, explicit GPU device assignment, persistent artifact/cache volumes, secret-free configuration, health/readiness and migration/backup runbooks. Initial target is Linux/NVIDIA CUDA; do not invent tested runtime versions or hardware limits. Use ACE-Step's headless API and LoRA/LoKr path for the first training feasibility build. Core runs without a GPU; inference and training are separate allocations. Publish no production images or cloud workloads during planning.

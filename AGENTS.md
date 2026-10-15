@@ -22,4 +22,7 @@ Read all planning documents and `CODING_AGENT_HANDOFF.md` before implementation.
 15. Reference conditioning and style analysis are not fine-tuning. Actual custom-track training requires a verified recipe, budget, evaluation and compatible versioned artifacts.
 16. Read `docs/SERVICE_CATALOG.md`, `docs/ARTIST_TRAINING.md` and `docs/OUTPUT_SPEC.md` as mandatory scope documents.
 
+17. Docker is the required deployment format. Follow `docs/CONTAINER_RUNTIME_PLAN.md`; isolate each model's dependencies and training/inference allocations. Never include a frontend or deploy Gradio for upstream training.
+18. Preserve final lyrics through ACE-Step's upstream formatting/planning options; internal musical planning is not permission to generate or rewrite lyrics.
+
 This baseline is capability planning. Begin runtime implementation only when assigned the coding-agent implementation phase. Deliver implementation in reviewed milestones and a feature branch. Do not merge or deploy automatically. Routine local development and tests do not require repeated permission. Ask only when missing deployment facts block the next milestone.
