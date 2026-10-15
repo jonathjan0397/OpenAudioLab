@@ -59,8 +59,13 @@ services:
       - "50555:50555"
     environment:
       OAL_DATABASE_URL: postgresql+psycopg2://oal:${OAL_POSTGRES_PASSWORD}@postgres:5432/oal
+      OAL_REDIS_URL: redis://redis:6379/0
+      OAL_SECRET_KEY: ${OAL_SECRET_KEY:?set OAL_SECRET_KEY in .env}
+      OAL_STORAGE_DIR: /srv/openaudiolab/artifacts-data
       OAL_CORS_ORIGINS: ${OAL_CORS_ORIGINS:-http://localhost:3000}
       OAL_BIND_HOST: 0.0.0.0
+    volumes:
+      - artifacts-data:/srv/openaudiolab/artifacts-data
     depends_on:
       postgres:
         condition: service_healthy
@@ -69,11 +74,50 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  # Milestone 2 adds the deterministic WAV fixture worker on this service.
+  dispatcher:
+    build: .
+    profiles: ["core"]
+    command: python -m app.dispatcher
+    environment:
+      OAL_DATABASE_URL: postgresql+psycopg2://oal:${OAL_POSTGRES_PASSWORD}@postgres:5432/oal
+      OAL_REDIS_URL: redis://redis:6379/0
+      OAL_SECRET_KEY: ${OAL_SECRET_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  maintenance:
+    build: .
+    profiles: ["core"]
+    command: python -m app.maintenance --interval 600
+    environment:
+      OAL_DATABASE_URL: postgresql+psycopg2://oal:${OAL_POSTGRES_PASSWORD}@postgres:5432/oal
+      OAL_STORAGE_DIR: /srv/openaudiolab/artifacts-data
+    volumes:
+      - artifacts-data:/srv/openaudiolab/artifacts-data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # Opt-in deterministic WAV fixture worker (synthetic test audio, never real
+  # engine output). Enable with: docker compose --profile core --profile test up
   fixture-worker:
     build: .
     profiles: ["test"]
-    command: python -c "print('fixture worker arrives in milestone 2')"
+    command: python -m app.worker
+    environment:
+      OAL_DATABASE_URL: postgresql+psycopg2://oal:${OAL_POSTGRES_PASSWORD}@postgres:5432/oal
+      OAL_REDIS_URL: redis://redis:6379/0
+      OAL_SECRET_KEY: ${OAL_SECRET_KEY}
+      OAL_STORAGE_DIR: /srv/openaudiolab/artifacts-data
+    volumes:
+      - artifacts-data:/srv/openaudiolab/artifacts-data
     depends_on:
       api:
         condition: service_started
@@ -81,3 +125,4 @@ services:
 volumes:
   postgres-data:
   object-storage-data:
+  artifacts-data:

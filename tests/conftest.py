@@ -8,6 +8,11 @@ _TMP = pathlib.Path(tempfile.mkdtemp(prefix="oal-tests-"))
 _DB = _TMP / "test.db"
 os.environ["OAL_DATABASE_URL"] = f"sqlite:///{_DB}"
 os.environ["OAL_CORS_ORIGINS"] = "https://openaudiolab.io,http://localhost:3000"
+os.environ["OAL_STORAGE_DIR"] = str(_TMP / "artifacts")
+os.environ["OAL_SECRET_KEY"] = "test-secret"
+os.environ["OAL_SSE_FOLLOW_SECONDS"] = "0.3"
+os.environ["OAL_FIXTURE_LATENCY_SECONDS"] = "0.01"
+os.environ["OAL_WORKER_BRPOP_TIMEOUT_SECONDS"] = "1"
 
 import pytest  # noqa: E402
 from alembic import command  # noqa: E402
@@ -33,14 +38,43 @@ def _clean(_migrate) -> None:
 
     db = Db(os.environ["OAL_DATABASE_URL"])
     with db.session() as session:
-        session.execute(text("DELETE FROM jobs"))
-        session.execute(text("DELETE FROM idempotency_records"))
+        for table in (
+            "jobs",
+            "idempotency_records",
+            "job_attempts",
+            "job_events",
+            "outbox_records",
+            "assets",
+            "workers",
+        ):
+            session.execute(text(f"DELETE FROM {table}"))
         session.commit()
 
 
 @pytest.fixture(scope="session")
 def client() -> TestClient:
     return TestClient(create_app())
+
+
+@pytest.fixture
+def orch():
+    """Direct orchestration access (fakeredis-backed) for pipeline tests."""
+    import fakeredis
+
+    from app.config import get_settings
+    from app.db import Db
+    from app.orchestration import Dispatcher
+    from app.queue import RedisQueue
+    from app.storage import LocalObjectStorage
+    from app.worker import FixtureWorker
+
+    settings = get_settings()
+    db = Db(settings.database_url)
+    queue = RedisQueue(fakeredis.FakeStrictRedis())
+    storage = LocalObjectStorage(settings.storage_dir)
+    dispatcher = Dispatcher(db, queue, settings)
+    worker = FixtureWorker(db, queue, storage, settings, worker_id="test-fixture")
+    return type("Orch", (), {"db": db, "queue": queue, "storage": storage, "settings": settings, "dispatcher": dispatcher, "worker": worker})()
 
 
 TOKEN_A = "Bearer user-a-secret-token"

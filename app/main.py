@@ -13,6 +13,7 @@ from .config import Settings, get_settings
 from .db import Db
 from .errors import install_error_handlers
 from .routes import health_router, jobs_router, models_router
+from .storage import LocalObjectStorage
 
 API_V1_PREFIX = "/api/v1"
 
@@ -59,6 +60,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.db = Db(settings.database_url)
+    app.state.storage = LocalObjectStorage(settings.storage_dir)
 
     app.add_middleware(BodyLimitMiddleware, max_body_bytes=settings.max_body_bytes)
     app.add_middleware(RequestIdMiddleware)

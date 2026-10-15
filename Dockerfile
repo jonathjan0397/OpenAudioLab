@@ -14,6 +14,7 @@ COPY alembic ./alembic
 COPY app ./app
 
 RUN useradd --create-home --uid 10001 oal \
+    && mkdir -p /srv/openaudiolab/artifacts-data \
     && chown -R oal:oal /srv/openaudiolab
 USER oal
 

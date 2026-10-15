@@ -7,10 +7,37 @@ owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_
 
 ## [Unreleased]
 
+## [Milestone 2] - 2026-10-15
+
+Durable orchestration and the deterministic WAV fixture worker. Branch
+`impl/milestone-1`. Record: `docs/MILESTONE_2.md`.
+
 ### Added
-- Milestone 2 (in progress): durable orchestration — attempts, events, outbox,
-  assets, workers; Redis delivery; dispatcher; deterministic WAV fixture worker;
-  private artifact storage with expiring download URLs and seven-day cleanup.
+- Durable `job_attempts`, `job_events`, `outbox_records`, `assets` and `workers`
+  tables (Alembic `0002`); `jobs` gains `stage`, `progress`, `progress_source`.
+- Redis list delivery (LPUSH + BRPOP) with database-coordinated claims; the
+  database remains the authoritative job truth.
+- Dispatcher process: outbox publication (no double-publish after restart) and
+  lease reconciliation (interrupted → requeue, `MAX_ATTEMPTS` failure, or
+  cancellation).
+- Opt-in deterministic WAV fixture worker producing `synthetic_test_audio`
+  artifacts with fenced lease tokens and heartbeats.
+- Lease fencing and completion guards: stale-lease callbacks are rejected; a
+  late result after cancellation is discarded and cannot publish assets.
+- Private local-filesystem storage with server-generated keys; assets carry
+  role, MIME, bytes, SHA-256, audio metadata, synthetic flag and seven-day
+  expiry.
+- Short-lived HMAC-signed download URLs with HTTP Range (206) support and 410 on
+  expired retention; seven-day maintenance cleanup deletes expired objects.
+- SSE replays persisted events with `Last-Event-ID` and follows to a terminal
+  state; job detail reports real stage/progress.
+- Compose `core` gains `dispatcher` and `maintenance`; `test` runs the real
+  fixture worker; shared `artifacts-data` volume.
+- 14 new pytest orchestration tests (58 total).
+
+### Fixed
+- The shared `artifacts-data` volume is pre-created in the image so the non-root
+  container user can write; the worker now logs swallowed exceptions.
 
 ## [Milestone 1] - 2026-10-15
 

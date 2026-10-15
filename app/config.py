@@ -24,6 +24,21 @@ class Settings(BaseSettings):
     max_client_reference_length: int = 200
     poll_after_seconds: int = 3
 
+    # Milestone 2: durable orchestration
+    redis_url: str = "redis://127.0.0.1:6379/0"
+    secret_key: str = "dev-secret-change-me"
+    storage_dir: str = "./artifacts-data"
+    asset_retention_days: int = 7
+    download_url_ttl_seconds: int = 300
+    max_attempts: int = 3
+    lease_seconds: int = 30
+    heartbeat_interval_seconds: int = 10
+    dispatcher_poll_seconds: float = 1.0
+    worker_brpop_timeout_seconds: int = 5
+    max_artifact_bytes: int = 200 * 1024 * 1024
+    fixture_latency_seconds: float = 0.2
+    sse_follow_seconds: float = 30.0
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:

@@ -7,18 +7,23 @@ from __future__ import annotations
 
 import base64
 import hashlib
-from datetime import timedelta
+import json
+import time
+from datetime import timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..deps import owner_from_request
 from ..errors import ApiError
-from ..models import Job, IdempotencyRecord, new_uuid, utcnow
+from ..models import Asset, Job, JobEvent, IdempotencyRecord, new_uuid, utcnow
+from ..orchestration import append_event, as_utc, enqueue
 from ..registry import MODEL_RELEASES, SUPPORTED_OPERATIONS
+from ..storage import parse_range
+from ..tokens import check_token, make_token
 from ..schemas import (
     ArtifactsResponse,
     CancelResponse,
@@ -48,9 +53,9 @@ def _detail(job: Job, poll_after: int) -> JobDetailResponse:
         model_id=job.model_id,
         model_revision=job.model_revision,
         attempt_number=job.attempt_number,
-        stage=None,
-        progress=None,
-        progress_source=None,
+        stage=job.stage,
+        progress=job.progress,
+        progress_source=job.progress_source,
         lyrics_sha256=job.lyrics_sha256,
         lyrics_origin=job.lyrics_origin,
         client_reference=job.client_reference,
@@ -213,6 +218,8 @@ def create_job(
             )
             session.add(job)
             session.add(record)
+            enqueue(session, job, settings)
+            append_event(session, job.id, "queued", "queued")
             try:
                 session.commit()
             except IntegrityError:
@@ -296,13 +303,16 @@ def cancel_job(
 ) -> CancelResponse:
     with request.app.state.db.session() as session:
         job = _get_owned_job(session, job_id, owner_id)
+        transitioned = False
         if job.status == "queued":
             job.status = "cancelled"
             job.cancel_requested_at = utcnow()
             job.finished_at = utcnow()
+            transitioned = True
         elif job.status == "running":
             job.status = "cancelling"
             job.cancel_requested_at = utcnow()
+            transitioned = True
         elif job.status in ("cancelling", "cancelled"):
             pass
         elif job.status in TERMINAL_STATES:
@@ -312,6 +322,8 @@ def cancel_job(
                 f"Job in state '{job.status}' cannot be cancelled.",
                 {"status": job.status},
             )
+        if transitioned:
+            append_event(session, job.id, job.status, job.status)
         session.commit()
         return CancelResponse(
             job_id=job.id,
@@ -342,6 +354,10 @@ def retry_job(
         job.started_at = None
         job.finished_at = None
         job.cancel_requested_at = None
+        job.stage = None
+        job.progress = None
+        enqueue(session, job, request.app.state.settings)
+        append_event(session, job.id, "requeued", "queued", message="Explicit retry.")
         session.commit()
     return _detail(job, request.app.state.settings.poll_after_seconds)
 
@@ -354,7 +370,31 @@ def job_artifacts(
 ) -> ArtifactsResponse:
     with request.app.state.db.session() as session:
         job = _get_owned_job(session, job_id, owner_id)
-    return ArtifactsResponse(job_id=job.id, artifacts=[])
+        assets = list(
+            session.execute(
+                select(Asset)
+                .where(Asset.job_id == job.id, Asset.deleted_at.is_(None))
+                .order_by(Asset.created_at)
+            ).scalars()
+        )
+    return ArtifactsResponse(
+        job_id=job.id,
+        artifacts=[
+            {
+                "asset_id": asset.id,
+                "role": asset.role,
+                "mime": asset.mime,
+                "bytes": asset.bytes,
+                "sha256": asset.sha256,
+                "sample_rate": asset.sample_rate,
+                "channels": asset.channels,
+                "duration_seconds": asset.duration_seconds,
+                "synthetic_test_audio": asset.synthetic,
+                "expires_at": asset.expires_at.isoformat() if asset.expires_at else None,
+            }
+            for asset in assets
+        ],
+    )
 
 
 @router.get("/jobs/{job_id}/events")
@@ -363,14 +403,57 @@ def job_events(
     request: Request,
     owner_id: str = Depends(owner_from_request),
 ) -> StreamingResponse:
+    settings = request.app.state.settings
     with request.app.state.db.session() as session:
-        job = _get_owned_job(session, job_id, owner_id)
-    snapshot = _detail(job, request.app.state.settings.poll_after_seconds).model_dump_json()
+        _get_owned_job(session, job_id, owner_id)
+    last_event_header = request.headers.get("Last-Event-ID")
+    last_id = 0
+    if last_event_header:
+        try:
+            last_id = int(last_event_header.rsplit("-", 1)[-1])
+        except ValueError:
+            last_id = 0
 
-    async def _resync():
-        yield f"id: {job.id}-0\nevent: resync\ndata: {snapshot}\n\n"
+    def _fetch(after: int):
+        with request.app.state.db.session() as session:
+            job = _get_owned_job(session, job_id, owner_id)
+            rows = list(
+                session.execute(
+                    select(JobEvent).where(JobEvent.job_id == job.id, JobEvent.id > after).order_by(JobEvent.id)
+                ).scalars()
+            )
+            return job.status, rows
 
-    return StreamingResponse(_resync(), media_type="text/event-stream")
+    def _sse(event: JobEvent) -> str:
+        data = json.dumps(
+            {
+                "job_id": event.job_id,
+                "attempt_id": event.attempt_id,
+                "event": event.event,
+                "status": event.status,
+                "stage": event.stage,
+                "progress": event.progress,
+                "message": event.message,
+            }
+        )
+        return f"id: {event.job_id}-{event.id}\nevent: {event.event}\ndata: {data}\n\n"
+
+    def _stream():
+        cursor = last_id
+        deadline = time.monotonic() + settings.sse_follow_seconds
+        while True:
+            status, rows = _fetch(cursor)
+            for event in rows:
+                cursor = event.id
+                yield _sse(event)
+            if status in TERMINAL_STATES or not rows and time.monotonic() > deadline:
+                if status in TERMINAL_STATES:
+                    return
+                yield "event: resync\ndata: {}\n\n"
+                return
+            time.sleep(0.25)
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
 
 
 @router.post("/artifacts/{asset_id}/download-url")
@@ -379,4 +462,55 @@ def artifact_download_url(
     request: Request,
     owner_id: str = Depends(owner_from_request),
 ) -> JSONResponse:
-    raise ApiError(404, "ASSET_NOT_FOUND", "Asset not found.")
+    settings = request.app.state.settings
+    with request.app.state.db.session() as session:
+        asset = session.execute(select(Asset).where(Asset.id == asset_id)).scalar_one_or_none()
+        if asset is None or asset.owner_id != owner_id:
+            raise ApiError(404, "ASSET_NOT_FOUND", "Asset not found.")
+        now = utcnow()
+        if asset.deleted_at is not None or (as_utc(asset.expires_at) is not None and as_utc(asset.expires_at) <= now):
+            raise ApiError(410, "ASSET_EXPIRED", "Asset retention has expired.")
+        expiry = now + timedelta(seconds=settings.download_url_ttl_seconds)
+        if asset.expires_at is not None and as_utc(asset.expires_at) < expiry:
+            expiry = as_utc(asset.expires_at)
+        token = make_token(settings.secret_key, asset.id, expiry)
+    return JSONResponse(
+        status_code=200,
+        content={
+            "asset_id": asset.id,
+            "url": f"/api/v1/artifacts/{asset.id}/content?token={token}",
+            "expires_at": expiry.isoformat(),
+        },
+    )
+
+
+@router.get("/artifacts/{asset_id}/content")
+def artifact_content(
+    asset_id: str,
+    request: Request,
+    token: str = Query(...),
+) -> Response:
+    settings = request.app.state.settings
+    with request.app.state.db.session() as session:
+        asset = session.execute(select(Asset).where(Asset.id == asset_id)).scalar_one_or_none()
+    if asset is None:
+        raise ApiError(404, "ASSET_NOT_FOUND", "Asset not found.")
+    now = utcnow()
+    if asset.deleted_at is not None or (as_utc(asset.expires_at) is not None and as_utc(asset.expires_at) <= now):
+        raise ApiError(410, "ASSET_EXPIRED", "Asset retention has expired.")
+    expiry = check_token(settings.secret_key, asset.id, token, now)
+    if expiry is None:
+        raise ApiError(403, "DOWNLOAD_TOKEN_INVALID", "Download token is invalid or expired.")
+    byte_range = parse_range(request.headers.get("Range"), asset.bytes)
+    stored = request.app.state.storage.get(asset.storage_key, byte_range)
+    headers = {"Accept-Ranges": "bytes"}
+    status_code = 200
+    if stored.content_range is not None:
+        headers["Content-Range"] = stored.content_range
+        status_code = 206
+    return Response(
+        content=stored.body,
+        status_code=status_code,
+        media_type=asset.mime,
+        headers=headers,
+    )
