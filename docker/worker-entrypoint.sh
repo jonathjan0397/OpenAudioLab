@@ -1,8 +1,16 @@
 #!/bin/sh
-# Combined worker entrypoint: fetch our app code from the backend over the
-# WireGuard tunnel, start the co-located ACE-Step server, then run the worker
-# role(s). The heavy runtime lives in the image; only our code is transferred.
+# Combined worker entrypoint: optionally bring up the WireGuard tunnel, fetch
+# our app code from the backend over the tunnel, start the co-located ACE-Step
+# server, then run the worker role(s). The heavy runtime lives in the image;
+# only our code is transferred.
 set -e
+
+# Optional self-contained WireGuard bring-up (needs NET_ADMIN + a mounted
+# /etc/wireguard/wg0.conf). Skipped when the host already provides the tunnel.
+if [ "${OAL_WG_UP:-0}" = "1" ] && [ -f /etc/wireguard/wg0.conf ]; then
+    echo "[worker] bringing up WireGuard (wg0)"
+    wg-quick up wg0 || { echo "[worker] wg-quick up failed"; exit 1; }
+fi
 
 BACKEND="${OAL_BACKEND_URL:-http://10.0.0.1:50555}"
 APP_DIR="${OAL_APP_DIR:-/srv/openaudiolab/code}"

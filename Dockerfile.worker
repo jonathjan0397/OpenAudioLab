@@ -27,6 +27,13 @@ RUN git clone https://github.com/ace-step/ACE-Step-1.5.git . \
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
+# --- WireGuard client tooling (late layer so heavy layers stay cached) --------
+# Lets a self-contained node bring its own tunnel up (entrypoint wg-quick) when
+# run with NET_ADMIN and a mounted /etc/wireguard/wg0.conf.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wireguard-tools iproute2 iptables \
+    && rm -rf /var/lib/apt/lists/*
+
 # --- Bootstrap (app code arrives at runtime from the backend bundle) ---------
 COPY docker/worker-entrypoint.sh /usr/local/bin/worker-entrypoint.sh
 RUN chmod +x /usr/local/bin/worker-entrypoint.sh
