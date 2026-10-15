@@ -5,9 +5,25 @@
 # only our code is transferred.
 set -e
 
-# Optional self-contained WireGuard bring-up (needs NET_ADMIN + a mounted
-# /etc/wireguard/wg0.conf). Skipped when the host already provides the tunnel.
-if [ "${OAL_WG_UP:-0}" = "1" ] && [ -f /etc/wireguard/wg0.conf ]; then
+# Optional self-contained WireGuard bring-up (needs NET_ADMIN). When enabled and
+# no config is mounted, write /etc/wireguard/wg0.conf from env so a Vast-style
+# container needs no bind-mount.
+if [ "${OAL_WG_UP:-0}" = "1" ]; then
+    mkdir -p /etc/wireguard
+    if [ ! -f /etc/wireguard/wg0.conf ] && [ -n "${OAL_WG_PRIVKEY:-}" ]; then
+        cat > /etc/wireguard/wg0.conf <<WG
+[Interface]
+PrivateKey = ${OAL_WG_PRIVKEY}
+Address = ${OAL_WG_ADDRESS}
+ListenPort = ${OAL_WG_PORT:-51820}
+
+[Peer]
+PublicKey = ${OAL_WG_PUBKEY}
+Endpoint = ${OAL_WG_ENDPOINT}
+AllowedIPs = ${OAL_WG_ALLOWED:-10.203.0.0/24}
+PersistentKeepalive = 25
+WG
+    fi
     echo "[worker] bringing up WireGuard (wg0)"
     wg-quick up wg0 || { echo "[worker] wg-quick up failed"; exit 1; }
 fi
