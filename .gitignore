@@ -16,3 +16,6 @@ data/
 models/
 artifacts/
 node_modules/
+
+*.db
+oal.db
