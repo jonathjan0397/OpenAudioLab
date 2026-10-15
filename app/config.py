@@ -48,6 +48,16 @@ class Settings(BaseSettings):
     engine_timeout_seconds: float = 600.0
     engine_http_timeout_seconds: float = 120.0
 
+    # Milestone 4: audio services (uploads, exports, separation)
+    max_upload_bytes: int = 100 * 1024 * 1024
+    upload_session_ttl_minutes: int = 60
+    ffmpeg_bin: str = "ffmpeg"
+    ffprobe_bin: str = "ffprobe"
+    demucs_python: str = ""
+    demucs_model: str = "htdemucs"
+    demucs_device: str = "cpu"
+    separator_timeout_seconds: float = 900.0
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:

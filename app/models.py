@@ -129,6 +129,11 @@ class Asset(Base):
     attempt_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     storage_key: Mapped[str] = mapped_column(String(500), unique=True)
     role: Mapped[str] = mapped_column(String(40))
+    kind: Mapped[str] = mapped_column(String(20), default="generated")
+    source_asset_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    stem_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    stem_category: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    processing: Mapped[str | None] = mapped_column(String(120), nullable=True)
     mime: Mapped[str] = mapped_column(String(80))
     bytes: Mapped[int] = mapped_column(Integer)
     sha256: Mapped[str] = mapped_column(String(64))
@@ -150,3 +155,48 @@ class Worker(Base):
     drain: Mapped[bool] = mapped_column(default=False)
     last_heartbeat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Project(Base):
+    __tablename__ = "projects"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    owner_id: Mapped[str] = mapped_column(String(80), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    active_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    etag_version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ProjectVersion(Base):
+    __tablename__ = "project_versions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    project_id: Mapped[str] = mapped_column(String(36), index=True)
+    owner_id: Mapped[str] = mapped_column(String(80), index=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    label: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    source_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    source_asset_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    parent_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    manifest: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class UploadSession(Base):
+    __tablename__ = "upload_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    owner_id: Mapped[str] = mapped_column(String(80), index=True)
+    filename: Mapped[str] = mapped_column(String(300))
+    content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    asset_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

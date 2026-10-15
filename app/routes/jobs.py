@@ -386,6 +386,11 @@ def job_artifacts(
             {
                 "asset_id": asset.id,
                 "role": asset.role,
+                "kind": asset.kind,
+                "source_asset_id": asset.source_asset_id,
+                "stem_source": asset.stem_source,
+                "stem_category": asset.stem_category,
+                "processing": asset.processing,
                 "mime": asset.mime,
                 "bytes": asset.bytes,
                 "sha256": asset.sha256,

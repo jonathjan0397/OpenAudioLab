@@ -47,6 +47,9 @@ def _clean(_migrate) -> None:
             "outbox_records",
             "assets",
             "workers",
+            "projects",
+            "project_versions",
+            "upload_sessions",
         ):
             session.execute(text(f"DELETE FROM {table}"))
         session.commit()

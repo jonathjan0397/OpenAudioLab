@@ -119,3 +119,116 @@ class ModelDetail(ModelSummary):
     min_duration_seconds: int
     max_duration_seconds: int
     output_options: list[str]
+
+
+class ProjectCreate(StrictModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class ProjectPatch(StrictModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    active_version_id: str | None = None
+
+
+class ProjectResponse(BaseModel):
+    project_id: str
+    name: str
+    active_version_id: str | None
+    etag: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProjectPage(BaseModel):
+    projects: list[ProjectResponse]
+
+
+class VersionCreate(StrictModel):
+    source_job_id: str | None = None
+    source_asset_id: str | None = None
+    label: str | None = Field(default=None, max_length=200)
+
+
+class VersionResponse(BaseModel):
+    version_id: str
+    project_id: str
+    kind: str
+    label: str | None
+    source_job_id: str | None
+    source_asset_id: str | None
+    parent_version_id: str | None
+    manifest: dict[str, Any]
+    created_at: datetime
+
+
+class VersionPage(BaseModel):
+    versions: list[VersionResponse]
+
+
+class RestoreRequest(StrictModel):
+    version_id: str
+
+
+class UploadCreate(StrictModel):
+    filename: str = Field(min_length=1, max_length=300)
+    content_type: str | None = Field(default=None, max_length=120)
+
+
+class UploadResponse(BaseModel):
+    upload_id: str
+    status: str
+    data_url: str
+    expires_at: datetime
+    bytes: int | None
+    sha256: str | None
+    asset_id: str | None
+    error: str | None
+
+
+class AssetResponse(BaseModel):
+    asset_id: str
+    job_id: str | None
+    role: str
+    kind: str
+    source_asset_id: str | None
+    stem_source: str | None
+    stem_category: str | None
+    processing: str | None
+    mime: str
+    bytes: int
+    sha256: str
+    sample_rate: int | None
+    channels: int | None
+    duration_seconds: float | None
+    synthetic: bool
+    created_at: datetime
+    expires_at: datetime | None
+    deleted: bool
+
+
+class WavSettings(StrictModel):
+    sample_rate: Literal["native", 44100, 48000] = "native"
+    encoding: Literal["pcm16", "pcm24"] = "pcm16"
+
+
+class Mp3Settings(StrictModel):
+    bitrate_kbps: Literal[128, 192, 256, 320] = 320
+
+
+class ExportRequest(StrictModel):
+    source_version_id: str
+    outputs: list[OutputOption] = Field(min_length=1)
+    wav: WavSettings | None = None
+    mp3: Mp3Settings | None = None
+    stem_set: Literal["available"] = "available"
+
+    def canonical_json(self) -> str:
+        return json.dumps(
+            self.model_dump(mode="json"),
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+    def request_hash(self) -> str:
+        return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()

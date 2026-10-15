@@ -7,6 +7,40 @@ owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_
 
 ## [Unreleased]
 
+## [Milestone 4] - 2026-10-15
+
+Backend audio services and external frontend integration. Branch
+`impl/milestone-1`. Record: `docs/MILESTONE_4.md`.
+
+### Added
+- Projects with owner-scoped CRUD, tombstone delete and integer-ETag
+  optimistic concurrency (`If-Match` required on PATCH/restore; 428 missing,
+  412 mismatch); immutable project versions created from a succeeded job's mix
+  asset or an uploaded asset; restore moves the active pointer.
+- Asset ingestion: upload session allocate → PUT bytes → complete with probe
+  (stdlib WAV reader, FFmpeg fallback); non-audio fails closed
+  (`UPLOAD_NOT_AUDIO`); `GET`/`DELETE /assets/{id}` with 410 after revoke.
+- Export jobs (`POST /exports`, `audio.export` operation, dedicated queue):
+  settings validated before queuing (native-only WAV, MP3 128/192/256/320);
+  CPU audio worker publishes `mix_wav` native copy, `mix_mp3` (FFmpeg
+  libmp3lame, codec + bitrate validation), `stems_wav` (explicit Demucs
+  `htdemucs` separation, sample-alignment validated, `stem_source=separated`)
+  and `stems_zip` (safe names + manifest). Partial results preserved on
+  per-output failure.
+- Asset lineage: `kind`, `source_asset_id`, `stem_source`, `stem_category`,
+  `processing` (Alembic `0003`, SQLite-batch compatible).
+- `scripts/frontend_contract.py`: stdlib-only frontend contract demonstration
+  (discovery → submit → poll → signed download + Range → project/version/ETag
+  → export → delivery).
+- Compose `audio-worker` service in the `ace` profile; API image now includes
+  FFmpeg 6.1; engine venv gained demucs + torchaudio 2.10.0+cu128.
+- 15 new tests (83 total).
+
+### Evidence
+- Live contract run on the real stack: vocal job (12 s, seed 42) → 48 kHz
+  stereo WAV delivered with 200/206; export produced a 320,029 bps MP3
+  (ffprobe) and four sample-aligned separated stems + ZIP with manifest.
+
 ## [Milestone 3] - 2026-10-15
 
 First real music engine: ACE-Step 1.5 behind an isolated GPU worker. Branch

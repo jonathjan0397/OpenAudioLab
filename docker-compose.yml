@@ -168,6 +168,25 @@ services:
       acestep-server:
         condition: service_started
 
+  # CPU audio export worker (FFmpeg MP3, WAV copy, stem ZIP). Stem separation
+  # needs a separator runtime in this container (OAL_DEMUCS_PYTHON); without
+  # it, stem exports fail closed with SEPARATOR_UNAVAILABLE.
+  audio-worker:
+    build: .
+    profiles: ["ace"]
+    command: python -m app.audio_worker
+    environment:
+      OAL_DATABASE_URL: postgresql+psycopg2://oal:${OAL_POSTGRES_PASSWORD}@postgres:5432/oal
+      OAL_REDIS_URL: redis://redis:6379/0
+      OAL_SECRET_KEY: ${OAL_SECRET_KEY}
+      OAL_STORAGE_DIR: /srv/openaudiolab/artifacts-data
+      OAL_DEMUCS_PYTHON: ${OAL_DEMUCS_PYTHON:-}
+    volumes:
+      - artifacts-data:/srv/openaudiolab/artifacts-data
+    depends_on:
+      api:
+        condition: service_started
+
 volumes:
   postgres-data:
   object-storage-data:

@@ -12,7 +12,14 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from .config import Settings, get_settings
 from .db import Db
 from .errors import install_error_handlers
-from .routes import health_router, jobs_router, models_router
+from .routes import (
+    exports_router,
+    health_router,
+    jobs_router,
+    models_router,
+    projects_router,
+    uploads_router,
+)
 from .storage import LocalObjectStorage
 
 API_V1_PREFIX = "/api/v1"
@@ -28,14 +35,18 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
 
 
 class BodyLimitMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, max_body_bytes: int) -> None:
+    def __init__(self, app, max_body_bytes: int, max_upload_bytes: int = 0) -> None:
         super().__init__(app)
         self.max_body_bytes = max_body_bytes
+        self.max_upload_bytes = max_upload_bytes
 
     async def dispatch(self, request: Request, call_next):
+        limit = self.max_body_bytes
+        if self.max_upload_bytes and request.url.path.endswith("/data"):
+            limit = self.max_upload_bytes
         content_length = request.headers.get("Content-Length")
         if content_length is not None and content_length.isdigit():
-            if int(content_length) > self.max_body_bytes:
+            if int(content_length) > limit:
                 from .errors import _envelope
 
                 return JSONResponse(
@@ -44,7 +55,7 @@ class BodyLimitMiddleware(BaseHTTPMiddleware):
                         request,
                         "BODY_TOO_LARGE",
                         "Request body exceeds the configured limit.",
-                        {"max_body_bytes": self.max_body_bytes},
+                        {"max_body_bytes": limit},
                     ),
                 )
         return await call_next(request)
@@ -62,21 +73,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.db = Db(settings.database_url)
     app.state.storage = LocalObjectStorage(settings.storage_dir)
 
-    app.add_middleware(BodyLimitMiddleware, max_body_bytes=settings.max_body_bytes)
+    app.add_middleware(BodyLimitMiddleware, max_body_bytes=settings.max_body_bytes, max_upload_bytes=settings.max_upload_bytes)
     app.add_middleware(RequestIdMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "PATCH", "DELETE"],
-        allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
-        expose_headers=["Location", "Retry-After", "X-Request-ID"],
+        allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "If-Match"],
+        expose_headers=["Location", "Retry-After", "X-Request-ID", "ETag"],
     )
     install_error_handlers(app)
 
     app.include_router(health_router, prefix=API_V1_PREFIX)
     app.include_router(models_router, prefix=API_V1_PREFIX)
     app.include_router(jobs_router, prefix=API_V1_PREFIX)
+    app.include_router(projects_router, prefix=API_V1_PREFIX)
+    app.include_router(uploads_router, prefix=API_V1_PREFIX)
+    app.include_router(exports_router, prefix=API_V1_PREFIX)
     # Root aliases for container/compose healthchecks.
     app.include_router(health_router, include_in_schema=False)
     return app
