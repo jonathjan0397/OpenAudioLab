@@ -116,5 +116,6 @@ class ModelDetail(ModelSummary):
     supported_controls: list[str]
     supports_seed: bool
     supports_duration: bool
+    min_duration_seconds: int
     max_duration_seconds: int
     output_options: list[str]

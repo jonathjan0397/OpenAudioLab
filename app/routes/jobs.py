@@ -135,12 +135,15 @@ def _validate_request(payload: GenerateJobRequest, max_lyrics_chars: int) -> Non
     if payload.duration_seconds is not None:
         if not release.supports_duration:
             raise ApiError(422, "CONTROL_UNSUPPORTED", "This model does not accept a duration target.")
-        if payload.duration_seconds > release.max_duration_seconds:
+        if not (release.min_duration_seconds <= payload.duration_seconds <= release.max_duration_seconds):
             raise ApiError(
                 422,
                 "CONTROL_UNSUPPORTED",
-                "Requested duration exceeds the model maximum.",
-                {"max_duration_seconds": release.max_duration_seconds},
+                "Requested duration is outside the model range.",
+                {
+                    "min_duration_seconds": release.min_duration_seconds,
+                    "max_duration_seconds": release.max_duration_seconds,
+                },
             )
 
 

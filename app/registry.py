@@ -24,6 +24,7 @@ class ModelRelease:
     supported_controls: tuple[str, ...] = ()
     supports_seed: bool = True
     supports_duration: bool = True
+    min_duration_seconds: int = 1
     max_duration_seconds: int = 600
     output_options: tuple[str, ...] = OUTPUT_OPTIONS
     capabilities: dict[str, bool] = field(default_factory=dict)
@@ -33,11 +34,13 @@ MODEL_RELEASES: dict[str, ModelRelease] = {
     "ace-step-1.5": ModelRelease(
         model_id="ace-step-1.5",
         display_name="ACE-Step 1.5",
-        revision="1.5-unpinned-m1",
+        revision="1.5.0@ca1e85f",
         enabled=True,
         commercial_policy="unrestricted",
-        license_status="needs_review",
+        license_status="verified",
         supported_controls=(),
+        min_duration_seconds=10,
+        max_duration_seconds=600,
         capabilities={
             "lyrics_conditioned": True,
             "instrumental": True,

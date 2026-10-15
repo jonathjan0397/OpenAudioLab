@@ -39,6 +39,15 @@ class Settings(BaseSettings):
     fixture_latency_seconds: float = 0.2
     sse_follow_seconds: float = 30.0
 
+    # Milestone 3: ACE-Step 1.5 engine worker
+    acestep_base_url: str = "http://127.0.0.1:8001"
+    acestep_api_key: str = ""
+    acestep_model: str = "acestep-v15-turbo"
+    acestep_thinking: bool = False
+    engine_poll_seconds: float = 2.0
+    engine_timeout_seconds: float = 600.0
+    engine_http_timeout_seconds: float = 120.0
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:

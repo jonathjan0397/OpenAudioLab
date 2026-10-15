@@ -40,6 +40,7 @@ def get_model(model_id: str) -> ModelDetail:
         supported_controls=list(release.supported_controls),
         supports_seed=release.supports_seed,
         supports_duration=release.supports_duration,
+        min_duration_seconds=release.min_duration_seconds,
         max_duration_seconds=release.max_duration_seconds,
         output_options=list(release.output_options),
     )

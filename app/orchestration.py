@@ -238,6 +238,8 @@ def complete_attempt(
     lease_token: str,
     artifact: tuple[str, bytes],
     audio_meta: tuple[int, int, float] | None = None,
+    synthetic: bool = True,
+    engine_version: str | None = None,
 ) -> str:
     """Complete a running attempt with one artifact (role, body).
 
@@ -250,10 +252,20 @@ def complete_attempt(
             append_event(session, job_id, "discarded", "stale-lease", message="Lease lost before completion.", attempt_id=attempt_id)
             session.commit()
             return "stale"
+        if engine_version is not None:
+            attempt = session.get(JobAttempt, attempt_id)
+            if attempt is not None:
+                attempt.engine_version = engine_version
         result = session.execute(
             update(Job)
             .where(Job.id == job_id, Job.status == "running")
-            .values(status="succeeded", finished_at=utcnow(), stage="done", progress=1.0, progress_source="fixture")
+            .values(
+                status="succeeded",
+                finished_at=utcnow(),
+                stage="done",
+                progress=1.0,
+                progress_source="fixture" if synthetic else "engine",
+            )
         )
         if result.rowcount == 0:
             job = get_job_by_id(session, job_id)
@@ -280,7 +292,7 @@ def complete_attempt(
             mime="audio/wav",
             bytes=len(data),
             sha256=checksum,
-            synthetic=True,
+            synthetic=synthetic,
             finalized_at=utcnow(),
             expires_at=expires_at,
             sample_rate=audio_meta[0] if audio_meta else None,
