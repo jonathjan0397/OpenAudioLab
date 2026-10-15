@@ -26,7 +26,7 @@ from .orchestration import (
     heartbeat,
     is_cancelling,
 )
-from .queue import RedisQueue
+from .queue import RedisQueue, build_redis
 from .storage import LocalObjectStorage
 from .worker import InvalidArtifact, validate_wav
 
@@ -198,10 +198,8 @@ class EngineWorker:
 
 def build_engine_worker() -> EngineWorker:
     settings = get_settings()
-    import redis
-
     db = Db(settings.database_url)
-    queue = RedisQueue(redis.Redis.from_url(settings.redis_url))
+    queue = RedisQueue(build_redis(settings.redis_url))
     storage = LocalObjectStorage(settings.storage_dir)
     transport = RequestsTransport(
         settings.acestep_base_url,

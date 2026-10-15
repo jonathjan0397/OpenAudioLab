@@ -7,15 +7,13 @@ import logging
 from .config import get_settings
 from .db import Db
 from .orchestration import Dispatcher
-from .queue import RedisQueue
+from .queue import RedisQueue, build_redis
 
 
 def build_dispatcher() -> Dispatcher:
     settings = get_settings()
-    import redis
-
     db = Db(settings.database_url)
-    queue = RedisQueue(redis.Redis.from_url(settings.redis_url))
+    queue = RedisQueue(build_redis(settings.redis_url))
     return Dispatcher(db, queue, settings)
 
 

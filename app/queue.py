@@ -13,6 +13,17 @@ from __future__ import annotations
 from typing import Any
 
 
+def build_redis(url: str) -> Any:
+    """Blocking-safe Redis client.
+
+    redis-py >=6 defaults socket_timeout to 5 s, which races BRPOP blocking
+    reads; blocking workers need the socket to outlive the server-side timeout.
+    """
+    import redis
+
+    return redis.Redis.from_url(url, socket_timeout=None, health_check_interval=30)
+
+
 class RedisQueue:
     def __init__(self, client: Any) -> None:
         self.client = client

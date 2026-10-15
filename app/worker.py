@@ -32,7 +32,7 @@ from .orchestration import (
     heartbeat,
     is_cancelling,
 )
-from .queue import RedisQueue
+from .queue import RedisQueue, build_redis
 from .storage import LocalObjectStorage
 
 SAMPLE_RATE = 44100
@@ -174,10 +174,8 @@ class FixtureWorker:
 
 def build_worker() -> FixtureWorker:
     settings = get_settings()
-    import redis
-
     db = Db(settings.database_url)
-    queue = RedisQueue(redis.Redis.from_url(settings.redis_url))
+    queue = RedisQueue(build_redis(settings.redis_url))
     storage = LocalObjectStorage(settings.storage_dir)
     return FixtureWorker(db, queue, storage, settings)
 

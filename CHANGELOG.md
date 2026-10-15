@@ -7,6 +7,40 @@ owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_
 
 ## [Unreleased]
 
+## [Milestone 3] - 2026-10-15
+
+First real music engine: ACE-Step 1.5 behind an isolated GPU worker. Branch
+`impl/milestone-1`. Record: `docs/MILESTONE_3.md`.
+
+### Added
+- ACE-Step 1.5 adapter over the documented upstream REST contract
+  (`/release_task`, `/query_result`, `/v1/audio`) with lyrics passed verbatim
+  (`use_format=false`; CoT disabled in DiT-only mode) and native WAV output.
+- Engine worker process with fenced leases, poll-as-heartbeat, cancellation by
+  discard (upstream has no cancel endpoint), `ENGINE_BUSY` requeue without
+  budget burn, and safe error codes (`ENGINE_REJECTED`, `ENGINE_AUTH`,
+  `ENGINE_BUSY`, `ENGINE_GENERATION_FAILED`, `ENGINE_TIMEOUT`,
+  `ENGINE_NO_AUDIO`, `ARTIFACT_INVALID`).
+- Pinned runtime: upstream commit `ca1e85f`, torch 2.10.0+cu128 (CUDA 12.8),
+  Python 3.12, uv-managed; checkpoints size-verified. Registry revision
+  `1.5.0@ca1e85f`, license `verified` (MIT code + MIT model card).
+- Admission now enforces the model duration range (10–600 s) and model detail
+  reports `min_duration_seconds`.
+- Compose `ace` profile (private `acestep-server` with GPU device 0 +
+  `engine-worker`) and `Dockerfile.acestep` deployment deliverable.
+- 10 new engine tests (68 total).
+
+### Fixed
+- Redis blocking reads: redis-py >=6 defaults `socket_timeout=5s`, racing the
+  5 s BRPOP; the queue factory pins `socket_timeout=None` with a health check
+  and the dependency is held at the `5.*` line.
+- Compose exposes PostgreSQL/Redis on loopback ports for host-side workers.
+
+### Evidence
+- Real vocal and instrumental generation on an RTX PRO 4000 Blackwell: cold
+  ~10 s, warm 2–3 s, ~12.3 GB VRAM (DiT-only); 48 kHz stereo WAV delivered
+  through the public API with Range support; `synthetic_test_audio=false`.
+
 ## [Milestone 2] - 2026-10-15
 
 Durable orchestration and the deterministic WAV fixture worker. Branch
