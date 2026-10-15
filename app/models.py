@@ -200,3 +200,114 @@ class UploadSession(Base):
     error: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ArtistProfile(Base):
+    __tablename__ = "artist_profiles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    owner_id: Mapped[str] = mapped_column(String(80), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    style_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    singer_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    sharing_policy: Mapped[str] = mapped_column(String(20), default="private")
+    active_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    etag_version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class RightsRecord(Base):
+    __tablename__ = "rights_records"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    owner_id: Mapped[str] = mapped_column(String(80), index=True)
+    profile_id: Mapped[str] = mapped_column(String(36), index=True)
+    asset_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    purpose: Mapped[str] = mapped_column(String(40))
+    declaration: Mapped[str] = mapped_column(String(500))
+    declared_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Dataset(Base):
+    __tablename__ = "datasets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    owner_id: Mapped[str] = mapped_column(String(80), index=True)
+    profile_id: Mapped[str] = mapped_column(String(36), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(20), default="open")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DatasetTrack(Base):
+    __tablename__ = "dataset_tracks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    dataset_id: Mapped[str] = mapped_column(String(36), index=True)
+    owner_id: Mapped[str] = mapped_column(String(80), index=True)
+    asset_id: Mapped[str] = mapped_column(String(36))
+    lyrics: Mapped[str | None] = mapped_column(Text, nullable=True)
+    language: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    labels_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    split: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DatasetVersion(Base):
+    __tablename__ = "dataset_versions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    dataset_id: Mapped[str] = mapped_column(String(36), index=True)
+    owner_id: Mapped[str] = mapped_column(String(80), index=True)
+    version_number: Mapped[int] = mapped_column(Integer, default=1)
+    frozen_sha256: Mapped[str] = mapped_column(String(64))
+    split_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    report_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ArtistProfileVersion(Base):
+    __tablename__ = "artist_profile_versions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    profile_id: Mapped[str] = mapped_column(String(36), index=True)
+    owner_id: Mapped[str] = mapped_column(String(80), index=True)
+    mechanism: Mapped[str] = mapped_column(String(40))
+    base_model_id: Mapped[str] = mapped_column(String(80))
+    base_revision: Mapped[str] = mapped_column(String(120))
+    recipe_revision: Mapped[str] = mapped_column(String(120))
+    dataset_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    artifacts_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    evaluation_status: Mapped[str] = mapped_column(String(20), default="none")
+    state: Mapped[str] = mapped_column(String(20), default="candidate")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TrainingRun(Base):
+    __tablename__ = "training_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    job_id: Mapped[str] = mapped_column(String(36), index=True)
+    profile_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    budget_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    hyperparams_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    seed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    metrics_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    worker_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    hardware: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="queued")
+
+
+class Evaluation(Base):
+    __tablename__ = "evaluations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    profile_version_id: Mapped[str] = mapped_column(String(36), index=True)
+    job_id: Mapped[str] = mapped_column(String(36), index=True)
+    prompts_json: Mapped[list] = mapped_column(JSON, default=list)
+    measurements_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    review: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

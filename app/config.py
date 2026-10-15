@@ -58,6 +58,16 @@ class Settings(BaseSettings):
     demucs_device: str = "cpu"
     separator_timeout_seconds: float = 900.0
 
+    # Milestone 5: artist training
+    train_queue_model_id: str = "training"
+    evaluate_queue_model_id: str = "evaluation"
+    train_max_epochs: int = 2000
+    train_max_wall_seconds: int = 7200
+    train_poll_seconds: float = 5.0
+    train_http_timeout_seconds: float = 1800.0
+    train_workdir: str = "./training-data"
+    train_recipe_revision: str = "acestep-lora@ca1e85f"
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:

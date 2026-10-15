@@ -35,7 +35,7 @@ class RedisQueue:
     def publish(self, queue: str, job_id: str) -> None:
         self.client.lpush(queue, job_id)
 
-    def receive(self, queue: str, timeout_seconds: int) -> str | None:
+    def receive(self, queue: str | list[str], timeout_seconds: int) -> str | None:
         item = self.client.brpop(queue, timeout=timeout_seconds)
         if item is None:
             return None

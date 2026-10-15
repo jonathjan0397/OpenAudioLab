@@ -50,6 +50,14 @@ def _clean(_migrate) -> None:
             "projects",
             "project_versions",
             "upload_sessions",
+            "artist_profiles",
+            "rights_records",
+            "datasets",
+            "dataset_tracks",
+            "dataset_versions",
+            "artist_profile_versions",
+            "training_runs",
+            "evaluations",
         ):
             session.execute(text(f"DELETE FROM {table}"))
         session.commit()

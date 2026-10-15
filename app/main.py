@@ -13,6 +13,7 @@ from .config import Settings, get_settings
 from .db import Db
 from .errors import install_error_handlers
 from .routes import (
+    artist_router,
     exports_router,
     health_router,
     jobs_router,
@@ -91,6 +92,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(projects_router, prefix=API_V1_PREFIX)
     app.include_router(uploads_router, prefix=API_V1_PREFIX)
     app.include_router(exports_router, prefix=API_V1_PREFIX)
+    app.include_router(artist_router, prefix=API_V1_PREFIX)
     # Root aliases for container/compose healthchecks.
     app.include_router(health_router, include_in_schema=False)
     return app

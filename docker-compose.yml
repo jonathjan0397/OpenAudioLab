@@ -187,8 +187,32 @@ services:
       api:
         condition: service_started
 
+  # Training/evaluation worker (milestone 5). Needs shared access to the
+  # upstream server's filesystem for dataset materialization and adapter
+  # artifacts (same-host deployment; remote training workers are a later
+  # deployment concern).
+  training-worker:
+    build: .
+    profiles: ["ace"]
+    command: python -m app.training_worker
+    environment:
+      OAL_DATABASE_URL: postgresql+psycopg2://oal:${OAL_POSTGRES_PASSWORD}@postgres:5432/oal
+      OAL_REDIS_URL: redis://redis:6379/0
+      OAL_SECRET_KEY: ${OAL_SECRET_KEY}
+      OAL_STORAGE_DIR: /srv/openaudiolab/artifacts-data
+      OAL_ACESTEP_BASE_URL: http://acestep-server:8001
+      OAL_ACESTEP_API_KEY: ${OAL_ACESTEP_API_KEY:-}
+      OAL_TRAIN_WORKDIR: /srv/openaudiolab/training-data
+    volumes:
+      - artifacts-data:/srv/openaudiolab/artifacts-data
+      - training-data:/srv/openaudiolab/training-data
+    depends_on:
+      api:
+        condition: service_started
+
 volumes:
   postgres-data:
   object-storage-data:
   artifacts-data:
   acestep-checkpoints:
+  training-data:

@@ -30,7 +30,6 @@ class GenerateJobRequest(StrictModel):
     outputs: list[OutputOption] = Field(default_factory=lambda: ["mix_wav", "mix_mp3"])
     artist_profile_version_id: str | None = None
     client_reference: str | None = Field(default=None, max_length=200)
-
     @field_validator("outputs")
     @classmethod
     def _dedupe_outputs(cls, value: list[str]) -> list[str]:
@@ -232,3 +231,137 @@ class ExportRequest(StrictModel):
 
     def request_hash(self) -> str:
         return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
+
+
+class ArtistProfileCreate(StrictModel):
+    name: str = Field(min_length=1, max_length=200)
+    style: dict[str, Any] = Field(default_factory=dict)
+    singer: dict[str, Any] = Field(default_factory=dict)
+
+
+class ArtistProfilePatch(StrictModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    style: dict[str, Any] | None = None
+    singer: dict[str, Any] | None = None
+
+
+class ArtistProfileResponse(BaseModel):
+    profile_id: str
+    name: str
+    style: dict[str, Any]
+    singer: dict[str, Any]
+    sharing_policy: str
+    active_version_id: str | None
+    etag: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class RightsCreate(StrictModel):
+    purpose: str
+    declaration: str = Field(min_length=1, max_length=500)
+    asset_id: str | None = None
+
+
+class RightsResponse(BaseModel):
+    record_id: str
+    profile_id: str
+    asset_id: str | None
+    purpose: str
+    declaration: str
+    declared_at: datetime
+
+
+class DatasetCreate(StrictModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class DatasetResponse(BaseModel):
+    dataset_id: str
+    profile_id: str
+    name: str
+    status: str
+    created_at: datetime
+
+
+class TrackCreate(StrictModel):
+    asset_id: str
+    lyrics: str | None = Field(default=None, max_length=20000)
+    language: str | None = Field(default=None, max_length=20)
+    labels: dict[str, Any] = Field(default_factory=dict)
+
+
+class TrackResponse(BaseModel):
+    track_id: str
+    dataset_id: str
+    asset_id: str
+    lyrics: str | None
+    language: str | None
+    labels: dict[str, Any]
+    split: str | None
+
+
+class DatasetVersionResponse(BaseModel):
+    dataset_version_id: str
+    dataset_id: str
+    version_number: int
+    frozen_sha256: str
+    split: dict[str, Any]
+    report: dict[str, Any]
+    created_at: datetime
+
+
+class TrainingCreate(StrictModel):
+    profile_id: str
+    dataset_version_id: str
+    base_model_id: str | None = None
+    recipe_revision: str | None = None
+    budget: dict[str, Any] | None = None
+    hyperparams: dict[str, Any] = Field(default_factory=dict)
+    seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
+
+    def canonical_json(self) -> str:
+        return json.dumps(self.model_dump(mode="json"), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+    def request_hash(self) -> str:
+        return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
+
+
+class EvaluationCreate(StrictModel):
+    profile_version_id: str
+    prompts: list[str] = Field(min_length=1, max_length=3)
+
+    @field_validator("prompts")
+    @classmethod
+    def _prompt_lengths(cls, value: list[str]) -> list[str]:
+        if any(not p.strip() or len(p) > 500 for p in value):
+            raise ValueError("Each evaluation prompt must be 1-500 characters.")
+        return value
+
+    def canonical_json(self) -> str:
+        return json.dumps(self.model_dump(mode="json"), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+    def request_hash(self) -> str:
+        return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
+
+
+class ProfileVersionResponse(BaseModel):
+    version_id: str
+    profile_id: str
+    mechanism: str
+    base_model_id: str
+    base_revision: str
+    recipe_revision: str
+    dataset_version_id: str | None
+    artifacts: dict[str, Any]
+    evaluation_status: str
+    state: str
+    created_at: datetime
+
+
+class ActivateRequest(StrictModel):
+    version_id: str
+
+
+class ReviewRequest(StrictModel):
+    review: Literal["accept", "reject"]

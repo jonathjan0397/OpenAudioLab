@@ -10,6 +10,7 @@ import logging
 import socket
 import time
 import os
+from uuid import uuid4
 
 from sqlalchemy import select
 
@@ -84,8 +85,23 @@ class EngineWorker:
         with self.db.session() as session:
             job = get_job_by_id(session, claimed_job)
             payload = self._payload_for(job)
+            profile_path = None
+            profile_version_id = dict(job.request_json).get("artist_profile_version_id")
+            if profile_version_id:
+                from .models import ArtistProfileVersion
+
+                version = session.get(ArtistProfileVersion, profile_version_id)
+                if version is not None:
+                    profile_path = (version.artifacts_json or {}).get("adapter_path")
             append_event(session, claimed_job, "stage", "running", stage="submitting", attempt_id=attempt_id)
             session.commit()
+
+        if profile_path:
+            try:
+                self.adapter.unload_lora()
+            except EngineError:
+                pass
+            self.adapter.load_lora(profile_path, adapter_name=f"oal-{uuid4().hex[:8]}")
 
         try:
             submit = self.adapter.submit(payload)
@@ -96,6 +112,16 @@ class EngineWorker:
             fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token, exc.code, exc.message)
             return True
 
+        try:
+            return self._run_generation(claimed_job, attempt_id, lease_token, submit)
+        finally:
+            if profile_path:
+                try:
+                    self.adapter.unload_lora()
+                except EngineError:
+                    log.warning("failed to unload profile adapter after job %s", claimed_job)
+
+    def _run_generation(self, claimed_job: str, attempt_id: str, lease_token: str, submit) -> bool:
         deadline = time.monotonic() + self.settings.engine_timeout_seconds
         poll_interval = self.settings.engine_poll_seconds
         while True:

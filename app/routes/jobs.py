@@ -175,6 +175,21 @@ def create_job(
     status_url, events_url = None, None
 
     with request.app.state.db.session() as session:
+        if payload.artist_profile_version_id is not None:
+            from ..models import ArtistProfileVersion
+
+            profile_version = session.get(ArtistProfileVersion, payload.artist_profile_version_id)
+            if profile_version is None or profile_version.owner_id != owner_id:
+                raise ApiError(404, "PROFILE_VERSION_NOT_FOUND", "Artist profile version not found.")
+            if profile_version.base_model_id != payload.model_id:
+                raise ApiError(
+                    422,
+                    "PROFILE_INCOMPATIBLE",
+                    "The profile version was trained for a different base model.",
+                    {"profile_base_model_id": profile_version.base_model_id, "model_id": payload.model_id},
+                )
+            if profile_version.state not in ("active", "candidate"):
+                raise ApiError(409, "STATE_CONFLICT", "Retired profile versions cannot be used for new jobs.")
         existing = session.execute(
             select(IdempotencyRecord).where(
                 IdempotencyRecord.owner_id == owner_id,

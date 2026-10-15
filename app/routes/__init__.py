@@ -4,6 +4,7 @@ from .models import router as models_router
 from .projects import router as projects_router
 from .uploads import router as uploads_router
 from .exports import router as exports_router
+from .artist import router as artist_router
 
 __all__ = [
     "health_router",
@@ -12,4 +13,5 @@ __all__ = [
     "projects_router",
     "uploads_router",
     "exports_router",
+    "artist_router",
 ]

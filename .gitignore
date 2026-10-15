@@ -13,6 +13,7 @@ __pycache__/
 *.mp3
 *.flac
 data/
+training-data/
 models/
 artifacts/
 node_modules/

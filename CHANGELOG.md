@@ -7,6 +7,39 @@ owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_
 
 ## [Unreleased]
 
+## [Milestone 5] - 2026-10-15
+
+Artist profiles and real LoRA fine-tuning on hardware. Branch
+`impl/milestone-1`. Record: `docs/MILESTONE_5.md`.
+
+### Added
+- Artist schema (Alembic `0004`): `artist_profiles`, `rights_records`,
+  `datasets`/`dataset_tracks`/`dataset_versions`, `artist_profile_versions`,
+  `training_runs`, `evaluations`; immutable versions with mechanism, base
+  revision, recipe, dataset version, evaluation status and activation state.
+- Artist API (`app/routes/artist.py`): owner-scoped profiles with ETag,
+  rights declarations, dataset track add + `finalize` (train/validation/holdout
+  split by recording unit + `frozen_sha256`), `trainings` with pre-queue
+  budget validation (`BUDGET_EXCEEDED`), `evaluations`, `activate` (409
+  `PROFILE_NOT_EVALUATED` until measured) and `review`.
+- Training adapter (`app/training_acestep.py`) over the upstream ACE-Step
+  training REST contract (`/v1/init`, dataset scan/preprocess, training
+  start/status/stop/export, LoRA load/unload/toggle) and an isolated training
+  worker (`app/training_worker.py`) on `oal:queue:training`/`oal:queue:evaluation`
+  with fenced leases, heartbeat, cancellation, budget guard and candidate
+  registration (recipe `acestep-lora@ca1e85f`).
+- Profile-aware generation: admission resolves the active profile version
+  (`PROFILE_INCOMPATIBLE`/`PROFILE_VERSION_NOT_FOUND`); the engine worker loads
+  the candidate LoRA per job. Compose `training-worker` service;
+  `scripts/training_cycle.py` live gate driver.
+- 10 new artist/training tests (93 total).
+
+### Evidence
+- Live custom-track cycle on an RTX PRO 4000 Blackwell: 3 generations → dataset
+  frozen → LoRA training (24.0 s) → candidate `fine_tuned_adapter` registered →
+  evaluation (6.0 s, `measured`) → activation → generation with the active
+  profile; activated version `adapter_loadable=true`, final loss 1.2937.
+
 ## [Milestone 4] - 2026-10-15
 
 Backend audio services and external frontend integration. Branch

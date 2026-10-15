@@ -172,6 +172,21 @@ class AceStepAdapter:
         # ``file`` values are /v1/audio?path=... URLs relative to the server.
         return self.transport.get_bytes(file_url)
 
+    # -- trained adapter (milestone 5) -------------------------------------------
+
+    def load_lora(self, lora_path: str, adapter_name: str | None = None) -> None:
+        payload: dict[str, Any] = {"lora_path": lora_path}
+        if adapter_name:
+            payload["adapter_name"] = adapter_name
+        response = self.transport.post_json("/v1/lora/load", payload)
+        if response.get("code") != 200:
+            raise EngineError("ENGINE_REJECTED", str(response.get("error", "lora load failed")))
+
+    def unload_lora(self) -> None:
+        response = self.transport.post_json("/v1/lora/unload", {})
+        if response.get("code") != 200:
+            raise EngineError("ENGINE_REJECTED", str(response.get("error", "lora unload failed")))
+
     @property
     def upstream_termination_supported(self) -> bool:
         # The reviewed REST contract exposes no task cancellation endpoint;
