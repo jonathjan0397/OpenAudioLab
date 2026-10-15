@@ -33,7 +33,7 @@ from .orchestration import (
     is_cancelling,
 )
 from .queue import RedisQueue, build_redis
-from .storage import LocalObjectStorage
+from .storage import Storage, build_storage
 
 SAMPLE_RATE = 44100
 FIXTURE_MAX_SECONDS = 10.0
@@ -83,7 +83,7 @@ class FixtureWorker:
         self,
         db: Db,
         queue: RedisQueue,
-        storage: LocalObjectStorage,
+        storage: Storage,
         settings: Settings,
         worker_id: str | None = None,
         queue_name: str | None = None,
@@ -176,7 +176,7 @@ def build_worker() -> FixtureWorker:
     settings = get_settings()
     db = Db(settings.database_url)
     queue = RedisQueue(build_redis(settings.redis_url))
-    storage = LocalObjectStorage(settings.storage_dir)
+    storage = build_storage(settings)
     return FixtureWorker(db, queue, storage, settings)
 
 

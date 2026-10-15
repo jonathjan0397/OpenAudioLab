@@ -12,12 +12,28 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .config import Settings
 
 
 @dataclass(frozen=True)
 class StoredObject:
     body: bytes
     content_range: str | None = None
+
+
+class Storage(Protocol):
+    """Server-generated keys only; clients never submit filesystem paths."""
+
+    def put(self, key: str, body: bytes) -> str: ...
+
+    def get(self, key: str, byte_range: tuple[int, int] | None = None) -> StoredObject: ...
+
+    def exists(self, key: str) -> bool: ...
+
+    def delete(self, key: str) -> None: ...
 
 
 class LocalObjectStorage:
@@ -79,3 +95,86 @@ def parse_range(header: str | None, size: int) -> tuple[int, int] | None:
     if start >= size:
         return (start, start)
     return (start, min(end, size - 1))
+
+
+class S3ObjectStorage:
+    """S3-compatible adapter (MinIO on the hub, or managed object storage).
+
+    The durable source of truth across hosts: ephemeral workers push results
+    here and the API proxies ranged reads, so the bucket stays private.
+    """
+
+    def __init__(self, bucket: str, endpoint_url: str | None = None, region: str = "us-east-1",
+                 access_key: str | None = None, secret_key: str | None = None, prefix: str = "") -> None:
+        import boto3
+        from botocore.config import Config
+
+        if not bucket:
+            raise ValueError("S3 storage requires a bucket name.")
+        self.bucket = bucket
+        self.prefix = prefix
+        config = Config(s3={"addressing_style": "path"}) if endpoint_url else None
+        self.client = boto3.client(
+            "s3",
+            endpoint_url=endpoint_url or None,
+            region_name=region or "us-east-1",
+            aws_access_key_id=access_key or None,
+            aws_secret_access_key=secret_key or None,
+            config=config,
+        )
+
+    def _key(self, key: str) -> str:
+        return f"{self.prefix}{key}" if self.prefix else key
+
+    def put(self, key: str, body: bytes) -> str:
+        self.client.put_object(Bucket=self.bucket, Key=self._key(key), Body=body)
+        return hashlib.sha256(body).hexdigest()
+
+    def get(self, key: str, byte_range: tuple[int, int] | None = None) -> StoredObject:
+        from botocore.exceptions import ClientError
+
+        kwargs = {"Bucket": self.bucket, "Key": self._key(key)}
+        if byte_range is not None:
+            start, end = byte_range
+            kwargs["Range"] = f"bytes={start}-{end}"
+        try:
+            response = self.client.get_object(**kwargs)
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+                raise FileNotFoundError(key) from exc
+            raise
+        body = response["Body"].read()
+        if byte_range is None:
+            return StoredObject(body=body)
+        content_range = response.get("ContentRange")
+        if content_range is None:
+            total = self.client.head_object(Bucket=self.bucket, Key=self._key(key))["ContentLength"]
+            start, end = byte_range
+            content_range = f"bytes {start}-{min(end, total - 1)}/{total}"
+        return StoredObject(body=body, content_range=content_range)
+
+    def exists(self, key: str) -> bool:
+        from botocore.exceptions import ClientError
+
+        try:
+            self.client.head_object(Bucket=self.bucket, Key=self._key(key))
+            return True
+        except ClientError:
+            return False
+
+    def delete(self, key: str) -> None:
+        self.client.delete_object(Bucket=self.bucket, Key=self._key(key))
+
+
+def build_storage(settings: "Settings") -> Storage:
+    backend = (getattr(settings, "storage_backend", "local") or "local").lower()
+    if backend == "s3":
+        return S3ObjectStorage(
+            bucket=settings.s3_bucket,
+            endpoint_url=settings.s3_endpoint_url or None,
+            region=settings.s3_region,
+            access_key=settings.s3_access_key or None,
+            secret_key=settings.s3_secret_key or None,
+            prefix=settings.s3_prefix,
+        )
+    return LocalObjectStorage(settings.storage_dir)

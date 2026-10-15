@@ -16,10 +16,10 @@ from .config import Settings, get_settings
 from .db import Db
 from .models import Asset, Job, utcnow
 from .orchestration import get_job_by_id
-from .storage import LocalObjectStorage
+from .storage import Storage, build_storage
 
 
-def expire_once(db: Db, storage: LocalObjectStorage, now=None) -> int:
+def expire_once(db: Db, storage: Storage, now=None) -> int:
     now = now or utcnow()
     expired = 0
     with db.session() as session:
@@ -47,7 +47,7 @@ def main() -> None:
 
     settings: Settings = get_settings()
     db = Db(settings.database_url)
-    storage = LocalObjectStorage(settings.storage_dir)
+    storage = build_storage(settings)
     while True:
         count = expire_once(db, storage)
         if count:

@@ -7,3 +7,4 @@ alembic==1.14.*
 psycopg2-binary==2.9.*
 redis==5.*
 httpx==0.28.*
+boto3==1.*

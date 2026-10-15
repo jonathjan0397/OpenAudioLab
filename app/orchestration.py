@@ -26,7 +26,7 @@ from .models import (
     utcnow,
 )
 from .queue import RedisQueue
-from .storage import LocalObjectStorage
+from .storage import Storage
 
 log = logging.getLogger("oal.orchestration")
 
@@ -231,7 +231,7 @@ def _finish_attempt(session: Session, attempt_id: str, lease_token: str, status:
 
 def complete_attempt(
     db: Db,
-    storage: LocalObjectStorage,
+    storage: Storage,
     settings: Settings,
     job_id: str,
     attempt_id: str,

@@ -10,6 +10,7 @@ import logging
 import socket
 import time
 import os
+from pathlib import Path
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -28,7 +29,7 @@ from .orchestration import (
     is_cancelling,
 )
 from .queue import RedisQueue, build_redis
-from .storage import LocalObjectStorage
+from .storage import Storage, build_storage
 from .worker import InvalidArtifact, validate_wav
 
 log = logging.getLogger("oal.engine_worker")
@@ -39,7 +40,7 @@ class EngineWorker:
         self,
         db: Db,
         queue: RedisQueue,
-        storage: LocalObjectStorage,
+        storage: Storage,
         adapter: AceStepAdapter,
         settings: Settings,
         worker_id: str | None = None,
@@ -63,6 +64,26 @@ class EngineWorker:
                 worker.last_heartbeat = utcnow()
             session.commit()
 
+    def _materialize_adapter(self, artifacts: dict) -> str | None:
+        """Resolve a loadable local adapter dir from durable object storage.
+
+        A profile trained on any node is portable: its PEFT files live in the
+        bucket, so we cache them under a node-local directory the co-located
+        ACE-Step server can read. Falls back to a same-host local path.
+        """
+        prefix = artifacts.get("adapter_object_prefix")
+        files = artifacts.get("adapter_files")
+        if prefix and files:
+            version_id = prefix.rstrip("/").rsplit("/", 1)[-1]
+            cache = Path(self.settings.adapter_cache_dir) / version_id
+            cache.mkdir(parents=True, exist_ok=True)
+            for name in files:
+                target = cache / name
+                if not target.is_file():
+                    target.write_bytes(self.storage.get(f"{prefix}/{name}").body)
+            return str(cache)
+        return artifacts.get("adapter_path")
+
     def _payload_for(self, job: Job) -> dict:
         request = dict(job.request_json)
         return self.adapter.build_payload(
@@ -85,17 +106,18 @@ class EngineWorker:
         with self.db.session() as session:
             job = get_job_by_id(session, claimed_job)
             payload = self._payload_for(job)
-            profile_path = None
+            profile_artifacts: dict | None = None
             profile_version_id = dict(job.request_json).get("artist_profile_version_id")
             if profile_version_id:
                 from .models import ArtistProfileVersion
 
                 version = session.get(ArtistProfileVersion, profile_version_id)
                 if version is not None:
-                    profile_path = (version.artifacts_json or {}).get("adapter_path")
+                    profile_artifacts = dict(version.artifacts_json or {})
             append_event(session, claimed_job, "stage", "running", stage="submitting", attempt_id=attempt_id)
             session.commit()
 
+        profile_path = self._materialize_adapter(profile_artifacts) if profile_artifacts else None
         if profile_path:
             try:
                 self.adapter.unload_lora()
@@ -226,7 +248,7 @@ def build_engine_worker() -> EngineWorker:
     settings = get_settings()
     db = Db(settings.database_url)
     queue = RedisQueue(build_redis(settings.redis_url))
-    storage = LocalObjectStorage(settings.storage_dir)
+    storage = build_storage(settings)
     transport = RequestsTransport(
         settings.acestep_base_url,
         api_key=settings.acestep_api_key or None,

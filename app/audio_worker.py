@@ -39,7 +39,7 @@ from .orchestration import (
 )
 from .queue import RedisQueue, build_redis
 from .separator import DemucsSeparator, NullSeparator, Separator, SeparatorUnavailable
-from .storage import LocalObjectStorage
+from .storage import Storage, build_storage
 
 log = logging.getLogger("oal.audio_worker")
 
@@ -72,7 +72,7 @@ def _extension(role: str, mime: str) -> str:
 
 def finalize_export(
     db: Db,
-    storage: LocalObjectStorage,
+    storage: Storage,
     settings: Settings,
     job_id: str,
     attempt_id: str,
@@ -146,7 +146,7 @@ class AudioWorker:
         self,
         db: Db,
         queue: RedisQueue,
-        storage: LocalObjectStorage,
+        storage: Storage,
         settings: Settings,
         separator: Separator | None = None,
         worker_id: str | None = None,
@@ -400,7 +400,7 @@ def build_audio_worker() -> AudioWorker:
     settings = get_settings()
     db = Db(settings.database_url)
     queue = RedisQueue(build_redis(settings.redis_url))
-    storage = LocalObjectStorage(settings.storage_dir)
+    storage = build_storage(settings)
     separator = (
         DemucsSeparator(
             settings.demucs_python,

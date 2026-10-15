@@ -7,6 +7,27 @@ owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_
 
 ## [Unreleased]
 
+### Remote worker deployments (ephemeral GPU nodes over WireGuard)
+- S3-compatible object storage adapter (`S3ObjectStorage` + `build_storage`
+  factory, `OAL_STORAGE_BACKEND=local|s3` + `OAL_S3_*`, `boto3`) as the durable
+  cross-host store; all six services build storage via the factory; the API
+  proxies ranged reads so the bucket stays private.
+- Worker code bundle endpoint `GET /internal/v1/worker/bundle` (tar.gz of `app/`
+  + `REVISION`, `X-OAL-Revision` header): an ephemeral node pulls its code from
+  the backend over the tunnel, so the heavy runtime image stays generic.
+- Cross-host adapter persistence: training uploads the exported PEFT files to
+  object storage (object prefix + file list in `artifacts_json`); the engine
+  worker downloads them to a node-local cache before `load_lora`, so a profile
+  trained on one node generates on another.
+- Combined worker image `stratastack/oal-worker:ca1e85f-torch2.10-cu128`
+  (`Dockerfile.worker` + `docker/worker-entrypoint.sh`) built and pushed to
+  Docker Hub; `docker-compose.worker.yml`, `.env.worker.example` and
+  `deploy/wireguard/worker-peer.conf.template` for the node.
+- Validation: the pushed image ran as a container (no shared volume), fetched
+  its bundle over HTTP, generated, pushed the WAV to S3 and the API served it
+  (200, valid RIFF, 2,304,044 bytes). 6 new tests (99 total). Record:
+  `docs/REMOTE_WORKERS.md`.
+
 ## [Milestone 5] - 2026-10-15
 
 Artist profiles and real LoRA fine-tuning on hardware. Branch

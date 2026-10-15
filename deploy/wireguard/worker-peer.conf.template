@@ -1,0 +1,18 @@
+# WireGuard peer config template for an ephemeral worker node joining the
+# existing "Simple Server Networks" mesh (hub: mercury). The node DIALS OUT to
+# the hub, so no inbound ports are needed on the NAT'd/dynamic Vast instance.
+#
+# Copy to /etc/wireguard/wg0.conf on the node, fill the keys and the assigned
+# 10.201.0.x address, then `wg-quick up wg0`. The hub must add this node as a
+# peer (AllowedIPs = its /32) before the handshake completes.
+
+[Interface]
+PrivateKey = <NODE_PRIVATE_KEY>
+Address = 10.201.0.<NODE_ID>/24
+# No ListenPort: the node initiates outbound to the hub.
+
+[Peer]
+PublicKey = <HUB_PUBLIC_KEY>
+Endpoint = 192.151.156.123:443
+AllowedIPs = 10.201.0.0/24
+PersistentKeepalive = 25

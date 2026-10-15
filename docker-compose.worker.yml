@@ -1,0 +1,49 @@
+name: oal-worker
+
+# Runs on an ephemeral GPU node (e.g. Vast.ai) that has joined the WireGuard
+# mesh. It PULLS the prebuilt combined worker image (no on-node build) and the
+# container fetches our app code from the backend over the tunnel on boot.
+#
+# The hub (backend) address is the hub's WireGuard address. Postgres, Redis and
+# MinIO are reachable only over the tunnel; the ACE-Step server is co-located
+# (localhost) inside this same container.
+#
+# Usage: OAL_HUB=10.201.0.2 docker compose -f docker-compose.worker.yml up -d
+
+services:
+  worker:
+    image: ${OAL_WORKER_IMAGE:-stratastack/oal-worker:ca1e85f-torch2.10-cu128}
+    restart: unless-stopped
+    env_file:
+      - .env.worker
+    environment:
+      OAL_BACKEND_URL: http://${OAL_HUB:-10.201.0.2}:50555
+      OAL_DATABASE_URL: postgresql+psycopg2://oal:${OAL_POSTGRES_PASSWORD}@${OAL_HUB:-10.201.0.2}:5432/oal
+      OAL_REDIS_URL: redis://${OAL_HUB:-10.201.0.2}:6379/0
+      OAL_STORAGE_BACKEND: s3
+      OAL_S3_ENDPOINT_URL: http://${OAL_HUB:-10.201.0.2}:9000
+      OAL_S3_BUCKET: ${OAL_S3_BUCKET:-oal}
+      OAL_S3_REGION: ${OAL_S3_REGION:-us-east-1}
+      OAL_S3_ACCESS_KEY: ${OAL_OBJECT_ACCESS_KEY}
+      OAL_S3_SECRET_KEY: ${OAL_OBJECT_SECRET_KEY}
+      OAL_ACESTEP_BASE_URL: http://127.0.0.1:8001
+      OAL_ACESTEP_API_KEY: ${OAL_ACESTEP_API_KEY:-}
+      OAL_WORKER_ROLE: ${OAL_WORKER_ROLE:-engine_worker,training_worker}
+      OAL_TRAIN_WORKDIR: /srv/openaudiolab/training-data
+      OAL_ADAPTER_CACHE_DIR: /srv/openaudiolab/adapter-cache
+    volumes:
+      - acestep-checkpoints:/opt/acestep/checkpoints
+      - training-data:/srv/openaudiolab/training-data
+      - adapter-cache:/srv/openaudiolab/adapter-cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+
+volumes:
+  acestep-checkpoints:
+  training-data:
+  adapter-cache:

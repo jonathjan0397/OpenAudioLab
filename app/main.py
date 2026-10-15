@@ -16,12 +16,13 @@ from .routes import (
     artist_router,
     exports_router,
     health_router,
+    internal_router,
     jobs_router,
     models_router,
     projects_router,
     uploads_router,
 )
-from .storage import LocalObjectStorage
+from .storage import build_storage
 
 API_V1_PREFIX = "/api/v1"
 
@@ -72,7 +73,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.db = Db(settings.database_url)
-    app.state.storage = LocalObjectStorage(settings.storage_dir)
+    app.state.storage = build_storage(settings)
 
     app.add_middleware(BodyLimitMiddleware, max_body_bytes=settings.max_body_bytes, max_upload_bytes=settings.max_upload_bytes)
     app.add_middleware(RequestIdMiddleware)
@@ -93,6 +94,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(uploads_router, prefix=API_V1_PREFIX)
     app.include_router(exports_router, prefix=API_V1_PREFIX)
     app.include_router(artist_router, prefix=API_V1_PREFIX)
+    app.include_router(internal_router, prefix="/internal/v1")
     # Root aliases for container/compose healthchecks.
     app.include_router(health_router, include_in_schema=False)
     return app

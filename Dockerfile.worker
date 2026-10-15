@@ -1,0 +1,47 @@
+# Combined OpenAudioLab worker image: the pinned ACE-Step 1.5 runtime (private
+# server on 8001) plus our worker dependencies, in one image. Our application
+# code is NOT baked — the entrypoint fetches it from the backend over the
+# WireGuard tunnel, so code iteration never rebuilds this heavy runtime image.
+#
+# Build once, publish to Docker Hub, and ephemeral GPU nodes just `docker pull`.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir uv
+
+# --- ACE-Step 1.5 runtime (pinned upstream commit; torch via uv.lock) --------
+ARG ACESTEP_REF=ca1e85f
+WORKDIR /opt/acestep
+RUN git clone https://github.com/ace-step/ACE-Step-1.5.git . \
+    && git checkout "$ACESTEP_REF" \
+    && uv sync --frozen
+
+# --- Our worker dependencies (system python, separate from ACE-Step's venv) --
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# --- Bootstrap (app code arrives at runtime from the backend bundle) ---------
+COPY docker/worker-entrypoint.sh /usr/local/bin/worker-entrypoint.sh
+RUN chmod +x /usr/local/bin/worker-entrypoint.sh
+
+ENV ACESTEP_API_HOST=0.0.0.0 \
+    ACESTEP_API_PORT=8001 \
+    ACESTEP_INIT_LLM=false \
+    ACESTEP_DEVICE=cuda:0 \
+    OAL_BACKEND_URL=http://10.0.0.1:50555 \
+    OAL_WORKER_ROLE=engine_worker \
+    OAL_APP_DIR=/srv/openaudiolab/code
+
+WORKDIR /srv/openaudiolab
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=5 \
+    CMD curl -fsS http://127.0.0.1:8001/health || exit 1
+
+ENTRYPOINT ["/usr/local/bin/worker-entrypoint.sh"]

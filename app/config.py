@@ -68,6 +68,17 @@ class Settings(BaseSettings):
     train_workdir: str = "./training-data"
     train_recipe_revision: str = "acestep-lora@ca1e85f"
 
+    # Remote workers / object storage (durable across hosts)
+    storage_backend: str = "local"
+    s3_endpoint_url: str = ""
+    s3_bucket: str = ""
+    s3_region: str = "us-east-1"
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_prefix: str = ""
+    adapter_cache_dir: str = "./adapter-cache"
+    build_revision: str = "dev"
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:

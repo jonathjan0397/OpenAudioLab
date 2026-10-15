@@ -43,7 +43,7 @@ from .orchestration import (
     is_cancelling,
 )
 from .queue import RedisQueue, build_redis
-from .storage import LocalObjectStorage
+from .storage import Storage, build_storage
 from .training_acestep import AceStepTrainingAdapter
 from .worker import InvalidArtifact, validate_wav
 
@@ -55,7 +55,7 @@ class TrainingWorker:
         self,
         db: Db,
         queue: RedisQueue,
-        storage: LocalObjectStorage,
+        storage: Storage,
         settings: Settings,
         adapter: AceStepTrainingAdapter,
         gen_adapter: AceStepAdapter,
@@ -202,6 +202,14 @@ class TrainingWorker:
         except EngineError:
             pass
 
+        # Persist the exported adapter to durable object storage so an
+        # ephemeral node can lose its local copy and any node can load it.
+        version_id = new_uuid()
+        adapter_prefix = f"owners/{job.owner_id}/adapters/{version_id}"
+        adapter_files = sorted(p.name for p in Path(adapter_path).iterdir() if p.is_file())
+        for name in adapter_files:
+            self.storage.put(f"{adapter_prefix}/{name}", (Path(adapter_path) / name).read_bytes())
+
         history = status.get("loss_history") or []
         metrics = {
             "steps": status.get("current_step", 0),
@@ -215,7 +223,7 @@ class TrainingWorker:
         release = MODEL_RELEASES.get(base_model_id)
         with self.db.session() as session:
             version = ArtistProfileVersion(
-                id=new_uuid(),
+                id=version_id,
                 profile_id=request["profile_id"],
                 owner_id=job.owner_id,
                 mechanism="fine_tuned_adapter",
@@ -225,7 +233,8 @@ class TrainingWorker:
                 dataset_version_id=dataset_version_id,
                 artifacts_json={"adapter_path": adapter_path, "tensor_dir": str(workdir / "tensors"),
                                 "dataset_dir": str(dataset_dir), "hardware": socket.gethostname(),
-                                "adapter_loadable": loadable},
+                                "adapter_loadable": loadable, "adapter_object_prefix": adapter_prefix,
+                                "adapter_files": adapter_files},
                 evaluation_status="none",
                 state="candidate",
             )
@@ -361,7 +370,7 @@ def build_training_worker() -> TrainingWorker:
     settings = get_settings()
     db = Db(settings.database_url)
     queue = RedisQueue(build_redis(settings.redis_url))
-    storage = LocalObjectStorage(settings.storage_dir)
+    storage = build_storage(settings)
     transport = RequestsTransport(
         settings.acestep_base_url,
         api_key=settings.acestep_api_key or None,

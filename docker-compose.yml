@@ -37,7 +37,7 @@ services:
   # until milestone 2 (artifact upload/finalization). quay.io anonymous pulls
   # can hit rate limits; use `docker login quay.io` or a mirror if pull fails.
   object-storage:
-    image: quay.io/minio/minio:latest
+    image: docker.io/minio/minio:latest
     profiles: ["storage"]
     command: server /data --address ":9000" --console-address ":9001"
     environment:
