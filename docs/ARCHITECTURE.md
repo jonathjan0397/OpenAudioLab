@@ -58,3 +58,18 @@ Validate actual audio content and decodability, duration, channel count, byte li
 Private bucket/key paths are server-generated; clients cannot submit filesystem paths or arbitrary provider URLs. Publish artifact metadata only after finalized upload. Use authenticated delivery or short-lived signed URLs and support HTTP Range playback. Avoid forwarding authorization to redirected, untrusted download origins. Default generated asset retention is seven days; bounded user overrides are role/policy controlled. Object deletion is idempotent and auditable.
 
 Expose liveness, dependency readiness, worker availability, queue depth/age, GPU allocation, failure rates and inference latency. Use request/job/attempt IDs for correlation. Redact lyrics, tokens and signed URLs from routine logs. Production startup fails on unsafe secrets or invalid auth configuration. Bound request/upload sizes and per-user job concurrency. No live service is being deployed in this planning task.
+
+
+## Capability specification v0.2 additions
+
+`SERVICE_CATALOG.md`, `OUTPUT_SPEC.md` and `ARTIST_TRAINING.md` define the expanded service scope. This repository implements no frontend. Frontend integration gates mean API/client contract tests and documented coordination with the separate website, not building a website here.
+
+Add separate worker queues/capabilities for generation, processing/rendering, separation/export, dataset preparation, fine-tuning and evaluation. Training jobs share the durable job/attempt/lease/event infrastructure but use separate GPU allocation and cost limits. Never allocate the same reserved devices concurrently across training and inference. Inference admissions and training admissions enforce distinct capacity policies.
+
+Add database models for projects and immutable version graphs, artist profiles/versions, datasets/versions, training runs, evaluations, rights records, processing/session manifests, and transactional usage reservations/settlements. Resource authorization extends to every referenced input, not just the parent job. Public job success describes completed execution; training success does not mean evaluation passed or a candidate was activated.
+
+Generation freezes model and profile versions. Dataset preparation freezes original asset references/checksums and produces an immutable prepared version; training freezes that dataset and base/recipe revisions. Candidate activation is a separate owner-authorized state change, with rollback. Profiles may carry separate musical-style and singer-identity components, applied only with supported compatible adapters.
+
+Full mixes export as WAV and MP3. Native or separated stems export as aligned WAV and optionally ZIP. Preserve native originals and label processing. Store waveform peaks and analysis results for the frontend; do not render frontend controls. Store validated session/edit graphs and execute offline renders; responsive live playback stays in the frontend.
+
+Retention is class-based: generated outputs retain the existing seven-day default unless deployment policy changes; active profile artifacts and required manifests remain while active; source training data follows explicit owner retention, not automatic output expiry; temporary preparation segments/checkpoints have bounded cleanup. Deletion revokes access first, then removes objects/caches under recorded policy. Saved song permanence has not been confirmed and is not implied by project metadata persistence.

@@ -12,9 +12,14 @@ Read all planning documents and `CODING_AGENT_HANDOFF.md` before implementation.
 6. Use real stage progress when available; otherwise return an indeterminate stage. Do not invent completion percentages.
 7. Test tones are development fixtures, clearly marked `synthetic_test_audio`, never music-generation success.
 8. Model revisions, license evidence, capabilities, and worker requirements are explicit. Unknown licenses fail closed for commercial dispatch.
-9. Private artifacts expire after seven days by default. Download links expire sooner and cannot outlive artifact retention.
+9. Generated output artifacts expire after seven days by default under the deployment policy. Active artist-profile artifacts and explicitly retained training datasets have separate retention; never apply output cleanup to them. Download links cannot outlive the relevant asset.
 10. No credentials, model weights, generated music, production database dumps, or customer lyrics in Git.
 11. No cloud spending or production deployment without configured authorization and limits.
 12. Append implementation decisions and validation evidence to `DEVELOPMENT_LOG.md`; keep OpenAPI and frontend examples aligned.
 
-Deliver implementation in reviewed milestones and a feature branch. Do not merge or deploy automatically. Routine local development and tests do not require repeated permission. Ask only when missing deployment facts block the next milestone.
+13. Backend services only: no frontend application, website, player, dashboard, timeline/mixer UI, lyric chatbot or checkout UI. API schemas and examples are in scope.
+14. Required exports are WAV and MP3 mixes and aligned WAV stems; follow `docs/OUTPUT_SPEC.md`.
+15. Reference conditioning and style analysis are not fine-tuning. Actual custom-track training requires a verified recipe, budget, evaluation and compatible versioned artifacts.
+16. Read `docs/SERVICE_CATALOG.md`, `docs/ARTIST_TRAINING.md` and `docs/OUTPUT_SPEC.md` as mandatory scope documents.
+
+This baseline is capability planning. Begin runtime implementation only when assigned the coding-agent implementation phase. Deliver implementation in reviewed milestones and a feature branch. Do not merge or deploy automatically. Routine local development and tests do not require repeated permission. Ask only when missing deployment facts block the next milestone.

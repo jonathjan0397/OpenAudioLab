@@ -46,3 +46,12 @@ Each release records: internal ID, upstream repo, exact commit/checkpoint checks
 Adapters implement capability discovery, health/readiness, request validation, deterministic input mapping, generate/submit, progress when available, cancellation semantics, safe error mapping and artifact validation. Registry capabilities are intersected with healthy worker capabilities before accepting jobs. Keep the original lyrics immutable even if an engine internally fails to sing them exactly; do not promise exact sung transcription from pass-through alone.
 
 Never assume all models have the same HTTP API. Prefer official SDK/CLI interfaces behind isolated worker bridges. Do not call an invented endpoint for ACE-Step or treat a locally proposed bridge contract as upstream documentation. Measure cold/warm latency and peak VRAM before setting queue capacity. No automatic model download on public job requests. Do not bundle weights in public images or commit them here.
+
+
+## Training and expanded capability gate
+
+Generation compatibility does not establish trainability. None of the candidates is declared training-ready by this plan. Verify upstream training code, base/codec/dependency licenses, derivative-weight use/distribution terms, supported adapter type, recipes, dataset requirements, measured training memory, inference loading and evaluation before enabling a fine-tuning recipe.
+
+Registry capabilities separately report `reference_conditioning`, `style_analysis`, `fine_tuning`, `singer_adaptation`, `style_adaptation`, `extension`, `section_replacement`, `remix`, `native_stems` and compatible external separation/export services. Each includes implementation status and tested constraints. Do not mark all true from a generic model-family description. Commercial fine-tuning and serving of trained derivatives require their own evidence; permissive runtime code alone is insufficient.
+
+The actual training engine is a feasibility decision for the implementation phase. If ACE-Step or MiniMax generation works but no verified training recipe is available, the backend must report training unavailable and preserve the unmet requirement. It must not present an extracted style vector, stored prompt, or reference clip as a fine-tuned artist model.

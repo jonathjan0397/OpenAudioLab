@@ -31,6 +31,7 @@ Require an `Idempotency-Key` header (opaque bounded length; scope to owner and r
 
 ```json
 {
+  "operation": "music.generate",
   "model_id": "ace-step-1.5",
   "music_description": "Acoustic country, warm baritone, fingerpicked guitar, restrained first verse, expansive final chorus.",
   "lyrics": "[Verse]\nMorning settles on the pine\n\n[Chorus]\nWe find our way in time\n",
@@ -39,6 +40,8 @@ Require an `Idempotency-Key` header (opaque bounded length; scope to owner and r
   "duration_seconds": 120,
   "seed": 7,
   "controls": {},
+  "outputs": ["mix_wav", "mix_mp3"],
+  "artist_profile_version_id": null,
   "client_reference": "optional-external-draft-id"
 }
 ```
@@ -83,3 +86,63 @@ Download URLs include server-calculated expiry no later than artifact expiry and
 3. On 202, retain job ID and switch to progress view; poll or fetch-stream events.
 4. On success, request authorized preview/download URLs. Expired URLs can be refreshed while assets remain retained.
 5. Cancellation/retry use documented endpoints. The frontend's LLM service can be unavailable without preventing submission of already-written lyrics or instrumental jobs.
+
+
+## Expanded backend service routes (capability specification)
+
+All paths below share `/api/v1`. All resource operations are authenticated and owner/ACL scoped. UUIDs are opaque. Metadata routes are synchronous; preparation, training, processing and rendering return 202 with common `/jobs/{job_id}` status/events URLs. Use operation-discriminated request schemas rather than one permissive bag of fields. Missing optional fields use documented defaults; unknown fields fail validation.
+
+| Method | Path | Behavior |
+| --- | --- | --- |
+| POST / GET | `/projects` | Create/list owned projects |
+| GET / PATCH / DELETE | `/projects/{id}` | Read/update/tombstone project; ETag for edits |
+| POST / GET | `/projects/{id}/versions` | Create immutable version manifest/list versions |
+| GET | `/projects/{id}/versions/{version_id}` | Read owned version and lineage |
+| POST | `/projects/{id}/restore` | Point active version to existing immutable version with concurrency guard |
+| POST | `/assets/uploads` | Allocate constrained private upload session |
+| POST | `/assets/uploads/{upload_id}/complete` | Validate/finalize or queue probe; ownership checked |
+| GET / DELETE | `/assets/{id}` | Metadata/revoke and schedule policy-aware deletion |
+| POST | `/exports` | Queue explicit WAV/MP3/WAV-stem/ZIP export |
+| POST / GET | `/artist-profiles` | Create/list private artist profiles |
+| GET / PATCH / DELETE | `/artist-profiles/{id}` | Read/update/revoke and queue deletion |
+| POST / GET | `/artist-profiles/{id}/versions` | Add reference/style configuration candidate/list immutable versions |
+| GET | `/artist-profiles/{id}/versions/{version_id}` | Candidate mechanism, compatibility, evaluation and provenance |
+| POST | `/artist-profiles/{id}/activate` | Activate evaluated compatible version; optimistic concurrency |
+| POST / GET | `/datasets` | Create/list owned training datasets |
+| GET / PATCH / DELETE | `/datasets/{id}` | Metadata, draft edits and policy-aware deletion |
+| POST / DELETE | `/datasets/{id}/assets/{asset_id}` | Attach/detach authorized asset while draft |
+| POST / GET | `/datasets/{id}/versions` | Freeze/list immutable source dataset snapshots |
+| GET | `/datasets/{id}/versions/{version_id}` | Source/prepared manifest and reports |
+| POST | `/datasets/{id}/prepare` | Queue preparation of a frozen source version |
+| GET | `/training-recipes` | Verified base/recipe compatibility, requirements, controls and limits |
+| POST | `/training-jobs` | Validate budget/compatibility and queue actual fine-tuning |
+| POST | `/artist-profiles/{id}/evaluations` | Queue candidate evaluation with fixed prompts/holdout |
+| POST | `/jobs/{job_id}/resume` | Resume supported interrupted training from a valid checkpoint; otherwise reject |
+| GET | `/usage` | Own allowances, reservations and usage records |
+
+Training/evaluation records use common job reads/events/cancellation. Profiles expose evaluation records/artifacts through their version metadata. Manual reference/style versions are explicitly evaluated for their own mechanism; they cannot masquerade as fine-tuned versions. Resume is not a generic retry: validate checkpoint compatibility, dataset/base/recipe hashes and budget. Training retries are explicit, bounded and disabled automatically by default.
+
+Existing `/jobs` admits discriminated operations including `music.generate`, `music.variation`, `music.extend`, `music.replace_section`, `music.remix`, `audio.separate`, `audio.analyze`, `audio.process` and `audio.render` as adapters become available. Specialized `/exports`, `/training-jobs`, dataset preparation and evaluation endpoints are canonical creation routes for those operations; they all return the common job envelope. Do not create duplicate jobs if a frontend retries a creation request.
+
+Generation adds `operation=music.generate`, optional exact `artist_profile_version_id`, and `outputs`. `outputs` includes `mix_wav`, `mix_mp3`, `stems_wav`, `stems_zip`; export options follow OUTPUT_SPEC.md. Profile ID aliases may be supported only if resolved/frozen at admission; explicit version IDs are preferred. Backend checks ownership and base-model compatibility before dispatch.
+
+Edit requests identify owned source version, sample/time range and supplied final lyrics when relevant. Freeze sample rate/time interpretation and source checksum; reject out-of-range spans. Processing/render requests use safe versioned DSP/session schemas; they cannot carry shell commands, arbitrary plugin code or filesystem paths. Frontend conversational commands must map into these validated operations.
+
+Training request example:
+
+```json
+{
+  "artist_profile_id": "<owned-profile-uuid>",
+  "prepared_dataset_version_id": "<frozen-prepared-dataset-uuid>",
+  "base_model_release_id": "<approved-release-id>",
+  "training_recipe_id": "<verified-recipe-revision>",
+  "components": ["musical_style"],
+  "parameters": {},
+  "budget": {"max_gpu_seconds": 3600, "max_wall_seconds": 7200},
+  "seed": 7
+}
+```
+
+Numbers above illustrate request shape, not expected training cost or recommended model settings. Server limits cap any client request. Recipe discovery specifies valid parameters/components, measured hardware support, minimum dataset requirements, checkpoint/resume behavior and evaluation support. Add specific errors for unsupported capability, incompatible profile/base, invalid dataset, rights record required, insufficient allowance, training recipe unavailable and deleted resource. Never return secret model paths or raw provider failure text.
+
+Future backend-only extensions include revocable collaboration grants/comments, signed webhook subscriptions/delivery history, MIDI jobs and advanced session automation. They are not a bundled frontend or a commitment that the first selected engine implements them.
