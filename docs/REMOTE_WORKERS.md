@@ -142,5 +142,22 @@ Validation (2026-10-15): the dev host joined as a client (`10.203.0.2`),
 handshook and pinged the hub (~42 ms); the containerized backend came up on the
 home server and `GET /api/v1/health/live` and `/api/v1/health/ready` both
 returned **200 over the tunnel** from the dev host (API + Postgres + Redis
-reachable from a remote node). Remaining: run a full generation with a worker
-node over the tunnel.
+reachable from a remote node).
+
+
+## End-to-end validation (home-server hub, 2026-10-15)
+
+A worker on the dev host (engine worker + the co-located ACE-Step server)
+consumed a job from the home-server backend over the tunnel and completed a real
+generation:
+
+| Step | Result |
+| --- | --- |
+| Submit `POST /jobs` over the tunnel | 202 queued |
+| Worker consumes from hub Redis (`10.203.0.1`) | job picked up |
+| Generation via co-located ACE-Step | status **succeeded** |
+| Artifact push-back to hub S3 | `owners/<owner>/jobs/<job>/<attempt>/mix_wav.wav` |
+| API delivery over the tunnel | 200, 2,304,044 bytes, valid RIFF |
+
+This confirms the full remote-worker flow against the containerized home-server
+backend over the WireGuard overlay.
