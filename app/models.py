@@ -211,6 +211,7 @@ class ArtistProfile(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     owner_id: Mapped[str] = mapped_column(String(80), index=True)
     name: Mapped[str] = mapped_column(String(200))
+    slug: Mapped[str | None] = mapped_column(String(220), nullable=True, unique=True)
     style_json: Mapped[dict] = mapped_column(JSON, default=dict)
     singer_json: Mapped[dict] = mapped_column(JSON, default=dict)
     sharing_policy: Mapped[str] = mapped_column(String(20), default="private")

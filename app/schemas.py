@@ -244,11 +244,13 @@ class ArtistProfilePatch(StrictModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     style: dict[str, Any] | None = None
     singer: dict[str, Any] | None = None
+    sharing: str | None = Field(default=None, pattern=r"^(private|public)$")
 
 
 class ArtistProfileResponse(BaseModel):
     profile_id: str
     name: str
+    slug: str | None = None
     style: dict[str, Any]
     singer: dict[str, Any]
     sharing_policy: str

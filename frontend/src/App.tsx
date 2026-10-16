@@ -6,6 +6,7 @@ import AuthMenu from "./components/AuthMenu";
 import MainPage from "./pages/Main";
 import StudioPage from "./pages/Studio";
 import AdminPage from "./pages/Admin";
+import ArtistPage from "./pages/Artist";
 
 const TEMPLATES = ["open-canvas", "analog-soul", "neon-studio", "signal-lab"];
 
@@ -53,6 +54,8 @@ export default function App() {
         <Route path="/" element={<MainPage />} />
         <Route path="/studio" element={<StudioPage />} />
         <Route path="/admin" element={<AdminPage />} />
+        <Route path="/artists" element={<ArtistPage />} />
+        <Route path="/artists/:slug" element={<ArtistPage />} />
       </Routes>
     </>
   );

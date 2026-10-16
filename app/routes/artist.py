@@ -11,7 +11,7 @@ import hashlib
 import json
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 
@@ -63,6 +63,7 @@ def _profile_response(profile: ArtistProfile) -> ArtistProfileResponse:
     return ArtistProfileResponse(
         profile_id=profile.id,
         name=profile.name,
+        slug=profile.slug,
         style=profile.style_json,
         singer=profile.singer_json,
         sharing_policy=profile.sharing_policy,
@@ -71,6 +72,20 @@ def _profile_response(profile: ArtistProfile) -> ArtistProfileResponse:
         created_at=profile.created_at,
         updated_at=profile.updated_at,
     )
+
+
+def _unique_slug(session, name: str) -> str:
+    import re
+
+    from sqlalchemy import select as _select
+
+    base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:200] or "artist"
+    slug = base
+    counter = 2
+    while session.execute(_select(ArtistProfile).where(ArtistProfile.slug == slug)).scalar_one_or_none() is not None:
+        slug = f"{base}-{counter}"
+        counter += 1
+    return slug
 
 
 def _get_owned_profile(session, profile_id: str, owner_id: str) -> ArtistProfile:
@@ -180,7 +195,8 @@ def _create_job(session, request: Request, owner_id: str, route: str, operation:
 def create_profile(payload: ArtistProfileCreate, request: Request, owner_id: str = Depends(owner_from_request)) -> JSONResponse:
     with request.app.state.db.session() as session:
         profile = ArtistProfile(id=new_uuid(), owner_id=owner_id, name=payload.name,
-                                style_json=payload.style, singer_json=payload.singer)
+                                style_json=payload.style, singer_json=payload.singer,
+                                slug=_unique_slug(session, payload.name))
         session.add(profile)
         session.commit()
         body = _profile_response(profile)
@@ -217,6 +233,8 @@ def patch_profile(profile_id: str, payload: ArtistProfilePatch, request: Request
             profile.style_json = payload.style
         if payload.singer is not None:
             profile.singer_json = payload.singer
+        if payload.sharing is not None:
+            profile.sharing_policy = payload.sharing
         profile.etag_version += 1
         session.commit()
         body = _profile_response(profile)
@@ -513,3 +531,74 @@ def review_evaluation(evaluation_id: str, payload: ReviewRequest, request: Reque
         evaluation.review = payload.review
         session.commit()
     return JSONResponse(content={"evaluation_id": evaluation.id, "review": evaluation.review})
+
+
+# --- public discovery (no auth) ---------------------------------------------
+
+
+@router.get("/public/artists")
+def public_artists(request: Request, limit: int = Query(default=50, ge=1, le=200)) -> JSONResponse:
+    with request.app.state.db.session() as session:
+        rows = list(
+            session.execute(
+                select(ArtistProfile)
+                .where(
+                    ArtistProfile.sharing_policy == "public",
+                    ArtistProfile.deleted_at.is_(None),
+                )
+                .order_by(ArtistProfile.created_at.desc())
+                .limit(limit)
+            ).scalars()
+        )
+    return JSONResponse(
+        [
+            {"profile_id": p.id, "name": p.name, "slug": p.slug}
+            for p in rows
+            if p.slug
+        ]
+    )
+
+
+@router.get("/public/artists/{slug}")
+def public_artist(slug: str, request: Request) -> JSONResponse:
+    from ..models import Asset
+    from ..tokens import make_token
+
+    settings = request.app.state.settings
+    with request.app.state.db.session() as session:
+        profile = session.execute(
+            select(ArtistProfile).where(
+                ArtistProfile.slug == slug, ArtistProfile.deleted_at.is_(None)
+            )
+        ).scalar_one_or_none()
+        if profile is None or profile.sharing_policy != "public":
+            raise ApiError(404, "ARTIST_NOT_FOUND", "Public artist profile not found.")
+        tracks = list(
+            session.execute(
+                select(Asset)
+                .where(
+                    Asset.owner_id == profile.owner_id,
+                    Asset.shared.is_(True),
+                    Asset.deleted_at.is_(None),
+                    Asset.mime.like("audio/%"),
+                )
+                .order_by(Asset.created_at.desc())
+                .limit(20)
+            ).scalars()
+        )
+    from datetime import timedelta
+
+    from ..models import utcnow
+
+    expiry = utcnow() + timedelta(hours=24)
+    items = [
+        {
+            "asset_id": a.id,
+            "title": a.title,
+            "url": f"/api/v1/artifacts/{a.id}/content?token={make_token(settings.secret_key, a.id, expiry)}",
+        }
+        for a in tracks
+    ]
+    return JSONResponse(
+        {"profile_id": profile.id, "name": profile.name, "slug": profile.slug, "tracks": items}
+    )

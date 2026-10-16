@@ -23,6 +23,7 @@ from .routes import (
     lab_router,
     models_router,
     projects_router,
+    seo_router,
     uploads_router,
 )
 from .storage import build_storage
@@ -99,6 +100,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(artist_router, prefix=API_V1_PREFIX)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     app.include_router(admin_router, prefix=API_V1_PREFIX)
+    app.include_router(seo_router)
     app.include_router(internal_router, prefix="/internal/v1")
     # /lab stopgap test harness (self-prefixed routes, HTTP Basic guarded).
     app.include_router(lab_router)
@@ -113,7 +115,7 @@ def _mount_web(app) -> None:
     """Serve the built React shell (SPA fallback) when the bundle is present."""
     from pathlib import Path
 
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, Response
     from fastapi.staticfiles import StaticFiles
 
     web_dir = Path(app.state.settings.web_dir)
@@ -128,7 +130,54 @@ def _mount_web(app) -> None:
         candidate = (web_dir / full_path).resolve()
         if full_path and candidate.is_file() and candidate.is_relative_to(web_dir.resolve()):
             return FileResponse(candidate)
-        return FileResponse(web_dir / "index.html")
+        meta = _route_meta(app, full_path)
+        if meta is None:
+            return FileResponse(web_dir / "index.html")
+        html = (web_dir / "index.html").read_text(encoding="utf-8")
+        injected = (
+            f"<title>{meta['title']}</title>"
+            f"<meta property=\"og:title\" content=\"{meta['title']}\">"
+            f"<meta property=\"og:description\" content=\"{meta['description']}\">"
+            + (f"<meta property=\"og:audio\" content=\"{meta['audio']}\">" if meta.get("audio") else "")
+        )
+        html = html.replace("<title>OpenAudioLab</title>", injected, 1)
+        return Response(content=html, media_type="text/html")
+
+
+def _route_meta(app, full_path: str) -> dict | None:
+    """SSR-lite meta for crawlable routes (/artists/<slug>, /tracks/<id>)."""
+    from sqlalchemy import select
+
+    from .models import ArtistProfile, Asset, utcnow
+    from .tokens import make_token
+
+    parts = full_path.strip("/").split("/")
+    try:
+        with app.state.db.session() as session:
+            if len(parts) == 2 and parts[0] == "artists" and parts[1] != "slug":
+                profile = session.execute(
+                    select(ArtistProfile).where(
+                        ArtistProfile.slug == parts[1], ArtistProfile.deleted_at.is_(None)
+                    )
+                ).scalar_one_or_none()
+                if profile is not None and profile.sharing_policy == "public":
+                    return {"title": f"{profile.name} - OpenAudioLab", "description": f"{profile.name} on OpenAudioLab."}
+            if len(parts) == 2 and parts[0] == "tracks":
+                asset = session.execute(select(Asset).where(Asset.id == parts[1])).scalar_one_or_none()
+                if asset is not None and asset.shared:
+                    from datetime import timedelta
+
+                    expiry = utcnow() + timedelta(hours=24)
+                    token = make_token(app.state.settings.secret_key, asset.id, expiry)
+                    title = asset.title or "Track"
+                    return {
+                        "title": f"{title} - OpenAudioLab",
+                        "description": f"{title} - made with OpenAudioLab.",
+                        "audio": f"/api/v1/artifacts/{asset.id}/content?token={token}",
+                    }
+    except Exception:
+        return None
+    return None
 
 
 def _bootstrap_site(app) -> None:
