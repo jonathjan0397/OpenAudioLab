@@ -6,7 +6,7 @@ import CreateWidget from "../components/CreateWidget";
 import ArtworkTile from "../components/ArtworkTile";
 import Waveform from "../components/Waveform";
 import { usePlayer } from "../components/PlayerContext";
-import { Progress, StatusPill, fmtTime } from "../components/ui";
+import { Donut, Progress, StatusPill, fmtTime } from "../components/ui";
 
 interface Track {
   asset_id: string;
@@ -135,10 +135,11 @@ export default function StudioPage() {
             <div style={{ flex: 1 }}>
               <div className="label">Credits Remaining</div>
               <div className="value">{balance.toLocaleString()}</div>
-              <div style={{ marginTop: 6 }}>
-                <Progress value={balance / 5000} />
-              </div>
+              <div className="sub">of 5,000</div>
             </div>
+            <span className="chart">
+              <Donut value={balance / 5000} size={58} label={`${Math.round((balance / 5000) * 100)}%`} />
+            </span>
           </div>
           <div className="card stat-card">
             <span className="icon">⇍</span>
@@ -222,6 +223,7 @@ export default function StudioPage() {
                     />
                   </div>
                   <div className="actions">
+                    <StatusPill status={t.expired ? "failed" : "completed"} label={t.expired ? "expired" : "ready"} />
                     <button className={`heart${t.favorite ? " on" : ""}`} onClick={() => toggle.mutate(t.asset_id)}>
                       {t.favorite ? "♥" : "♡"}
                     </button>
@@ -229,6 +231,8 @@ export default function StudioPage() {
                       {t.shared ? "Shared" : "Share"}
                     </button>
                     <a className="btn" href={t.url} download>WAV</a>
+                    <button className="btn" disabled title="Coming soon">MP3</button>
+                    <button className="btn" disabled title="Coming soon">Stems</button>
                   </div>
                 </div>
               ))}

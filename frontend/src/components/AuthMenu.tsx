@@ -35,18 +35,18 @@ export default function AuthMenu() {
 
   if (me.data?.user) {
     return (
-      <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
-        <span style={{ color: "var(--muted)" }}>
-          {me.data.user.username} · {me.data.user.credits_balance} cr
+      <span className="auth-user">
+        <span className="avatar">{me.data.user.username.slice(0, 2).toUpperCase()}</span>
+        <span className="auth-name">
+          {me.data.user.username}
+          <span className="auth-credits">{me.data.user.credits_balance.toLocaleString()} cr</span>
         </span>
-        <button className="primary" onClick={() => logout.mutate()}>
-          Sign Out
-        </button>
+        <button className="btn btn-ghost btn-sm" onClick={() => logout.mutate()}>Sign Out</button>
       </span>
     );
   }
   if (!mode) {
-    return <button className="primary" onClick={() => setMode("login")}>Sign In</button>;
+    return <button className="btn btn-ghost" onClick={() => setMode("login")}>Sign In</button>;
   }
   return (
     <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
@@ -61,10 +61,10 @@ export default function AuthMenu() {
         value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
-      <button className="primary" onClick={() => submit.mutate()} disabled={submit.isPending}>
+      <button className="btn btn-primary" onClick={() => submit.mutate()} disabled={submit.isPending}>
         {submit.isPending ? "..." : mode === "register" ? "Join" : "Go"}
       </button>
-      <button onClick={() => setMode(mode === "login" ? "register" : "login")}>
+      <button className="btn" onClick={() => setMode(mode === "login" ? "register" : "login")}>
         {mode === "login" ? "Join" : "Sign In"}
       </button>
       {error && <span style={{ color: "crimson", fontSize: 12 }}>{error}</span>}

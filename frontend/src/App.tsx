@@ -45,12 +45,15 @@ export default function App() {
           <span aria-hidden>⌕</span>
           <input placeholder="Search tracks, artists, prompts…" />
         </span>
+        <span className="spacer" />
         <span className="bell" title="Notifications">
           🔔<span className="dot" />
         </span>
         <AuthMenu />
+        <NavLink to="/studio" className="btn btn-primary btn-sm open-studio">Open Studio →</NavLink>
         <select
-          style={{ width: 150 }}
+          className="theme-select"
+          style={{ width: 130 }}
           value={theme}
           onChange={(e) => {
             window.localStorage.setItem("oal-theme-preview", e.target.value);

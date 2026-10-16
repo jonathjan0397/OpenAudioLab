@@ -459,3 +459,12 @@ img.avatar { padding: 0; }
   .sig-grid { grid-template-columns: 1fr; }
   .sig-grid > * { grid-column: 1 !important; grid-row: auto !important; }
 }
+
+/* header polish */
+.btn-sm { padding: 6px 12px; font-size: 13px; }
+.auth-user { display: flex; gap: 10px; align-items: center; }
+.auth-name { display: grid; line-height: 1.15; font-size: 13px; font-weight: 600; }
+.auth-credits { font-size: 11px; color: var(--muted); font-weight: 400; }
+.theme-select { width: 130px; font-size: 12px; padding: 6px 8px; opacity: 0.75; }
+.theme-select:hover { opacity: 1; }
+@media (max-width: 1100px) { .open-studio { display: none; } }
