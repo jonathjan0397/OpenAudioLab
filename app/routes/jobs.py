@@ -775,6 +775,7 @@ def public_tracks(
                     Asset.shared.is_(True),
                     Asset.deleted_at.is_(None),
                     Asset.mime.like("audio/%"),
+                    Asset.role == "mix_wav",
                 )
                 .order_by(Asset.created_at.desc())
                 .limit(limit)
