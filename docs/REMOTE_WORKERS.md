@@ -224,8 +224,9 @@ Policy: the dev host's GPU 0 runs an always-on engine worker (the baseline).
 When the engine queue `oal:queue:ace-step-1.5` reaches `OAL_SCALE_UP_DEPTH`
 (default 2) waiting jobs, `scripts/autoscale.py` spins up ONE Vast.ai burst
 worker (public-IP env, args-mode) to help drain it, and tears it down once the
-queue is empty for `OAL_SCALE_DOWN_SECONDS` (default 120s) after an
-`OAL_VAST_MIN_UPTIME` (default 180s) warm-up guard. It runs on the dev host
+queue is empty for `OAL_SCALE_DOWN_SECONDS` (default 1800s = 30 min, so a node
+stays hot for follow-up work) after an `OAL_VAST_MIN_UPTIME` (default 180s)
+warm-up guard. It runs on the dev host
 (GPU 0 + `vastai` + hub reachability), polls every 15s, and persists the managed
 contract to a state file so restarts don't orphan instances.
 

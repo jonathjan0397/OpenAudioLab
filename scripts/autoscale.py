@@ -3,8 +3,9 @@
 
 Policy: the local GPU worker (dev host, GPU 0) is the always-on baseline. When
 the engine queue backs up to OAL_SCALE_UP_DEPTH jobs we spin up ONE Vast.ai
-burst worker to help drain it, and tear it down once the queue is empty for
-OAL_SCALE_DOWN_SECONDS (after a minimum uptime so it is not killed mid-boot).
+burst worker to help drain it, and tear it down once the queue has been empty
+for OAL_SCALE_DOWN_SECONDS (default 1800s = 30 min, so a node stays hot for
+follow-up work) after a minimum uptime so it is not killed mid-boot.
 
 Vast workers reach the hub over its public IP (Vast containers lack NET_ADMIN,
 so in-container WireGuard is unavailable) and use args launch mode. Run this on
@@ -30,7 +31,7 @@ REDIS_URL = os.environ.get("OAL_REDIS_URL", f"redis://{HUB}:6379/0")
 IMAGE = os.environ.get("OAL_WORKER_IMAGE", "stratastack/oal-worker:ca1e85f-torch2.10-cu128-wg")
 DISK = os.environ.get("OAL_VAST_DISK", "40")
 SCALE_UP = int(os.environ.get("OAL_SCALE_UP_DEPTH", "2"))
-SCALE_DOWN_SECONDS = float(os.environ.get("OAL_SCALE_DOWN_SECONDS", "120"))
+SCALE_DOWN_SECONDS = float(os.environ.get("OAL_SCALE_DOWN_SECONDS", "1800"))
 MIN_UPTIME = float(os.environ.get("OAL_VAST_MIN_UPTIME", "180"))
 POLL = float(os.environ.get("OAL_SCALE_POLL_SECONDS", "15"))
 STATE = os.environ.get("OAL_AUTOSCALE_STATE", "/tmp/oal_autoscale_state.json")
