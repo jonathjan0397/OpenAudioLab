@@ -75,3 +75,26 @@ def test_lab_loras_endpoint(client, orch) -> None:
     assert by_id[lora_id]["kind"] == "genre"
     assert by_id[lora_id]["tags"] == ["pop", "dance"]
     assert all(item["name"] != "retired-one" for item in items)
+
+
+def test_lab_upload_and_tags(client, orch) -> None:
+    response = client.post(
+        "/lab/api/upload",
+        auth=CREDS_LAB,
+        files={"file": ("tone.wav", b"RIFFfake-wav-bytes", "audio/wav")},
+    )
+    assert response.status_code == 201
+    asset_id = response.json()["asset_id"]
+    assert response.json()["tags"] == []
+    listing = client.get("/lab/api/artifacts", auth=CREDS_LAB).json()["artifacts"]
+    uploaded = [a for a in listing if a["asset_id"] == asset_id]
+    assert uploaded and uploaded[0]["kind"] == "uploaded"
+    tagged = client.post(
+        f"/lab/api/assets/{asset_id}/tags",
+        auth=CREDS_LAB,
+        json={"tags": ["genre:pop", "mood:warm"]},
+    )
+    assert tagged.status_code == 200
+    listing = client.get("/lab/api/artifacts", auth=CREDS_LAB).json()["artifacts"]
+    uploaded = [a for a in listing if a["asset_id"] == asset_id][0]
+    assert uploaded["tags"] == ["genre:pop", "mood:warm"]

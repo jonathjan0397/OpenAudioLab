@@ -14,16 +14,17 @@ from datetime import timedelta
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from ..errors import ApiError
-from ..models import ArtistProfile, ArtistProfileVersion, Asset, Job, Lora, utcnow
+from ..models import ArtistProfile, ArtistProfileVersion, Asset, Job, Lora, new_uuid, utcnow
 from ..orchestration import as_utc
 from ..schemas import GenerateJobRequest
+from .. import tagging
 from ..tokens import make_token
 from .jobs import create_job
 
@@ -113,6 +114,8 @@ def lab_artifacts(
                 "sample_rate": asset.sample_rate,
                 "channels": asset.channels,
                 "synthetic": asset.synthetic,
+                "kind": asset.kind,
+                "tags": list(asset.tags_json or []),
                 "expired": expired,
                 "created_at": asset.created_at.isoformat() if asset.created_at else None,
                 "url": _content_url(settings, asset.id),
@@ -211,6 +214,77 @@ def lab_loras(
         for lora in rows
     ]
     return JSONResponse({"loras": items})
+
+
+class LabTags(BaseModel):
+    tags: list[str] = Field(default_factory=list, max_length=40)
+
+
+@router.post("/lab/api/upload")
+async def lab_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    _: HTTPBasicCredentials = Depends(require_lab),
+) -> JSONResponse:
+    settings = request.app.state.settings
+    body = await file.read()
+    if not body:
+        raise ApiError(422, "EMPTY_UPLOAD", "Uploaded file is empty.")
+    asset_id = new_uuid()
+    suffix = (file.filename or "upload.bin").rsplit("/", 1)[-1]
+    storage_key = f"owners/{_lab_owner(settings.lab_owner_token)}/uploads/{asset_id}/{suffix}"
+    request.app.state.storage.put(storage_key, body)
+    fp = None
+    if suffix.lower().endswith((".wav", ".mp3", ".flac", ".ogg", ".m4a")):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.NamedTemporaryFile(suffix="-" + suffix.rsplit(".", 1)[-1], delete=False) as tmp:
+            tmp.write(body)
+            tmp_path = Path(tmp.name)
+        try:
+            fp = tagging.fingerprint(tmp_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+    matches = []
+    if fp:
+        matches = tagging.acoustid_lookup(fp["signature"], fp["duration"], settings.acoustid_client_key)
+    tags = tagging.tags_from_matches(matches)
+    with request.app.state.db.session() as session:
+        session.add(
+            Asset(
+                id=asset_id,
+                job_id="upload",
+                owner_id=_lab_owner(settings.lab_owner_token),
+                storage_key=storage_key,
+                role="reference",
+                kind="uploaded",
+                mime=file.content_type or "application/octet-stream",
+                bytes=len(body),
+                sha256=hashlib.sha256(body).hexdigest(),
+                duration_seconds=fp["duration"] if fp else None,
+                synthetic=False,
+                tags_json=tags,
+            )
+        )
+        session.commit()
+    return JSONResponse({"asset_id": asset_id, "tags": tags, "matches": matches}, status_code=201)
+
+
+@router.post("/lab/api/assets/{asset_id}/tags")
+def lab_set_tags(
+    asset_id: str,
+    payload: LabTags,
+    request: Request,
+    _: HTTPBasicCredentials = Depends(require_lab),
+) -> JSONResponse:
+    with request.app.state.db.session() as session:
+        asset = session.execute(select(Asset).where(Asset.id == asset_id)).scalar_one_or_none()
+        if asset is None:
+            raise ApiError(404, "ASSET_NOT_FOUND", "Asset not found.")
+        asset.tags_json = payload.tags
+        session.commit()
+    return JSONResponse({"asset_id": asset_id, "tags": payload.tags})
 
 
 @router.get("/lab/api/jobs/{job_id}")
@@ -323,6 +397,13 @@ _PAGE_HTML = """<!doctype html>
   </section>
 
   <section class="card">
+    <h2>Upload &amp; identify</h2>
+    <input id="file" type="file" accept="audio/*">
+    <div style="margin-top:12px"><button id="upload">Upload &amp; identify</button></div>
+    <div class="status" id="ustatus"></div>
+  </section>
+
+  <section class="card">
     <h2>Artifacts <button class="ghost" id="refresh" style="float:right;padding:4px 12px">Refresh</button></h2>
     <ul class="artifacts" id="list"><li class="empty">Loading...</li></ul>
   </section>
@@ -365,6 +446,7 @@ function audioBlock(a) {
     + '<span>' + fmtDur(a.duration_seconds) + '</span>'
     + '<span>' + (a.bytes ? Math.round(a.bytes / 1024) + " KB" : "") + '</span>'
     + '<span>' + esc(fmtTime(a.created_at)) + '</span>' + expired + synth
+    + ' <span class="tag" style="cursor:pointer" onclick="editTags(\'' + a.asset_id + '\')">tags: ' + esc((a.tags || []).join(", ") || "none") + '</span>'
     + '</div><audio controls preload="none" src="' + esc(a.url) + '"></audio></div>';
 }
 
@@ -472,10 +554,42 @@ function generate() {
   });
 }
 
+function editTags(id) {
+  var v = prompt("Tags (comma separated):");
+  if (v === null) return;
+  var parts = v.split(",");
+  var tags = [];
+  for (var i = 0; i < parts.length; i++) { var t = parts[i].trim(); if (t) tags.push(t); }
+  xhr("POST", "/lab/api/assets/" + encodeURIComponent(id) + "/tags", JSON.stringify({ tags: tags }), function (x) { loadArtifacts(); });
+}
+
+function uploadFile() {
+  var input = $("file");
+  if (!input.files || !input.files.length) { $("ustatus").textContent = "Choose a file first."; return; }
+  var fd = new FormData();
+  fd.append("file", input.files[0]);
+  $("upload").disabled = true;
+  $("ustatus").textContent = "Uploading + fingerprinting...";
+  var x = new XMLHttpRequest();
+  x.open("POST", "/lab/api/upload", true);
+  x.onreadystatechange = function () {
+    if (x.readyState !== 4) return;
+    $("upload").disabled = false;
+    var data = null;
+    try { data = JSON.parse(x.responseText); } catch (e) {}
+    if (x.status !== 201 || !data) { $("ustatus").textContent = "Upload failed: " + x.status; return; }
+    var m = (data.matches || [])[0];
+    $("ustatus").textContent = "Identified: " + (m ? m.artist + " - " + m.title + " (" + Math.round(m.score * 100) + "%)" : "no match in AcoustID") + " | tags: " + (data.tags.join(", ") || "none");
+    loadArtifacts();
+  };
+  x.send(fd);
+}
+
 $("go").addEventListener("click", generate);
 $("refresh").addEventListener("click", loadArtifacts);
 $("profrefresh").addEventListener("click", loadProfiles);
 $("lorarefresh").addEventListener("click", loadLoras);
+$("upload").addEventListener("click", uploadFile);
 $("lora").addEventListener("change", function () { if (this.value) $("profile").value = ""; });
 $("profile").addEventListener("change", function () { if (this.value) $("lora").value = ""; });
 loadArtifacts();
