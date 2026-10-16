@@ -263,6 +263,7 @@ class EngineWorker:
         adapter_artifacts = lora_artifacts or profile_artifacts
         profile_path = self._materialize_adapter(adapter_artifacts) if adapter_artifacts else None
         if profile_path:
+            self.adapter.ensure_model()
             try:
                 self.adapter.unload_lora()
             except EngineError:

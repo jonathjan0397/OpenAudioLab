@@ -174,6 +174,12 @@ class AceStepAdapter:
 
     # -- trained adapter (milestone 5) -------------------------------------------
 
+    def ensure_model(self) -> None:
+        """Initialize the DiT if the server lazy-loaded it away (needed before LoRA load)."""
+        response = self.transport.post_json("/v1/init", {})
+        if response.get("code") != 200:
+            raise EngineError("ENGINE_REJECTED", str(response.get("error", "model init failed")))
+
     def load_lora(self, lora_path: str, adapter_name: str | None = None) -> None:
         payload: dict[str, Any] = {"lora_path": lora_path}
         if adapter_name:
