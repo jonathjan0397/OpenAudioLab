@@ -71,6 +71,7 @@ const PILL_CLASS: Record<string, string> = {
   failed: "err",
   cancelled: "warn",
   draining: "warn",
+  offline: "muted",
 };
 
 export function StatusPill({ status, label }: { status: string; label?: string }) {

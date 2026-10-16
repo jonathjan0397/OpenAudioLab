@@ -291,13 +291,17 @@ export default function AdminPage() {
               <div className="card-header">
                 <h2>GPU Workers</h2>
               </div>
-              {(stats.data?.workers || []).map((w) => {
+              {(stats.data?.workers || [])
+                .filter((w) => w.kind === "acestep")
+                .map((w) => {
+                const fresh =
+                  w.last_heartbeat != null && Date.now() - new Date(w.last_heartbeat + "Z").getTime() < 120000;
                 const vramPct = w.vram_used_mb && w.vram_total_mb ? w.vram_used_mb / w.vram_total_mb : 0;
                 return (
                   <div key={w.id} style={{ marginBottom: 14 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13, marginBottom: 4 }}>
                       <strong>{w.id}</strong>
-                      <StatusPill status={w.drain ? "draining" : "online"} />
+                      <StatusPill status={w.drain ? "draining" : fresh ? "online" : "offline"} label={fresh ? "online" : w.drain ? "draining" : "stale"} />
                     </div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "var(--muted)" }}>
                       <span style={{ width: 34 }}>{w.gpu_util != null ? `${w.gpu_util}%` : "—"}</span>
@@ -313,7 +317,9 @@ export default function AdminPage() {
                   </div>
                 );
               })}
-              {(stats.data?.workers || []).length === 0 && <p style={{ color: "var(--muted)" }}>No workers registered.</p>}
+              {(stats.data?.workers || []).filter((w) => w.kind === "acestep").length === 0 && (
+                <p style={{ color: "var(--muted)" }}>No GPU workers registered.</p>
+              )}
             </div>
 
             <div className="card">

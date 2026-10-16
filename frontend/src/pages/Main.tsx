@@ -45,8 +45,7 @@ const HEROES: Record<string, { kicker: string; title: ReactNode; sub: string; no
   },
 };
 
-export default function MainPage() {
-  const theme = document.documentElement.dataset.theme || "open-canvas";
+export default function MainPage({ theme = "open-canvas" }: { theme?: string }) {
   const hero = HEROES[theme] || HEROES["open-canvas"];
   return (
     <main className="page main-layout">
