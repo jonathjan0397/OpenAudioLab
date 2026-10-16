@@ -27,7 +27,6 @@ export default function OpenCanvasMain() {
             create studio-quality tracks in seconds.
           </p>
         </div>
-        <span className="hero-note oc-note-a">↙ Describe any sound</span>
         <span className="hero-note oc-note-b">Ideas to music ↗</span>
       </section>
 

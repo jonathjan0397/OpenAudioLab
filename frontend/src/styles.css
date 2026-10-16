@@ -306,6 +306,10 @@ img.avatar { padding: 0; }
 .create-input-row { position: relative; display: flex; gap: 10px; align-items: flex-start; }
 .create-input-row textarea { flex: 1; }
 .input-spark { color: var(--accent); font-size: 16px; padding-top: 9px; }
+.create-wide {
+  position: relative; z-index: 1; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 18px; padding: 18px 20px; box-shadow: var(--shadow);
+}
 .create-wide .create-input-row textarea { border-radius: 999px; padding: 13px 20px; }
 .create-wide .gen-wide { flex: none; }
 .create-controls .ctrl { flex-direction: row; gap: 10px; align-items: center; }
@@ -343,7 +347,7 @@ img.avatar { padding: 0; }
 .oc-main, .split-main, .sig-main { padding: 30px 44px 150px; }
 .oc-hero { position: relative; display: grid; grid-template-columns: 1fr 1fr; align-items: center; min-height: 420px; margin-bottom: 26px; }
 .oc-hero-art {
-  position: absolute; inset: -40px -44px auto auto; width: 62%; height: 130%;
+  position: absolute; inset: -30px -44px auto auto; width: 66%; height: 340px;
   background: var(--hero-image) right center / contain no-repeat; pointer-events: none;
 }
 .oc-hero-copy { position: relative; z-index: 1; max-width: 560px; }
@@ -402,7 +406,7 @@ img.avatar { padding: 0; }
   font-size: 10px; letter-spacing: 0.3em; color: var(--muted); border-right: 2px solid var(--accent);
   padding-right: 10px;
 }
-.sig-grid { display: grid; grid-template-columns: 1fr 380px; gap: 18px; align-items: start; }
+.sig-grid { position: relative; z-index: 1; display: grid; grid-template-columns: 1fr 380px; gap: 18px; align-items: start; }
 .sig-create { grid-column: 1; }
 .sig-profile { grid-column: 2; grid-row: 1 / span 1; }
 .sig-player { grid-column: 1; }

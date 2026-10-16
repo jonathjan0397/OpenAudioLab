@@ -38,11 +38,6 @@ export default function SignalMain() {
             and studio-grade tools.
           </p>
         </div>
-        <div className="sig-rail">
-          {["IDEA", "GENERATE", "REFINE", "EXPORT"].map((w) => (
-            <span key={w}>{w}</span>
-          ))}
-        </div>
       </section>
 
       <div className="sig-grid">
