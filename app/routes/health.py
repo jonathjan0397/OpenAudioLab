@@ -25,3 +25,16 @@ def health_ready(request: Request) -> JSONResponse:
     except Exception:
         raise ApiError(503, "NOT_READY", "A required dependency is unavailable.")
     return JSONResponse(status_code=200, content={"status": "ready"})
+
+
+@router.get("/site")
+def site_info(request: Request) -> JSONResponse:
+    from ..models import SiteSetting
+    from ..routes.admin import DEFAULT_TEMPLATE
+
+    template = DEFAULT_TEMPLATE
+    with request.app.state.db.session() as session:
+        row = session.get(SiteSetting, "template")
+        if row is not None:
+            template = row.value
+    return JSONResponse({"site_name": "OpenAudioLab", "template": template})

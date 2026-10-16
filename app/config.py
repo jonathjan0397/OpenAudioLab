@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     bootstrap_admin_email: str = ""
     bootstrap_admin_password: str = ""
     credit_cost_per_generation: int = 10
+    web_dir: str = "./web"
 
     # Milestone 2: durable orchestration
     redis_url: str = "redis://127.0.0.1:6379/0"

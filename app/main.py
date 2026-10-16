@@ -104,8 +104,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(lab_router)
     # Root aliases for container/compose healthchecks.
     app.include_router(health_router, include_in_schema=False)
+    _mount_web(app)
     _bootstrap_site(app)
     return app
+
+
+def _mount_web(app) -> None:
+    """Serve the built React shell (SPA fallback) when the bundle is present."""
+    from pathlib import Path
+
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+
+    web_dir = Path(app.state.settings.web_dir)
+    if not web_dir.is_dir():
+        return
+    assets = web_dir / "assets"
+    if assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa_fallback(full_path: str) -> FileResponse:
+        candidate = (web_dir / full_path).resolve()
+        if full_path and candidate.is_file() and candidate.is_relative_to(web_dir.resolve()):
+            return FileResponse(candidate)
+        return FileResponse(web_dir / "index.html")
 
 
 def _bootstrap_site(app) -> None:

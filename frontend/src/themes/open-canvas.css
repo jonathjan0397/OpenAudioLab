@@ -1,0 +1,12 @@
+[data-theme="open-canvas"] {
+  --bg: #ffffff;
+  --surface: #f7f5f2;
+  --text: #16130f;
+  --muted: #6f6a63;
+  --border: #e5e0d8;
+  --accent: #f4511e;
+  --accent-2: #ffb199;
+  --accent-text: #ffffff;
+  --radius: 14px;
+  --font-heading: "Arial Black", system-ui, sans-serif;
+}

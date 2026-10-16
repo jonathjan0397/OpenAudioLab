@@ -1,0 +1,12 @@
+[data-theme="signal-lab"] {
+  --bg: #0b1220;
+  --surface: #101a2c;
+  --text: #e6f0f2;
+  --muted: #7f95a3;
+  --border: #1e2c40;
+  --accent: #b8f53d;
+  --accent-2: #38bdf8;
+  --accent-text: #101a05;
+  --radius: 8px;
+  --font-heading: var(--font);
+}

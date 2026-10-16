@@ -1,0 +1,12 @@
+[data-theme="analog-soul"] {
+  --bg: #171008;
+  --surface: #211710;
+  --text: #f0e6d8;
+  --muted: #a8977f;
+  --border: #3a2a1c;
+  --accent: #f0a35e;
+  --accent-2: #8a5a2b;
+  --accent-text: #241505;
+  --radius: 10px;
+  --font-heading: Georgia, "Times New Roman", serif;
+}

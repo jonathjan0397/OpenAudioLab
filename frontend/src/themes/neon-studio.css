@@ -1,0 +1,12 @@
+[data-theme="neon-studio"] {
+  --bg: #0a0e1f;
+  --surface: #111731;
+  --text: #e8ecff;
+  --muted: #8d97c4;
+  --border: #232c52;
+  --accent: #8b5cf6;
+  --accent-2: #22d3ee;
+  --accent-text: #ffffff;
+  --radius: 12px;
+  --font-heading: var(--font);
+}
