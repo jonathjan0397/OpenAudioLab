@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     engine_poll_seconds: float = 2.0
     engine_timeout_seconds: float = 600.0
     engine_http_timeout_seconds: float = 120.0
+    # Worker-managed ACE-Step lifecycle: the engine worker starts the co-located
+    # server on the first job and stops it after this many idle seconds to free
+    # the GPU and host RAM (0 = keep it running / hot, e.g. ephemeral Vast nodes).
+    engine_autostart: bool = True
+    engine_idle_stop_seconds: float = 600.0
+    engine_start_timeout_seconds: float = 240.0
+    acestep_cwd: str = "/opt/acestep"
+    acestep_start_cmd: str = "uv run acestep-api"
+    worker_heartbeat_file: str = "/tmp/oal_worker_heartbeat"
 
     # Milestone 4: audio services (uploads, exports, separation)
     max_upload_bytes: int = 100 * 1024 * 1024

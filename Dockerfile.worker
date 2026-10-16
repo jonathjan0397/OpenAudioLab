@@ -48,7 +48,10 @@ ENV ACESTEP_API_HOST=0.0.0.0 \
 
 WORKDIR /srv/openaudiolab
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=5 \
-    CMD curl -fsS http://127.0.0.1:8001/health || exit 1
+# Health reflects worker liveness (a heartbeat file the worker touches every
+# ~5s), NOT the ACE-Step /health endpoint: the engine worker now starts acestep
+# lazily and stops it when idle, so /health is intentionally down between jobs.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=5 \
+    CMD test -f /tmp/oal_worker_heartbeat && [ $(( $(date +%s) - $(stat -c %Y /tmp/oal_worker_heartbeat) )) -lt 90 ] || exit 1
 
 ENTRYPOINT ["/usr/local/bin/worker-entrypoint.sh"]

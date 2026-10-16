@@ -1,23 +1,28 @@
 #!/usr/bin/env python3
 """Queue-depth autoscaler for OpenAudioLab engine workers.
 
-Policy: the local GPU worker (dev host, GPU 0) is the always-on baseline. When
-the engine queue backs up to OAL_SCALE_UP_DEPTH jobs we spin up ONE Vast.ai
-burst worker to help drain it, and tear it down once the queue has been empty
-for OAL_SCALE_DOWN_SECONDS (default 1800s = 30 min, so a node stays hot for
-follow-up work) after a minimum uptime so it is not killed mid-boot.
+Policy (multi-node, tiered scale-down): the local GPU worker (dev host, GPU 0)
+is the always-on baseline. Desired Vast burst nodes = 0 while the queue is below
+OAL_SCALE_UP_DEPTH, else min(ceil(depth / OAL_SCALE_JOBS_PER_NODE),
+OAL_SCALE_MAX_NODES); we add at most one node per tick. Scale-down is driven by
+how long demand has been low (depth < OAL_SCALE_UP_DEPTH): hold the fleet for
+OAL_SCALE_TO_ONE_SECONDS, then drop to one hot node, then tear it down after
+OAL_SCALE_DOWN_SECONDS of low demand; any spike back to >= OAL_SCALE_UP_DEPTH
+resets the timer. A node younger than OAL_VAST_MIN_UPTIME is never removed.
 
 Vast workers reach the hub over its public IP (Vast containers lack NET_ADMIN,
 so in-container WireGuard is unavailable) and use args launch mode. Run this on
-the dev host (has GPU 0, the vastai CLI, and hub reachability).
+the hub (home server): it needs the vastai CLI + hub reachability (redis is
+local there) and does not need a GPU.
 
 Config comes from the environment; source the hub secrets first, e.g.:
     set -a; . .env.backend; set +a
-    OAL_HUB_IP=192.151.156.124 VASTAI=.venv/bin/vastai \
-      .venv/bin/python scripts/autoscale.py
+    OAL_HUB_IP=192.151.156.124 OAL_REDIS_URL=redis://127.0.0.1:6379/0 \
+      VASTAI=.venv/bin/vastai .venv/bin/python scripts/autoscale.py
 """
 import argparse
 import json
+import math
 import os
 import re
 import subprocess
@@ -31,7 +36,10 @@ REDIS_URL = os.environ.get("OAL_REDIS_URL", f"redis://{HUB}:6379/0")
 IMAGE = os.environ.get("OAL_WORKER_IMAGE", "stratastack/oal-worker:ca1e85f-torch2.10-cu128-wg")
 DISK = os.environ.get("OAL_VAST_DISK", "40")
 SCALE_UP = int(os.environ.get("OAL_SCALE_UP_DEPTH", "2"))
+JOBS_PER_NODE = int(os.environ.get("OAL_SCALE_JOBS_PER_NODE", "2"))
+MAX_NODES = int(os.environ.get("OAL_SCALE_MAX_NODES", "3"))
 SCALE_DOWN_SECONDS = float(os.environ.get("OAL_SCALE_DOWN_SECONDS", "1800"))
+TO_ONE_SECONDS = float(os.environ.get("OAL_SCALE_TO_ONE_SECONDS", "300"))
 MIN_UPTIME = float(os.environ.get("OAL_VAST_MIN_UPTIME", "180"))
 POLL = float(os.environ.get("OAL_SCALE_POLL_SECONDS", "15"))
 STATE = os.environ.get("OAL_AUTOSCALE_STATE", "/tmp/oal_autoscale_state.json")
@@ -74,6 +82,9 @@ def worker_env():
         f"-e OAL_SECRET_KEY={secret}",
         "-e OAL_WORKER_ROLE=engine_worker",
         "-e OAL_ACESTEP_BASE_URL=http://127.0.0.1:8001",
+        # Vast burst nodes stay hot (keep the model loaded for their short life);
+        # the autoscaler tears them down, so no idle-stop is needed.
+        "-e OAL_ENGINE_IDLE_STOP_SECONDS=0",
     ])
 
 
@@ -139,9 +150,18 @@ def destroy_instance(cid, dry_run=False):
 def load_state():
     try:
         with open(STATE) as f:
-            return json.load(f)
+            st = json.load(f)
     except Exception:
-        return {"contract": None, "created_at": None, "idle_since": None}
+        st = {}
+    # Backward-compat: old single-contract state -> node list.
+    if "nodes" not in st:
+        cid = st.get("contract")
+        st["nodes"] = (
+            [{"contract": cid, "created_at": st.get("created_at") or time.time()}]
+            if cid else []
+        )
+        st.setdefault("low_since", None)
+    return st
 
 
 def save_state(st):
@@ -149,31 +169,47 @@ def save_state(st):
         json.dump(st, f)
 
 
+def desired_nodes(depth, low_since, now, current):
+    """Target number of Vast burst nodes for the current queue state."""
+    if depth >= SCALE_UP:
+        return min(math.ceil(depth / JOBS_PER_NODE), MAX_NODES)
+    # Demand has subsided (depth < SCALE_UP): tier down by how long it has been low.
+    if low_since is None:
+        return current  # just dropped below threshold; hold during grace
+    age = now - low_since
+    if age < TO_ONE_SECONDS:
+        return current  # grace: keep the fleet briefly in case it is a lull
+    if age < SCALE_DOWN_SECONDS:
+        return 1        # keep one hot node for follow-up work
+    return 0            # sustained drain: tear everything down
+
+
 def tick(r, st, dry_run=False):
     depth = r.llen(QUEUE_KEY)
-    cid = st.get("contract")
     now = time.time()
-    if cid is None:
-        if depth >= SCALE_UP:
-            log(f"depth={depth} >= {SCALE_UP} -> spin up Vast burst worker")
-            new = create_instance(dry_run)
-            if new:
-                st.update(contract=new, created_at=now, idle_since=None)
-    else:
-        if depth == 0:
-            if now - (st.get("created_at") or 0) < MIN_UPTIME:
-                log(f"depth=0 but instance {cid} still warming "
-                    f"({int(now - st['created_at'])}s < {int(MIN_UPTIME)}s)")
-            elif st.get("idle_since") is None:
-                st["idle_since"] = now
-                log(f"depth=0 -> idle timer started for {cid}")
-            elif now - st["idle_since"] >= SCALE_DOWN_SECONDS:
-                log(f"drained for {int(now - st['idle_since'])}s -> tear down {cid}")
-                destroy_instance(cid, dry_run)
-                st.update(contract=None, created_at=None, idle_since=None)
-        elif st.get("idle_since") is not None:
-            st["idle_since"] = None
-            log(f"depth={depth} -> cancel idle timer")
+    nodes = st.get("nodes", [])
+    if depth >= SCALE_UP:
+        st["low_since"] = None
+    elif st.get("low_since") is None:
+        st["low_since"] = now
+    want = desired_nodes(depth, st.get("low_since"), now, len(nodes))
+
+    if len(nodes) < want:
+        new = create_instance(dry_run)
+        if new:
+            nodes.append({"contract": new, "created_at": now})
+            st["nodes"] = nodes
+            log(f"depth={depth} want={want} -> +1 node {new} (now {len(nodes)})")
+    elif len(nodes) > want:
+        removable = [n for n in nodes if now - n["created_at"] >= MIN_UPTIME]
+        if not removable:
+            log(f"depth={depth} want={want} nodes={len(nodes)} all < min_uptime; hold")
+        else:
+            victim = max(removable, key=lambda n: n["created_at"])  # newest first
+            destroy_instance(victim["contract"], dry_run)
+            nodes.remove(victim)
+            st["nodes"] = nodes
+            log(f"depth={depth} want={want} -> -1 node {victim['contract']} (now {len(nodes)})")
     return depth
 
 
@@ -185,7 +221,8 @@ def main():
 
     r = redis.Redis.from_url(REDIS_URL, socket_timeout=5)
     st = load_state()
-    log(f"start hub={HUB} queue={QUEUE_KEY} up>={SCALE_UP} down>{int(SCALE_DOWN_SECONDS)}s "
+    log(f"start hub={HUB} queue={QUEUE_KEY} up>={SCALE_UP} jobs/node={JOBS_PER_NODE} "
+        f"max={MAX_NODES} to_one>{int(TO_ONE_SECONDS)}s down>{int(SCALE_DOWN_SECONDS)}s "
         f"min_uptime={int(MIN_UPTIME)}s state={st}")
     while True:
         try:

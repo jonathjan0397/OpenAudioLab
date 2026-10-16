@@ -220,15 +220,19 @@ in the image for tunnel peers (dev host) even though Vast uses the public IP.
 
 ## Queue-depth autoscaling (local baseline + Vast burst)
 
-Policy: the dev host's GPU 0 runs an always-on engine worker (the baseline).
-When the engine queue `oal:queue:ace-step-1.5` reaches `OAL_SCALE_UP_DEPTH`
-(default 2) waiting jobs, `scripts/autoscale.py` spins up ONE Vast.ai burst
-worker (public-IP env, args-mode) to help drain it, and tears it down once the
-queue is empty for `OAL_SCALE_DOWN_SECONDS` (default 1800s = 30 min, so a node
-stays hot for follow-up work) after an `OAL_VAST_MIN_UPTIME` (default 180s)
-warm-up guard. It runs on the dev host
-(GPU 0 + `vastai` + hub reachability), polls every 15s, and persists the managed
-contract to a state file so restarts don't orphan instances.
+Policy (multi-node, tiered scale-down): the dev host's GPU 0 runs an always-on
+engine worker (the baseline). Desired Vast burst nodes are `0` while the engine
+queue `oal:queue:ace-step-1.5` is below `OAL_SCALE_UP_DEPTH` (default 2), else
+`min(ceil(depth / OAL_SCALE_JOBS_PER_NODE), OAL_SCALE_MAX_NODES)` (defaults 2 and
+3) — a deep queue scales out to several nodes, adding at most one per 15s tick.
+Scale-down is driven by how long demand has been low (depth < `OAL_SCALE_UP_DEPTH`):
+hold the fleet for `OAL_SCALE_TO_ONE_SECONDS` (default 300s), then drop to **one
+hot node**, then tear it down after `OAL_SCALE_DOWN_SECONDS` (default 1800s =
+30 min) of low demand; any spike back to ≥ `OAL_SCALE_UP_DEPTH` resets the timer.
+A node younger than `OAL_VAST_MIN_UPTIME` (default 180s) is never removed.
+`scripts/autoscale.py` runs on the **hub (home server)** — it needs `vastai` +
+hub reachability (redis is local there) and no GPU — polls every 15s, and
+persists its managed node list to a state file so restarts don't orphan instances.
 
 - **Offer selection**: among North-American offers passing `gpu_ram>=16`,
   `cuda_max_good>=12.8`, `verification=verified`, `reliability2>=0.95` and
@@ -241,11 +245,26 @@ contract to a state file so restarts don't orphan instances.
   short burst is usually drained by the local baseline before the node is warm.
   A pre-baked checkpoint volume or a kept-warm node mitigates this.
 
-Launch (on the dev host):
+## Worker cold/idle lifecycle (GPU freed between jobs)
+
+The engine worker now **owns** the co-located ACE-Step server: it starts the
+server lazily on the first job and **stops it after `OAL_ENGINE_IDLE_STOP_SECONDS`
+(default 600s) of no jobs**, so an idle baseline worker holds neither the GPU nor
+host RAM (the process is stopped, not merely offloaded to CPU). The first job
+after an idle gap pays a full cold load (~30–80s from the checkpoint cache); jobs
+within the idle window stay warm, so a burst does not thrash. Ephemeral Vast
+nodes set `OAL_ENGINE_IDLE_STOP_SECONDS=0` (never stop) to stay hot for their
+short life. Because `/health` is intentionally down while idle, the worker image's
+`HEALTHCHECK` now watches a **worker heartbeat file** (`/tmp/oal_worker_heartbeat`,
+touched every ~5s) instead of the ACE-Step endpoint. Set `OAL_ENGINE_AUTOSTART=0`
+to revert to the old external-server mode.
+
+Launch (on the hub / home server):
 
 ```
 set -a; . .env.backend; set +a
-VASTAI=.venv/bin/vastai OAL_AUTOSCALE_STATE=/tmp/oal_autoscale_state.json \
+OAL_REDIS_URL=redis://127.0.0.1:6379/0 VASTAI=.venv/bin/vastai \
+  OAL_AUTOSCALE_STATE=/tmp/oal_autoscale_state.json \
   .venv/bin/python scripts/autoscale.py
 ```
 

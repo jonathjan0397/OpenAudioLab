@@ -43,15 +43,19 @@ done
 tar -xzf /tmp/bundle.tgz -C "$APP_DIR"
 echo "[worker] code revision: $(cat "$APP_DIR/REVISION" 2>/dev/null || echo unknown)"
 
-echo "[worker] starting ACE-Step server"
-( cd /opt/acestep && exec uv run acestep-api ) &
-i=0
-until curl -fsS "http://127.0.0.1:8001/health" >/dev/null 2>&1; do
-    i=$((i + 1))
-    [ "$i" -ge 120 ] && { echo "[worker] ACE-Step server not ready"; exit 1; }
-    sleep 5
-done
-echo "[worker] ACE-Step server ready"
+if [ "${OAL_ENGINE_AUTOSTART:-1}" = "0" ]; then
+    echo "[worker] starting ACE-Step server (external mode)"
+    ( cd /opt/acestep && exec uv run acestep-api ) &
+    i=0
+    until curl -fsS "http://127.0.0.1:8001/health" >/dev/null 2>&1; do
+        i=$((i + 1))
+        [ "$i" -ge 120 ] && { echo "[worker] ACE-Step server not ready"; exit 1; }
+        sleep 5
+    done
+    echo "[worker] ACE-Step server ready"
+else
+    echo "[worker] ACE-Step server managed by engine_worker (lazy start, idle-stop)"
+fi
 
 export PYTHONPATH="$APP_DIR"
 cd "$APP_DIR"

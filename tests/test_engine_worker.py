@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from sqlalchemy import select
 
 from app.engine_acestep import EngineError, SubmitResult
@@ -106,3 +108,60 @@ def test_cancel_during_poll_discards(client, orch) -> None:
     finally:
         ew.is_cancelling = original_is_cancelling
     assert _status(orch.db, job_id) == "cancelled"
+
+
+class FakeProcess:
+    def __init__(self, running: bool = False, ensure_raises: EngineError | None = None) -> None:
+        self._running = running
+        self.ensure_raises = ensure_raises
+        self.ensure_calls = 0
+        self.stopped = False
+
+    def is_running(self) -> bool:
+        return self._running
+
+    def ensure_running(self) -> None:
+        self.ensure_calls += 1
+        if self.ensure_raises is not None:
+            raise self.ensure_raises
+        self._running = True
+
+    def stop(self) -> None:
+        self.stopped = True
+        self._running = False
+
+
+def test_idle_stop_stops_engine(client, orch) -> None:
+    proc = FakeProcess(running=True)
+    worker = EngineWorker(
+        orch.db, orch.queue, orch.storage, FakeAdapter([]), orch.settings,
+        worker_id="t-idle", engine_process=proc,
+    )
+    original = orch.settings.engine_idle_stop_seconds
+    orch.settings.engine_idle_stop_seconds = 0.001
+    try:
+        worker._last_activity = time.monotonic() - 10
+        assert worker.run_once() is False  # empty queue -> idle tick
+        assert proc.stopped is True
+    finally:
+        orch.settings.engine_idle_stop_seconds = original
+
+
+def test_engine_start_failure_requeues(client, orch) -> None:
+    import app.engine_worker as ew
+
+    proc = FakeProcess(running=False, ensure_raises=EngineError("ENGINE_START_FAILED", "boom"))
+    worker = EngineWorker(
+        orch.db, orch.queue, orch.storage, FakeAdapter([]), orch.settings,
+        worker_id="t-start", engine_process=proc,
+    )
+    job_id = submit(client, key="eng-5").json()["job_id"]
+    orch.dispatcher.publish_once()
+    original_sleep = ew.time.sleep
+    ew.time.sleep = lambda *_: None
+    try:
+        assert worker.run_once() is True
+    finally:
+        ew.time.sleep = original_sleep
+    assert _status(orch.db, job_id) == "queued"
+    assert proc.ensure_calls == 1

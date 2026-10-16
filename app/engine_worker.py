@@ -7,7 +7,11 @@ the API never loads model weights. Polling doubles as the lease heartbeat.
 from __future__ import annotations
 
 import logging
+import shlex
+import signal
 import socket
+import subprocess
+import threading
 import time
 import os
 from pathlib import Path
@@ -35,6 +39,85 @@ from .worker import InvalidArtifact, validate_wav
 log = logging.getLogger("oal.engine_worker")
 
 
+class AceStepProcess:
+    """Owns the co-located ACE-Step server subprocess.
+
+    The worker starts the server lazily on the first job and stops it when idle,
+    so an idle worker holds neither the GPU nor host RAM. The subprocess runs in
+    its own session so ``stop`` can signal the whole group (uv + its python
+    child) and reliably release CUDA memory.
+    """
+
+    def __init__(
+        self,
+        cwd: str,
+        cmd: list[str],
+        base_url: str,
+        api_key: str | None = None,
+        start_timeout: float = 240.0,
+        poll: float = 2.0,
+    ) -> None:
+        self.cwd = cwd
+        self.cmd = cmd
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.start_timeout = start_timeout
+        self.poll = poll
+        self.proc: subprocess.Popen | None = None
+
+    def is_running(self) -> bool:
+        return self.proc is not None and self.proc.poll() is None
+
+    def _healthy(self) -> bool:
+        import httpx
+
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        try:
+            return httpx.get(f"{self.base_url}/health", headers=headers, timeout=5.0).status_code == 200
+        except Exception:
+            return False
+
+    def ensure_running(self) -> None:
+        if self.is_running() and self._healthy():
+            return
+        if not self.is_running():
+            log.info("starting ACE-Step server: %s (cwd=%s)", " ".join(self.cmd), self.cwd)
+            self.proc = subprocess.Popen(self.cmd, cwd=self.cwd, start_new_session=True)
+        deadline = time.monotonic() + self.start_timeout
+        while time.monotonic() < deadline:
+            if self._healthy():
+                log.info("ACE-Step server ready")
+                return
+            if self.proc is not None and self.proc.poll() is not None:
+                self.proc = None
+                raise EngineError("ENGINE_START_FAILED", f"ACE-Step server exited (code {self.proc.returncode if self.proc else '?'}).")
+            time.sleep(self.poll)
+        self.stop()
+        raise EngineError("ENGINE_START_TIMEOUT", "ACE-Step server did not become healthy in time.")
+
+    def stop(self) -> None:
+        proc = self.proc
+        self.proc = None
+        if proc is None or proc.poll() is not None:
+            return
+        log.info("stopping ACE-Step server (pid %s)", proc.pid)
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            proc.terminate()
+        try:
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                proc.kill()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+
+
 class EngineWorker:
     def __init__(
         self,
@@ -45,6 +128,7 @@ class EngineWorker:
         settings: Settings,
         worker_id: str | None = None,
         queue_name: str | None = None,
+        engine_process: "AceStepProcess | None" = None,
     ) -> None:
         self.db = db
         self.queue = queue
@@ -53,7 +137,9 @@ class EngineWorker:
         self.settings = settings
         self.worker_id = worker_id or f"acestep-{socket.gethostname()}-{os.getpid()}"
         self.queue_name = queue_name or RedisQueue.queue_name("ace-step-1.5")
+        self.engine_process = engine_process
         self._stop = False
+        self._last_activity = time.monotonic()
 
     def register(self) -> None:
         with self.db.session() as session:
@@ -63,6 +149,33 @@ class EngineWorker:
             else:
                 worker.last_heartbeat = utcnow()
             session.commit()
+
+    def _touch_heartbeat(self) -> None:
+        path = self.settings.worker_heartbeat_file
+        if not path:
+            return
+        try:
+            with open(path, "w") as f:
+                f.write(str(time.time()))
+        except OSError:
+            log.debug("could not write heartbeat file %s", path)
+
+    def _heartbeat_loop(self) -> None:
+        while not self._stop:
+            self._touch_heartbeat()
+            time.sleep(5)
+
+    def _maybe_stop_engine(self) -> None:
+        proc = self.engine_process
+        if proc is None or not proc.is_running():
+            return
+        limit = self.settings.engine_idle_stop_seconds
+        if not limit:
+            return
+        idle = time.monotonic() - self._last_activity
+        if idle >= limit:
+            log.info("engine idle %ds >= %ss -> stopping to free GPU/RAM", int(idle), int(limit))
+            proc.stop()
 
     def _materialize_adapter(self, artifacts: dict) -> str | None:
         """Resolve a loadable local adapter dir from durable object storage.
@@ -98,7 +211,18 @@ class EngineWorker:
         job_id = self.queue.receive(self.queue_name, self.settings.worker_brpop_timeout_seconds)
         if job_id is None:
             self.register()
+            self._touch_heartbeat()
+            self._maybe_stop_engine()
             return False
+        self._last_activity = time.monotonic()
+        if self.engine_process is not None:
+            try:
+                self.engine_process.ensure_running()
+            except EngineError as exc:
+                log.warning("engine start failed for job %s (%s); requeueing", job_id, exc.code)
+                self.queue.publish(self.queue_name, job_id)
+                time.sleep(5)
+                return True
         claim = claim_attempt(self.db, job_id, self.worker_id)
         if claim is None:
             return True
@@ -162,6 +286,7 @@ class EngineWorker:
                     fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token, exc.code, exc.message)
                     return True
             heartbeat(self.db, attempt_id, lease_token)
+            self._touch_heartbeat()
             if state == "failed":
                 fail_attempt(
                     self.db, self.settings, claimed_job, attempt_id, lease_token,
@@ -233,12 +358,19 @@ class EngineWorker:
 
     def run_forever(self) -> None:
         self.register()
-        while not self._stop:
-            try:
-                self.run_once()
-            except Exception:
-                log.exception("engine worker iteration failed")
-                time.sleep(2)
+        heartbeat = threading.Thread(target=self._heartbeat_loop, daemon=True)
+        heartbeat.start()
+        try:
+            while not self._stop:
+                try:
+                    self.run_once()
+                except Exception:
+                    log.exception("engine worker iteration failed")
+                    time.sleep(2)
+        finally:
+            self._stop = True
+            if self.engine_process is not None:
+                self.engine_process.stop()
 
     def stop(self) -> None:
         self._stop = True
@@ -255,7 +387,16 @@ def build_engine_worker() -> EngineWorker:
         timeout=settings.engine_http_timeout_seconds,
     )
     adapter = AceStepAdapter(transport, model=settings.acestep_model, thinking=settings.acestep_thinking)
-    return EngineWorker(db, queue, storage, adapter, settings)
+    engine_process = None
+    if settings.engine_autostart:
+        engine_process = AceStepProcess(
+            cwd=settings.acestep_cwd,
+            cmd=shlex.split(settings.acestep_start_cmd),
+            base_url=settings.acestep_base_url,
+            api_key=settings.acestep_api_key or None,
+            start_timeout=settings.engine_start_timeout_seconds,
+        )
+    return EngineWorker(db, queue, storage, adapter, settings, engine_process=engine_process)
 
 
 if __name__ == "__main__":
