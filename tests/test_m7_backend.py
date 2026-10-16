@@ -133,3 +133,51 @@ def test_waveform_endpoint(client) -> None:
         session.commit()
     response = client.get(f"/api/v1/artifacts/{missing}/waveform")
     assert response.status_code == 404
+
+
+def test_waveform_fallback_computes_peaks(client) -> None:
+    import io
+    import wave as wavelib
+
+    from app.models import Asset, utcnow
+
+    _seed_admin(client, "m7-fb@example.com")
+    client.post("/api/v1/auth/logout")
+    client.post(
+        "/api/v1/auth/register",
+        json={"email": "m7-fb2@example.com", "username": "m7fb2", "password": "super-secret-1"},
+    )
+    asset_id = str(uuid.uuid4())
+    key = "owners/m7fb2/jobs/j3/a3/mix_wav.wav"
+    buf = io.BytesIO()
+    with wavelib.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(8000)
+        w.writeframes(b"".join(bytes([i % 256, (i * 7) % 256]) for i in range(4000)))
+    client.app.state.storage.put(key, buf.getvalue())
+    with client.app.state.db.session() as session:
+        session.add(
+            Asset(
+                id=asset_id,
+                owner_id="usr_m7fb2",
+                storage_key=key,
+                role="mix_wav",
+                mime="audio/wav",
+                bytes=len(buf.getvalue()),
+                sha256="x",
+                synthetic=False,
+                finalized_at=utcnow(),
+                shared=True,
+            )
+        )
+        session.commit()
+
+    response = client.get(f"/api/v1/artifacts/{asset_id}/waveform")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["buckets"] > 0
+    assert len(body["peaks"]) == body["buckets"]
+    # sidecar cached for next time
+    cached = client.app.state.storage.get(key[: -len(".wav")] + ".json")
+    assert json.loads(cached.body)["buckets"] == body["buckets"]

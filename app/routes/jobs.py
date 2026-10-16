@@ -609,7 +609,15 @@ def artifact_waveform(
     try:
         stored = request.app.state.storage.get(key)
     except FileNotFoundError:
-        raise ApiError(404, "WAVEFORM_NOT_FOUND", "Waveform peaks have not been generated yet.")
+        try:
+            wav = request.app.state.storage.get(asset.storage_key)
+        except FileNotFoundError:
+            raise ApiError(404, "WAVEFORM_NOT_FOUND", "Audio file is missing.")
+        from ..peaks import peaks_json
+
+        body = peaks_json(wav.body)
+        request.app.state.storage.put(key, body)
+        return Response(content=body, media_type="application/json")
     return Response(content=stored.body, media_type="application/json")
 
 
