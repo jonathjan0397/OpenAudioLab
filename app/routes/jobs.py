@@ -710,3 +710,47 @@ def public_tracks(
             }
         )
     return JSONResponse({"tracks": items})
+
+
+@router.get("/tracks")
+def my_tracks(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    owner_id: str = Depends(owner_from_request),
+) -> JSONResponse:
+    from ..models import Favorite
+
+    settings = request.app.state.settings
+    now = utcnow()
+    with request.app.state.db.session() as session:
+        rows = list(
+            session.execute(
+                select(Asset)
+                .where(Asset.owner_id == owner_id, Asset.deleted_at.is_(None), Asset.mime.like("audio/%"))
+                .order_by(Asset.created_at.desc())
+                .limit(limit)
+            ).scalars()
+        )
+        favorite_ids = set(
+            session.execute(
+                select(Favorite.asset_id).where(Favorite.owner_id == owner_id)
+            ).scalars()
+        )
+    items = []
+    for asset in rows:
+        expired = asset.expires_at is not None and as_utc(asset.expires_at) <= now
+        expiry = now + timedelta(hours=24)
+        token = make_token(settings.secret_key, asset.id, expiry)
+        items.append(
+            {
+                "asset_id": asset.id,
+                "title": asset.title,
+                "shared": asset.shared,
+                "favorite": asset.id in favorite_ids,
+                "duration_seconds": asset.duration_seconds,
+                "created_at": asset.created_at.isoformat() if asset.created_at else None,
+                "expired": expired,
+                "url": f"/api/v1/artifacts/{asset.id}/content?token={token}",
+            }
+        )
+    return JSONResponse({"tracks": items})
