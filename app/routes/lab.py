@@ -20,11 +20,12 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from ..models import Asset, utcnow
+from ..errors import ApiError
+from ..models import ArtistProfile, ArtistProfileVersion, Asset, Job, utcnow
 from ..orchestration import as_utc
 from ..schemas import GenerateJobRequest
 from ..tokens import make_token
-from .jobs import _get_owned_job, create_job
+from .jobs import create_job
 
 router = APIRouter(tags=["lab"])
 _basic = HTTPBasic()
@@ -40,6 +41,7 @@ class LabGenerate(BaseModel):
     instrumental: bool = True
     model_id: str = "ace-step-1.5"
     seed: int | None = Field(default=None, ge=0, le=2**63 - 1)
+    artist_profile_version_id: str | None = None
 
 
 class _RequestShim:
@@ -136,9 +138,49 @@ def lab_generate(
         body["duration_seconds"] = payload.duration_seconds
     if payload.seed is not None:
         body["seed"] = payload.seed
+    owner = _lab_owner(settings.lab_owner_token)
+    if payload.artist_profile_version_id:
+        body["artist_profile_version_id"] = payload.artist_profile_version_id
+        with request.app.state.db.session() as session:
+            version = session.get(ArtistProfileVersion, payload.artist_profile_version_id)
+        if version is None:
+            raise ApiError(404, "PROFILE_VERSION_NOT_FOUND", "Artist profile version not found.")
+        owner = version.owner_id
     gen = GenerateJobRequest(**body)
     shim = _RequestShim(request.app, {"Idempotency-Key": f"lab-{uuid4().hex}"})
-    return create_job(gen, shim, _lab_owner(settings.lab_owner_token))
+    return create_job(gen, shim, owner)
+
+
+@router.get("/lab/api/profiles")
+def lab_profiles(
+    request: Request,
+    _: HTTPBasicCredentials = Depends(require_lab),
+) -> JSONResponse:
+    with request.app.state.db.session() as session:
+        rows = list(
+            session.execute(
+                select(ArtistProfileVersion, ArtistProfile.name)
+                .join(ArtistProfile, ArtistProfile.id == ArtistProfileVersion.profile_id)
+                .where(ArtistProfile.deleted_at.is_(None))
+                .order_by(ArtistProfileVersion.created_at.desc())
+                .limit(50)
+            )
+            .tuples()
+        )
+    items = [
+        {
+            "version_id": version.id,
+            "profile_id": version.profile_id,
+            "profile_name": name,
+            "mechanism": version.mechanism,
+            "base_model_id": version.base_model_id,
+            "state": version.state,
+            "evaluation_status": version.evaluation_status,
+            "created_at": version.created_at.isoformat() if version.created_at else None,
+        }
+        for version, name in rows
+    ]
+    return JSONResponse({"profiles": items})
 
 
 @router.get("/lab/api/jobs/{job_id}")
@@ -148,9 +190,10 @@ def lab_job(
     _: HTTPBasicCredentials = Depends(require_lab),
 ) -> JSONResponse:
     settings = request.app.state.settings
-    owner = _lab_owner(settings.lab_owner_token)
     with request.app.state.db.session() as session:
-        job = _get_owned_job(session, job_id, owner)
+        job = session.execute(select(Job).where(Job.id == job_id)).scalar_one_or_none()
+        if job is None:
+            raise ApiError(404, "JOB_NOT_FOUND", "Job not found.")
         status, stage = job.status, job.stage
         progress, error_code, error_message = job.progress, job.error_code, job.error_message
         assets = list(
@@ -233,6 +276,11 @@ _PAGE_HTML = """<!doctype html>
       <div><label for="dur">Duration (s)</label><input id="dur" type="number" min="1" max="600" value="30"></div>
       <div><label for="seed">Seed (optional)</label><input id="seed" type="number" min="0" placeholder="random"></div>
       <div class="check"><input id="inst" type="checkbox" checked><label for="inst" style="margin:0">Instrumental</label></div>
+    </div>
+    <label for="profile">LoRA profile</label>
+    <div style="display:flex;gap:10px">
+      <select id="profile"><option value="">base model (no LoRA)</option></select>
+      <button class="ghost" id="profrefresh" style="flex:0 0 auto">Refresh</button>
     </div>
     <div style="margin-top:16px"><button id="go">Generate</button></div>
     <div class="status" id="status"></div>
@@ -320,6 +368,26 @@ function pollJob(jobId) {
   });
 }
 
+function loadProfiles() {
+  xhr("GET", "/lab/api/profiles", null, function (x) {
+    if (!x) return;
+    var data;
+    try { data = JSON.parse(x.responseText); } catch (e) { return; }
+    var items = data.profiles || [];
+    var sel = $("profile");
+    var prev = sel.value;
+    sel.innerHTML = '<option value="">base model (no LoRA)</option>';
+    for (var i = 0; i < items.length; i++) {
+      var p = items[i];
+      var opt = document.createElement("option");
+      opt.value = p.version_id;
+      opt.textContent = p.profile_name + " - " + p.mechanism + " [" + p.state + "/" + p.evaluation_status + "]";
+      sel.appendChild(opt);
+    }
+    if (prev) sel.value = prev;
+  });
+}
+
 function generate() {
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
   if (!$("desc").value.trim()) { setStatus("Enter a description first."); return; }
@@ -330,6 +398,7 @@ function generate() {
     model_id: "ace-step-1.5"
   };
   if ($("seed").value !== "") body.seed = parseInt($("seed").value, 10);
+  if ($("profile").value) body.artist_profile_version_id = $("profile").value;
   $("go").disabled = true; $("result").innerHTML = ""; setStatus("Submitting...");
   xhr("POST", "/lab/api/generate", JSON.stringify(body), function (x) {
     if (!x) { $("go").disabled = false; return; }
@@ -349,7 +418,9 @@ function generate() {
 
 $("go").addEventListener("click", generate);
 $("refresh").addEventListener("click", loadArtifacts);
+$("profrefresh").addEventListener("click", loadProfiles);
 loadArtifacts();
+loadProfiles();
 </script>
 </body>
 </html>
