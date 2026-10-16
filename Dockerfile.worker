@@ -32,7 +32,14 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # run with NET_ADMIN, and mount the hub's NFS storage dir (entrypoint mount).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends wireguard-tools iproute2 iptables nfs-common \
+        openssh-client rsync \
     && rm -rf /var/lib/apt/lists/*
+
+# --- Tailscale static binaries (userspace mode works without NET_ADMIN) -------
+RUN curl -fsSL https://pkgs.tailscale.com/stable/tailscale_1.104.1_amd64.tgz -o /tmp/ts.tgz \
+    && tar -xzf /tmp/ts.tgz -C /tmp \
+    && cp /tmp/tailscale_1.104.1_amd64/tailscale /tmp/tailscale_1.104.1_amd64/tailscaled /usr/local/bin/ \
+    && rm -rf /tmp/ts.tgz /tmp/tailscale_1.104.1_amd64
 
 # --- Bootstrap (app code arrives at runtime from the backend bundle) ---------
 COPY docker/worker-entrypoint.sh /usr/local/bin/worker-entrypoint.sh

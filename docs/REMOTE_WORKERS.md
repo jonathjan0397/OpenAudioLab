@@ -46,15 +46,21 @@ image.
 Current hub (home server): the plain filesystem backend (`LocalObjectStorage`,
 `OAL_STORAGE_BACKEND=local`) rooted at `/srv/oal-storage/oal` on the 1TB drive,
 NFS-exported **to the WireGuard subnet only** (`10.203.0.0/24`). The baseline
-worker bind-mounts the host's NFS automount (`/mnt/oal-storage` → `/data/oal`);
-Vast burst nodes mount it in-container via `OAL_NFS_SOURCE` (entrypoint `mount
--t nfs4`, needs `nfs-common`, in the image). LocalStack was dropped 2026-10-16:
-Community 3.8.1 does not persist S3 state (persistence is a Pro feature) and
-MinIO is not anonymously pullable on these hosts. The `S3ObjectStorage` adapter
-remains for a future VPS/managed-S3 hub. Workers push every artifact to the
-store; the API proxies ranged reads so the bucket stays private. Trained LoRA
-adapters are uploaded and recorded as an object prefix + file list, so a profile
-trained on one node can be loaded (downloaded to a node-local cache) anywhere.
+worker bind-mounts the host's NFS automount (`/mnt/oal-storage` → `/data/oal`).
+Vast burst nodes cannot mount NFS (Vast containers lack CAP_SYS_ADMIN *and*
+NET_ADMIN -- kernel WireGuard and kernel NFS both fail, and userspace Tailscale
+cannot route raw app TCP without the route), so they dial the hub's **public
+IP** and write to container-local disk; an entrypoint sidecar rsync-pushes
+`/data/oal/` to `administrator@hub:/srv/oal-storage/oal/` over ssh every 2 s
+(`OAL_PUSH_TARGET` + `OAL_PUSH_PRIVKEY_B64`, deploy key `~/.ssh/oal_worker_deploy`
+on the hub). Redis is public with `requirepass` (`OAL_REDIS_PASSWORD`);
+Postgres uses password auth. LocalStack was dropped 2026-10-16: Community 3.8.1
+does not persist S3 state (persistence is a Pro feature) and MinIO is not
+anonymously pullable on these hosts. The `S3ObjectStorage` adapter remains for
+a future VPS/managed-S3 hub. Workers push every artifact to the store; the API
+proxies ranged reads so the bucket stays private. Trained LoRA adapters are
+uploaded and recorded as an object prefix + file list, so a profile trained on
+one node can be loaded (downloaded to a node-local cache) anywhere.
 
 ## Ephemeral node boot sequence
 

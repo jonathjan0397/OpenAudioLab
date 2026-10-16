@@ -28,6 +28,28 @@ WG
     wg-quick up wg0 || { echo "[worker] wg-quick up failed"; exit 1; }
 fi
 
+# Optional Tailscale userspace bring-up for Vast nodes (no NET_ADMIN needed).
+# The hub's services are then reachable at its 100.x address.
+if [ "${OAL_TS_UP:-0}" = "1" ]; then
+    TS_SOCK=/tmp/tailscale/tailscaled.sock
+    mkdir -p /tmp/tailscale
+    echo "[worker] starting tailscaled (userspace networking)"
+    tailscaled --tun=userspace-networking --statedir=/tmp/tailscale --socket="$TS_SOCK" \
+        >/tmp/tailscale/tailscaled.log 2>&1 &
+    i=0
+    until tailscale --socket="$TS_SOCK" version >/dev/null 2>&1; do
+        i=$((i + 1))
+        [ "$i" -ge 30 ] && { echo "[worker] tailscaled not ready"; exit 1; }
+        sleep 1
+    done
+    TS_ARGS="--auth-key=${OAL_TS_AUTHKEY} --hostname=${OAL_TS_HOSTNAME:-oal-worker}"
+    [ -n "${OAL_TS_TAGS:-}" ] && TS_ARGS="$TS_ARGS --advertise-tags=$OAL_TS_TAGS"
+    echo "[worker] joining tailnet"
+    # shellcheck disable=SC2086
+    tailscale --socket="$TS_SOCK" up $TS_ARGS || { echo "[worker] tailscale up failed"; exit 1; }
+    tailscale --socket="$TS_SOCK" ip -4
+fi
+
 # Optional hub NFS mount for the local filesystem storage backend (Vast nodes
 # mount inside the container; trusted hosts bind-mount the dir instead).
 if [ -n "${OAL_NFS_SOURCE:-}" ]; then
@@ -40,6 +62,27 @@ if [ -n "${OAL_NFS_SOURCE:-}" ]; then
         [ "$i" -ge 20 ] && { echo "[worker] NFS mount failed"; exit 1; }
         sleep 3
     done
+fi
+
+# rsync push-back for nodes that cannot mount NFS (Vast lacks CAP_SYS_ADMIN):
+# the worker writes to local disk and a sidecar loop mirrors it to the hub.
+if [ -n "${OAL_PUSH_TARGET:-}" ]; then
+    if [ -n "${OAL_PUSH_PRIVKEY_B64:-}" ]; then
+        mkdir -p /root/.ssh
+        printf '%s' "${OAL_PUSH_PRIVKEY_B64}" | base64 -d > /root/.ssh/oal_deploy
+        chmod 600 /root/.ssh/oal_deploy
+    fi
+    SSH_RSYNC="ssh -i /root/.ssh/oal_deploy -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    mkdir -p "${OAL_STORAGE_DIR:-/data/oal}"
+    echo "[worker] push-back loop -> $OAL_PUSH_TARGET"
+    (
+        while true; do
+            rsync -aq -e "$SSH_RSYNC" "${OAL_STORAGE_DIR:-/data/oal}/" "$OAL_PUSH_TARGET" 2>/dev/null || true
+            sleep 2
+        done
+    ) &
+    PUSH_PID=$!
+    trap 'kill $PUSH_PID 2>/dev/null; rsync -aq -e "$SSH_RSYNC" "${OAL_STORAGE_DIR:-/data/oal}/" "$OAL_PUSH_TARGET" 2>/dev/null || true' TERM
 fi
 
 BACKEND="${OAL_BACKEND_URL:-http://10.0.0.1:50555}"

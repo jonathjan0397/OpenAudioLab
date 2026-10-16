@@ -12,19 +12,17 @@ OAL_SCALE_TO_ONE_SECONDS, then drop to one hot node, then tear it down after
 OAL_SCALE_DOWN_SECONDS of low demand; any spike back to >= OAL_SCALE_UP_DEPTH
 resets the timer. A node younger than OAL_VAST_MIN_UPTIME is never removed.
 
-Vast workers reach the hub over the WireGuard overlay (10.203.0.0/24): the
-autoscaler generates a keypair per node, assigns a pooled 10.203.0.x address,
-and adds/removes the peer on the hub's wg2 interface (needs `sudo -n wg` or run
-under sudo). The env string passes `--privileged` for Vast hosts that allow it;
-where NET_ADMIN is unavailable the node falls back to failing fast in the
-entrypoint rather than silently losing storage. Nodes use args launch mode.
+Vast workers reach the hub over Tailscale when OAL_TS_AUTHKEY + OAL_HUB_TS_IP
+are set (tailscaled runs in userspace mode inside the container -- Vast hosts
+deny NET_ADMIN, so kernel WireGuard fails there); otherwise they join the hub's
+WireGuard pool (per-node keypair + pooled 10.203.0.x address, hub-side
+`wg set wg2 peer`, needs `sudo -n wg`). Nodes use args launch mode.
 Run this on the hub (home server): it needs the vastai CLI + hub reachability
 (redis is local there) and does not need a GPU.
 
 Config comes from the environment; source the hub secrets first, e.g.:
     set -a; . .env.backend; set +a
     OAL_HUB_IP=192.151.156.124 OAL_REDIS_URL=redis://127.0.0.1:6379/0 \
-      OAL_WG_HUB_PUBKEY=<wg2 pubkey> \
       VASTAI=.venv/bin/vastai .venv/bin/python scripts/autoscale.py
 """
 import argparse
@@ -34,6 +32,7 @@ import os
 import re
 import subprocess
 import time
+import uuid
 
 import redis
 
@@ -62,6 +61,17 @@ WG_IFACE = os.environ.get("OAL_WG_IFACE", "wg2")
 WG_POOL_START = int(os.environ.get("OAL_WG_POOL_START", "10"))
 WG_POOL_SIZE = int(os.environ.get("OAL_WG_POOL_SIZE", "16"))
 WG_SUDO = os.environ.get("OAL_WG_SUDO", "sudo -n").split()
+# Tailscale transport (preferred for Vast: userspace mode needs no NET_ADMIN).
+# When both are set, Vast nodes join the tailnet instead of the wg2 pool.
+TS_AUTHKEY = os.environ.get("OAL_TS_AUTHKEY", "")
+TS_TAGS = os.environ.get("OAL_TS_TAGS", "")
+HUB_TS = os.environ.get("OAL_HUB_TS_IP", "")
+PUSH_PRIVKEY_B64 = os.environ.get("OAL_PUSH_PRIVKEY_B64", "")
+REDIS_PASSWORD = os.environ.get("OAL_REDIS_PASSWORD", "")
+# Vast transport: "public" (hub public IP + ssh push-back; Vast lacks the caps
+# for kernel WireGuard/NFS and userspace Tailscale cannot route raw app TCP),
+# or "ts"/"wg" for capable hosts.
+VAST_TRANSPORT = os.environ.get("OAL_VAST_TRANSPORT", "public")
 MIN_RELIABILITY = float(os.environ.get("OAL_VAST_MIN_RELIABILITY", "0.95"))
 # Exclude old architectures (e.g. Volta V100 = 7.0) that the cu128 ACE-Step build
 # is not validated on; keeps Turing/Ampere/Ada/Blackwell.
@@ -80,17 +90,17 @@ def sh(args, stdin=None):
     return p.returncode, p.stdout, p.stderr
 
 
-def worker_env(wg=None):
+def worker_env(transport="wg", slot=None):
     pw = os.environ["OAL_POSTGRES_PASSWORD"]
     secret = os.environ["OAL_SECRET_KEY"]
+    base = HUB_TS if transport == "ts" else (HUB_TUNNEL if transport == "wg" else HUB)
     env = [
-        f"-e OAL_BACKEND_URL=http://{HUB_TUNNEL}:50555",
-        f"-e OAL_REDIS_URL=redis://{HUB_TUNNEL}:6379/0",
-        f"-e OAL_DATABASE_URL=postgresql+psycopg2://oal:{pw}@{HUB_TUNNEL}:55432/oal",
+        f"-e OAL_BACKEND_URL=http://{base}:50555",
+        f"-e OAL_REDIS_URL=redis://:{REDIS_PASSWORD}@{base}:6379/0" if REDIS_PASSWORD
+        else f"-e OAL_REDIS_URL=redis://{base}:6379/0",
+        f"-e OAL_DATABASE_URL=postgresql+psycopg2://oal:{pw}@{base}:55432/oal",
         "-e OAL_STORAGE_BACKEND=local",
         "-e OAL_STORAGE_DIR=/data/oal",
-        f"-e OAL_NFS_SOURCE={HUB_TUNNEL}:/srv/oal-storage/oal",
-        "-e OAL_NFS_TARGET=/data/oal",
         f"-e OAL_SECRET_KEY={secret}",
         "-e OAL_WORKER_ROLE=engine_worker",
         "-e OAL_ACESTEP_BASE_URL=http://127.0.0.1:8001",
@@ -101,15 +111,37 @@ def worker_env(wg=None):
         # the autoscaler tears them down, so no idle-stop is needed.
         "-e OAL_ENGINE_IDLE_STOP_SECONDS=0",
     ]
-    if wg:
+    if transport in ("ts", "public"):
+        # Vast containers cannot mount NFS (no CAP_SYS_ADMIN): write to local
+        # disk and rsync-push to the hub over ssh instead.
+        if transport == "ts":
+            env += [
+                "-e OAL_TS_UP=1",
+                f"-e OAL_TS_AUTHKEY={TS_AUTHKEY}",
+                f"-e OAL_TS_HOSTNAME={slot['hostname'] if slot else 'oal-vast'}",
+            ]
+            if TS_TAGS:
+                env.append(f"-e OAL_TS_TAGS={TS_TAGS}")
         env += [
-            "-e OAL_WG_UP=1",
-            f"-e OAL_WG_PRIVKEY={wg['privkey']}",
-            f"-e OAL_WG_ADDRESS={wg['ip']}/24",
-            f"-e OAL_WG_PUBKEY={WG_HUB_PUBKEY}",
-            f"-e OAL_WG_ENDPOINT={HUB}:51822",
+            f"-e OAL_PUSH_TARGET=administrator@{base}:/srv/oal-storage/oal/",
+            f"-e OAL_PUSH_PRIVKEY_B64={PUSH_PRIVKEY_B64}",
         ]
+    else:
+        env.append(f"-e OAL_NFS_SOURCE={base}:/srv/oal-storage/oal")
+        env.append("-e OAL_NFS_TARGET=/data/oal")
+        if slot:
+            env += [
+                "-e OAL_WG_UP=1",
+                f"-e OAL_WG_PRIVKEY={slot['privkey']}",
+                f"-e OAL_WG_ADDRESS={slot['ip']}/24",
+                f"-e OAL_WG_PUBKEY={WG_HUB_PUBKEY}",
+                f"-e OAL_WG_ENDPOINT={HUB}:51822",
+            ]
     return " ".join(env)
+
+
+def gen_ts_slot():
+    return {"hostname": f"oal-vast-{uuid.uuid4().hex[:6]}"}
 
 
 def gen_wg_slot(nodes):
@@ -171,7 +203,7 @@ def pick_offer():
     return o.get("id")
 
 
-def create_instance(wg=None, dry_run=False):
+def create_instance(slot=None, dry_run=False, transport="wg"):
     offer = pick_offer()
     if not offer:
         log("no eligible North-American offer; will retry")
@@ -179,7 +211,7 @@ def create_instance(wg=None, dry_run=False):
     if dry_run:
         log(f"[dry-run] would create instance on offer {offer}")
         return -1
-    env = ("--privileged " if wg else "") + worker_env(wg)
+    env = ("--privileged " if transport == "wg" else "") + worker_env(transport, slot)
     _, out, _ = sh([VASTAI, "create", "instance", str(offer), "--image", IMAGE,
                     "--disk", DISK, "--env", env, "--args", "run"])
     ok = "'success': True" in out
@@ -189,8 +221,8 @@ def create_instance(wg=None, dry_run=False):
     # reported success:False -- the node booted and is billing, so leaving it
     # untracked would leak it. Only a create with no contract is a true failure.
     cid = int(m.group(1)) if m else None
-    if cid and wg:
-        wg_add_peer(wg["pubkey"], wg["ip"])
+    if cid and slot and transport == "wg":
+        wg_add_peer(slot["pubkey"], slot["ip"])
     return cid
 
 
@@ -251,22 +283,36 @@ def tick(r, st, dry_run=False):
     want = desired_nodes(depth, st.get("low_since"), now, len(nodes))
 
     if len(nodes) < want:
-        wg = gen_wg_slot(nodes) if WG_HUB_PUBKEY else None
-        if WG_HUB_PUBKEY and wg is None:
-            log("WireGuard pool exhausted; creating without tunnel")
-        new = create_instance(wg, dry_run)
+        transport = VAST_TRANSPORT
+        if transport == "ts":
+            slot = gen_ts_slot()
+        elif transport == "wg":
+            slot = gen_wg_slot(nodes)
+            if slot is None:
+                log("WireGuard pool exhausted; creating without tunnel")
+        else:
+            slot = None
+        new = create_instance(slot, dry_run, transport)
         if new:
-            node = {"contract": new, "created_at": now}
-            if wg:
-                node.update({"wg_ip": wg["ip"], "wg_pubkey": wg["pubkey"],
-                             "wg_privkey": wg["privkey"]})
+            node = {"contract": new, "created_at": now, "transport": transport}
+            if transport == "ts" and slot:
+                node["ts_hostname"] = slot["hostname"]
+            elif transport == "wg" and slot:
+                node.update({"wg_ip": slot["ip"], "wg_pubkey": slot["pubkey"],
+                             "wg_privkey": slot["privkey"]})
             nodes.append(node)
             st["nodes"] = nodes
-            log(f"depth={depth} want={want} -> +1 node {new} (now {len(nodes)})")
+            log(f"depth={depth} want={want} -> +1 node {new} via {transport} (now {len(nodes)})")
     elif len(nodes) > want:
         removable = [n for n in nodes if now - n["created_at"] >= MIN_UPTIME]
+        burst_depth = r.llen(BURST_KEY)
+        if removable and burst_depth > 0:
+            removable = []
+            hold_reason = f"burst={burst_depth} draining"
+        else:
+            hold_reason = "all < min_uptime"
         if not removable:
-            log(f"depth={depth} want={want} nodes={len(nodes)} all < min_uptime; hold")
+            log(f"depth={depth} want={want} nodes={len(nodes)} {hold_reason}; hold")
         else:
             victim = max(removable, key=lambda n: n["created_at"])  # newest first
             destroy_instance(victim["contract"], dry_run)
