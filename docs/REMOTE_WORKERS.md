@@ -217,3 +217,35 @@ consumer card); a warm node is faster. Exposing Redis/Postgres/S3 publicly is
 fine for validation; production should firewall the hub to worker IPs (or use a
 VPS hub) and MinIO/managed S3. The `wireguard-tools`/entrypoint wg bring-up stays
 in the image for tunnel peers (dev host) even though Vast uses the public IP.
+
+## Queue-depth autoscaling (local baseline + Vast burst)
+
+Policy: the dev host's GPU 0 runs an always-on engine worker (the baseline).
+When the engine queue `oal:queue:ace-step-1.5` reaches `OAL_SCALE_UP_DEPTH`
+(default 2) waiting jobs, `scripts/autoscale.py` spins up ONE Vast.ai burst
+worker (public-IP env, args-mode) to help drain it, and tears it down once the
+queue is empty for `OAL_SCALE_DOWN_SECONDS` (default 120s) after an
+`OAL_VAST_MIN_UPTIME` (default 180s) warm-up guard. It runs on the dev host
+(GPU 0 + `vastai` + hub reachability), polls every 15s, and persists the managed
+contract to a state file so restarts don't orphan instances.
+
+- **Offer selection**: cheapest North-American offer with `gpu_ram>=16`,
+  `cuda_max_good>=12.8`, `verification=verified`, `reliability2>=0.95` and
+  `compute_cap>=7.5` (excludes Volta, which the cu128 ACE-Step build isn't
+  validated on).
+- **Cold-start caveat**: a Vast node re-pulls the ~13 GB image (minutes) and
+  lazy-loads the model, so a burst worker only pays off for sustained load; a
+  short burst is usually drained by the local baseline before the node is warm.
+  A pre-baked checkpoint volume or a kept-warm node mitigates this.
+
+Launch (on the dev host):
+
+```
+set -a; . .env.backend; set +a
+VASTAI=.venv/bin/vastai OAL_AUTOSCALE_STATE=/tmp/oal_autoscale_state.json \
+  .venv/bin/python scripts/autoscale.py
+```
+
+Validated (2026-10-16): enqueuing 3 jobs drove depth to 3 → the autoscaler
+created a burst instance, the local baseline drained the queue (all jobs
+succeeded), and the autoscaler destroyed the instance after the cooldown.
