@@ -76,7 +76,7 @@ def _content_url(settings: Any, asset_id: str) -> str:
 
 @router.get("/lab", response_class=HTMLResponse)
 def lab_page(request: Request, _: HTTPBasicCredentials = Depends(require_lab)) -> HTMLResponse:
-    return HTMLResponse(_PAGE_HTML)
+    return HTMLResponse(_PAGE_HTML, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/lab/api/artifacts")
@@ -189,6 +189,7 @@ _PAGE_HTML = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
 <title>OpenAudioLab - Test Harness</title>
 <style>
   :root { color-scheme: light dark; }
@@ -221,6 +222,7 @@ _PAGE_HTML = """<!doctype html>
 </style>
 </head>
 <body>
+<noscript><p style="padding:12px 24px;color:#e6b450">This page needs JavaScript enabled.</p></noscript>
 <header><h1>OpenAudioLab</h1><span class="sub">test harness</span></header>
 <main>
   <section class="card">
@@ -242,6 +244,15 @@ _PAGE_HTML = """<!doctype html>
     <ul class="artifacts" id="list"><li class="empty">Loading...</li></ul>
   </section>
 </main>
+<script>
+window.onerror = function (m) {
+  var l = document.getElementById("list");
+  if (l) l.innerHTML = '<li class="empty">JS error: ' + m + "</li>";
+  var s = document.getElementById("status");
+  if (s) s.textContent = "JS error: " + m;
+  return false;
+};
+</script>
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => (s == null ? "" : String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])) ;
