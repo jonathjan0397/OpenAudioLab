@@ -446,7 +446,7 @@ function audioBlock(a) {
     + '<span>' + fmtDur(a.duration_seconds) + '</span>'
     + '<span>' + (a.bytes ? Math.round(a.bytes / 1024) + " KB" : "") + '</span>'
     + '<span>' + esc(fmtTime(a.created_at)) + '</span>' + expired + synth
-    + ' <span class="tag" style="cursor:pointer" onclick="editTags(\'' + a.asset_id + '\')">tags: ' + esc((a.tags || []).join(", ") || "none") + '</span>'
+    + ' <span class="tag" style="cursor:pointer" onclick="editTags(\\'' + a.asset_id + '\\')">tags: ' + esc((a.tags || []).join(", ") || "none") + '</span>'
     + '</div><audio controls preload="none" src="' + esc(a.url) + '"></audio></div>';
 }
 
