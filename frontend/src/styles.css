@@ -468,3 +468,6 @@ img.avatar { padding: 0; }
 .theme-select { width: 130px; font-size: 12px; padding: 6px 8px; opacity: 0.75; }
 .theme-select:hover { opacity: 1; }
 @media (max-width: 1100px) { .open-studio { display: none; } }
+.admin-strip { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.strip-controls { display: flex; gap: 10px; }
+.strip-controls select { width: auto; background: var(--surface); }

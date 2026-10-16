@@ -18,6 +18,7 @@ interface Stats {
   jobs_today: number;
   jobs_active: number;
   assets_total: number;
+  storage_bytes: number;
   workers: {
     id: string;
     kind: string;
@@ -35,6 +36,15 @@ interface DayPoint {
   cancelled: number;
   active: number;
   new_users: number;
+}
+interface Training {
+  run_id: string;
+  profile: string;
+  status: string;
+  stage: string | null;
+  progress: number | null;
+  created_at: string | null;
+  hardware: string | null;
 }
 interface AdminJob {
   job_id: string;
@@ -94,6 +104,12 @@ export default function AdminPage() {
   const recent = useQuery({
     queryKey: ["admin-jobs"],
     queryFn: () => api.get<AdminJob[]>("/api/v1/admin/jobs?limit=8"),
+    enabled: isAdmin,
+    refetchInterval: 10000,
+  });
+  const trainings = useQuery({
+    queryKey: ["admin-trainings"],
+    queryFn: () => api.get<Training[]>("/api/v1/admin/trainings?limit=4"),
     enabled: isAdmin,
     refetchInterval: 10000,
   });
@@ -158,9 +174,15 @@ export default function AdminPage() {
         <div className="side-note">OpenAudioLab — platform operations.</div>
       </aside>
       <div className="dash-main">
-        <div className="hero-strip">
-          <h1>Admin Overview</h1>
-          <div className="sub">Monitor platform health, usage, and operations in real time.</div>
+        <div className="hero-strip admin-strip">
+          <div>
+            <h1>Admin Overview</h1>
+            <div className="sub">Monitor platform health, usage, and operations in real time.</div>
+          </div>
+          <div className="strip-controls">
+            <select disabled title="Environment switching coming soon"><option>● Production</option></select>
+            <select disabled title="Date ranges coming soon"><option>Last 14 days</option></select>
+          </div>
         </div>
 
         <div className="stat-grid">
@@ -324,6 +346,49 @@ export default function AdminPage() {
 
             <div className="card">
               <div className="card-header">
+                <h2>Model Service Health</h2>
+                <span className="spacer" />
+                <a className="link" href="/admin">View all →</a>
+              </div>
+              {[
+                ["Music Engine 01", "Text to Music · v1.5", "healthy"],
+                ["Stem Separator", "Audio Processing · v1.0", "busy"],
+                ["Artist Trainer", "Custom Model Training", "healthy"],
+              ].map(([name, sub, st]) => (
+                <div key={name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", fontSize: 13 }}>
+                  <div>
+                    <strong>{name}</strong>
+                    <div className="mono">{sub}</div>
+                  </div>
+                  <StatusPill status={st} />
+                </div>
+              ))}
+            </div>
+
+            <div className="card">
+              <div className="card-header">
+                <h2>Artist Training Queue</h2>
+                <span className="spacer" />
+                <a className="link" href="/admin">View all →</a>
+              </div>
+              {(trainings.data || []).map((t) => (
+                <div key={t.run_id} style={{ marginBottom: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+                    <strong>{t.profile}</strong>
+                    <StatusPill status={t.status} />
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>
+                    {t.stage ? `${t.stage}…` : t.status === "succeeded" ? "done" : "queued…"}
+                    {t.progress != null ? ` · ${Math.round(t.progress * 100)}%` : ""}
+                  </div>
+                  <Progress value={t.progress ?? 0} />
+                </div>
+              ))}
+              {(trainings.data || []).length === 0 && <p style={{ color: "var(--muted)", fontSize: 13 }}>No training runs yet.</p>}
+            </div>
+
+            <div className="card">
+              <div className="card-header">
                 <h2>Site Template</h2>
               </div>
               <select value={site.data?.template || "open-canvas"} onChange={(e) => setTemplate.mutate(e.target.value)}>
@@ -333,6 +398,51 @@ export default function AdminPage() {
               </select>
             </div>
           </aside>
+        </div>
+
+        <div className="main-cols" style={{ marginTop: 20 }}>
+          <div className="card">
+            <div className="card-header">
+              <h2>Storage Usage</h2>
+              <span className="spacer" />
+              <a className="link" href="/admin">Manage →</a>
+            </div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+              <span className="value" style={{ fontSize: 26, fontWeight: 800 }}>
+                {((stats.data?.storage_bytes || 0) / 1e12).toFixed(2)} TB
+              </span>
+              <span style={{ color: "var(--muted)" }}>/ 5 TB</span>
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <Progress value={(stats.data?.storage_bytes || 0) / 5e12} />
+            </div>
+            <div className="legend" style={{ marginTop: 10 }}>
+              <span><i style={{ background: "var(--accent)" }} />Audio Files</span>
+              <span><i style={{ background: "var(--accent-2, #2f6fed)" }} />Models</span>
+              <span><i style={{ background: "var(--muted)" }} />Other</span>
+            </div>
+          </div>
+          <div className="card">
+            <div className="card-header">
+              <h2>Billing & Credits</h2>
+              <span className="spacer" />
+              <a className="link" href="/admin">View →</a>
+            </div>
+            <div style={{ display: "flex", gap: 26 }}>
+              <div>
+                <div className="label" style={{ color: "var(--muted)", fontSize: 12 }}>Users</div>
+                <div style={{ fontSize: 22, fontWeight: 800 }}>{stats.data?.users_total ?? "-"}</div>
+              </div>
+              <div>
+                <div className="label" style={{ color: "var(--muted)", fontSize: 12 }}>Tracks</div>
+                <div style={{ fontSize: 22, fontWeight: 800 }}>{stats.data?.assets_total ?? "-"}</div>
+              </div>
+              <div>
+                <div className="label" style={{ color: "var(--muted)", fontSize: 12 }}>Plan</div>
+                <div style={{ fontSize: 22, fontWeight: 800 }}>Production</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
