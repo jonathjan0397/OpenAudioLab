@@ -188,6 +188,21 @@ class EngineWorker:
             except Exception:
                 pass
         try:
+            from sqlalchemy import select
+
+            from .models import TrainingRun
+
+            with self.db.session() as session:
+                row = session.execute(
+                    select(TrainingRun.id)
+                    .where(TrainingRun.status.in_(("queued", "running")))
+                    .limit(1)
+                ).first()
+            if row is not None:
+                return True
+        except Exception:
+            pass
+        try:
             data = json.loads(self.adapter.transport.get_bytes("/v1/training/status"))
             return bool(data.get("data", {}).get("is_training"))
         except Exception:
