@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import DateTime, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Float, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -310,4 +310,24 @@ class Evaluation(Base):
     prompts_json: Mapped[list] = mapped_column(JSON, default=list)
     measurements_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     review: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Lora(Base):
+    """Registry of reusable adapters (style/genre/voice) selectable by tag or id."""
+
+    __tablename__ = "loras"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    kind: Mapped[str] = mapped_column(String(20), default="style")
+    tags_json: Mapped[list] = mapped_column(JSON, default=list)
+    storage_prefix: Mapped[str] = mapped_column(String(500), default="")
+    files_json: Mapped[list] = mapped_column(JSON, default=list)
+    base_model_id: Mapped[str] = mapped_column(String(80), default="ace-step-1.5")
+    base_revision: Mapped[str] = mapped_column(String(120), default="")
+    default_scale: Mapped[float] = mapped_column(Float, default=1.0)
+    state: Mapped[str] = mapped_column(String(20), default="active")
+    provenance: Mapped[str] = mapped_column(String(20), default="external")
+    profile_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

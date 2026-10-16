@@ -175,6 +175,12 @@ def create_job(
     status_url, events_url = None, None
 
     with request.app.state.db.session() as session:
+        if payload.lora_id is not None and payload.artist_profile_version_id is not None:
+            raise ApiError(
+                422,
+                "LORA_PROFILE_CONFLICT",
+                "Choose either a registry LoRA or an artist profile version, not both.",
+            )
         if payload.artist_profile_version_id is not None:
             from ..models import ArtistProfileVersion
 
@@ -190,6 +196,19 @@ def create_job(
                 )
             if profile_version.state not in ("active", "candidate"):
                 raise ApiError(409, "STATE_CONFLICT", "Retired profile versions cannot be used for new jobs.")
+        if payload.lora_id is not None:
+            from ..models import Lora
+
+            lora = session.get(Lora, payload.lora_id)
+            if lora is None or lora.state != "active":
+                raise ApiError(404, "LORA_NOT_FOUND", "Active registry LoRA not found.")
+            if lora.base_model_id != payload.model_id:
+                raise ApiError(
+                    422,
+                    "LORA_INCOMPATIBLE",
+                    "The registry LoRA was trained for a different base model.",
+                    {"lora_base_model_id": lora.base_model_id, "model_id": payload.model_id},
+                )
         existing = session.execute(
             select(IdempotencyRecord).where(
                 IdempotencyRecord.owner_id == owner_id,

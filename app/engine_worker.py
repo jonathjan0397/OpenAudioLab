@@ -246,10 +246,22 @@ class EngineWorker:
                 version = session.get(ArtistProfileVersion, profile_version_id)
                 if version is not None:
                     profile_artifacts = dict(version.artifacts_json or {})
+            lora_artifacts: dict | None = None
+            lora_id = dict(job.request_json).get("lora_id")
+            if lora_id:
+                from .models import Lora
+
+                lora = session.get(Lora, lora_id)
+                if lora is not None and lora.state == "active" and lora.storage_prefix and lora.files_json:
+                    lora_artifacts = {
+                        "adapter_object_prefix": lora.storage_prefix,
+                        "adapter_files": list(lora.files_json),
+                    }
             append_event(session, claimed_job, "stage", "running", stage="submitting", attempt_id=attempt_id)
             session.commit()
 
-        profile_path = self._materialize_adapter(profile_artifacts) if profile_artifacts else None
+        adapter_artifacts = lora_artifacts or profile_artifacts
+        profile_path = self._materialize_adapter(adapter_artifacts) if adapter_artifacts else None
         if profile_path:
             try:
                 self.adapter.unload_lora()

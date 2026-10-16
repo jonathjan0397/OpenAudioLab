@@ -29,6 +29,7 @@ class GenerateJobRequest(StrictModel):
     controls: dict[str, Any] = Field(default_factory=dict)
     outputs: list[OutputOption] = Field(default_factory=lambda: ["mix_wav", "mix_mp3"])
     artist_profile_version_id: str | None = None
+    lora_id: str | None = None
     client_reference: str | None = Field(default=None, max_length=200)
     @field_validator("outputs")
     @classmethod

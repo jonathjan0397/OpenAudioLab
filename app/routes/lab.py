@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from ..errors import ApiError
-from ..models import ArtistProfile, ArtistProfileVersion, Asset, Job, utcnow
+from ..models import ArtistProfile, ArtistProfileVersion, Asset, Job, Lora, utcnow
 from ..orchestration import as_utc
 from ..schemas import GenerateJobRequest
 from ..tokens import make_token
@@ -42,6 +42,7 @@ class LabGenerate(BaseModel):
     model_id: str = "ace-step-1.5"
     seed: int | None = Field(default=None, ge=0, le=2**63 - 1)
     artist_profile_version_id: str | None = None
+    lora_id: str | None = None
 
 
 class _RequestShim:
@@ -139,6 +140,8 @@ def lab_generate(
     if payload.seed is not None:
         body["seed"] = payload.seed
     owner = _lab_owner(settings.lab_owner_token)
+    if payload.lora_id:
+        body["lora_id"] = payload.lora_id
     if payload.artist_profile_version_id:
         body["artist_profile_version_id"] = payload.artist_profile_version_id
         with request.app.state.db.session() as session:
@@ -181,6 +184,33 @@ def lab_profiles(
         for version, name in rows
     ]
     return JSONResponse({"profiles": items})
+
+
+@router.get("/lab/api/loras")
+def lab_loras(
+    request: Request,
+    _: HTTPBasicCredentials = Depends(require_lab),
+) -> JSONResponse:
+    with request.app.state.db.session() as session:
+        rows = list(
+            session.execute(
+                select(Lora).where(Lora.state == "active").order_by(Lora.kind, Lora.name)
+            )
+            .scalars()
+        )
+    items = [
+        {
+            "id": lora.id,
+            "name": lora.name,
+            "kind": lora.kind,
+            "tags": list(lora.tags_json or []),
+            "base_model_id": lora.base_model_id,
+            "default_scale": lora.default_scale,
+            "provenance": lora.provenance,
+        }
+        for lora in rows
+    ]
+    return JSONResponse({"loras": items})
 
 
 @router.get("/lab/api/jobs/{job_id}")
@@ -282,6 +312,11 @@ _PAGE_HTML = """<!doctype html>
       <select id="profile"><option value="">base model (no LoRA)</option></select>
       <button class="ghost" id="profrefresh" style="flex:0 0 auto">Refresh</button>
     </div>
+    <label for="lora">Registry LoRA</label>
+    <div style="display:flex;gap:10px">
+      <select id="lora"><option value="">none</option></select>
+      <button class="ghost" id="lorarefresh" style="flex:0 0 auto">Refresh</button>
+    </div>
     <div style="margin-top:16px"><button id="go">Generate</button></div>
     <div class="status" id="status"></div>
     <div class="result" id="result"></div>
@@ -368,6 +403,26 @@ function pollJob(jobId) {
   });
 }
 
+function loadLoras() {
+  xhr("GET", "/lab/api/loras", null, function (x) {
+    if (!x) return;
+    var data;
+    try { data = JSON.parse(x.responseText); } catch (e) { return; }
+    var items = data.loras || [];
+    var sel = $("lora");
+    var prev = sel.value;
+    sel.innerHTML = '<option value="">none</option>';
+    for (var i = 0; i < items.length; i++) {
+      var l = items[i];
+      var opt = document.createElement("option");
+      opt.value = l.id;
+      opt.textContent = "[" + l.kind + "] " + l.name + (l.tags.length ? " (" + l.tags.join(", ") + ")" : "");
+      sel.appendChild(opt);
+    }
+    if (prev) sel.value = prev;
+  });
+}
+
 function loadProfiles() {
   xhr("GET", "/lab/api/profiles", null, function (x) {
     if (!x) return;
@@ -399,6 +454,7 @@ function generate() {
   };
   if ($("seed").value !== "") body.seed = parseInt($("seed").value, 10);
   if ($("profile").value) body.artist_profile_version_id = $("profile").value;
+  if ($("lora").value) body.lora_id = $("lora").value;
   $("go").disabled = true; $("result").innerHTML = ""; setStatus("Submitting...");
   xhr("POST", "/lab/api/generate", JSON.stringify(body), function (x) {
     if (!x) { $("go").disabled = false; return; }
@@ -419,8 +475,12 @@ function generate() {
 $("go").addEventListener("click", generate);
 $("refresh").addEventListener("click", loadArtifacts);
 $("profrefresh").addEventListener("click", loadProfiles);
+$("lorarefresh").addEventListener("click", loadLoras);
+$("lora").addEventListener("change", function () { if (this.value) $("profile").value = ""; });
+$("profile").addEventListener("change", function () { if (this.value) $("lora").value = ""; });
 loadArtifacts();
 loadProfiles();
+loadLoras();
 </script>
 </body>
 </html>
