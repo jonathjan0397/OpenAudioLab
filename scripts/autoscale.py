@@ -12,14 +12,19 @@ OAL_SCALE_TO_ONE_SECONDS, then drop to one hot node, then tear it down after
 OAL_SCALE_DOWN_SECONDS of low demand; any spike back to >= OAL_SCALE_UP_DEPTH
 resets the timer. A node younger than OAL_VAST_MIN_UPTIME is never removed.
 
-Vast workers reach the hub over its public IP (Vast containers lack NET_ADMIN,
-so in-container WireGuard is unavailable) and use args launch mode. Run this on
-the hub (home server): it needs the vastai CLI + hub reachability (redis is
-local there) and does not need a GPU.
+Vast workers reach the hub over the WireGuard overlay (10.203.0.0/24): the
+autoscaler generates a keypair per node, assigns a pooled 10.203.0.x address,
+and adds/removes the peer on the hub's wg2 interface (needs `sudo -n wg` or run
+under sudo). The env string passes `--privileged` for Vast hosts that allow it;
+where NET_ADMIN is unavailable the node falls back to failing fast in the
+entrypoint rather than silently losing storage. Nodes use args launch mode.
+Run this on the hub (home server): it needs the vastai CLI + hub reachability
+(redis is local there) and does not need a GPU.
 
 Config comes from the environment; source the hub secrets first, e.g.:
     set -a; . .env.backend; set +a
     OAL_HUB_IP=192.151.156.124 OAL_REDIS_URL=redis://127.0.0.1:6379/0 \
+      OAL_WG_HUB_PUBKEY=<wg2 pubkey> \
       VASTAI=.venv/bin/vastai .venv/bin/python scripts/autoscale.py
 """
 import argparse
@@ -33,6 +38,7 @@ import time
 import redis
 
 HUB = os.environ.get("OAL_HUB_IP", "192.151.156.124")
+HUB_TUNNEL = os.environ.get("OAL_HUB_TUNNEL_IP", "10.203.0.1")
 QUEUE_KEY = os.environ.get("OAL_QUEUE_KEY", "oal:queue:ace-step-1.5")
 BURST_KEY = QUEUE_KEY + ":burst"
 REDIS_URL = os.environ.get("OAL_REDIS_URL", f"redis://{HUB}:6379/0")
@@ -48,6 +54,14 @@ MIN_UPTIME = float(os.environ.get("OAL_VAST_MIN_UPTIME", "180"))
 POLL = float(os.environ.get("OAL_SCALE_POLL_SECONDS", "15"))
 STATE = os.environ.get("OAL_AUTOSCALE_STATE", "/tmp/oal_autoscale_state.json")
 VASTAI = os.environ.get("VASTAI", "vastai")
+# WireGuard peer pool for Vast burst nodes (hub iface wg2, 10.203.0.0/24).
+# The autoscaler runs on the hub; wg set needs root, so run it under sudo or
+# grant passwordless `sudo -n wg`.
+WG_HUB_PUBKEY = os.environ.get("OAL_WG_HUB_PUBKEY", "")
+WG_IFACE = os.environ.get("OAL_WG_IFACE", "wg2")
+WG_POOL_START = int(os.environ.get("OAL_WG_POOL_START", "10"))
+WG_POOL_SIZE = int(os.environ.get("OAL_WG_POOL_SIZE", "16"))
+WG_SUDO = os.environ.get("OAL_WG_SUDO", "sudo -n").split()
 MIN_RELIABILITY = float(os.environ.get("OAL_VAST_MIN_RELIABILITY", "0.95"))
 # Exclude old architectures (e.g. Volta V100 = 7.0) that the cu128 ACE-Step build
 # is not validated on; keeps Turing/Ampere/Ada/Blackwell.
@@ -66,23 +80,17 @@ def sh(args, stdin=None):
     return p.returncode, p.stdout, p.stderr
 
 
-def worker_env():
+def worker_env(wg=None):
     pw = os.environ["OAL_POSTGRES_PASSWORD"]
     secret = os.environ["OAL_SECRET_KEY"]
-    s3a = os.environ.get("OAL_S3_ACCESS_KEY", "oal")
-    s3s = os.environ["OAL_S3_SECRET_KEY"]
-    bucket = os.environ.get("OAL_S3_BUCKET", "oal")
-    region = os.environ.get("OAL_S3_REGION", "us-east-1")
-    return " ".join([
-        f"-e OAL_BACKEND_URL=http://{HUB}:50555",
-        f"-e OAL_REDIS_URL=redis://{HUB}:6379/0",
-        f"-e OAL_DATABASE_URL=postgresql+psycopg2://oal:{pw}@{HUB}:55432/oal",
-        "-e OAL_STORAGE_BACKEND=s3",
-        f"-e OAL_S3_ENDPOINT_URL=http://{HUB}:9000",
-        f"-e OAL_S3_BUCKET={bucket}",
-        f"-e OAL_S3_REGION={region}",
-        f"-e OAL_S3_ACCESS_KEY={s3a}",
-        f"-e OAL_S3_SECRET_KEY={s3s}",
+    env = [
+        f"-e OAL_BACKEND_URL=http://{HUB_TUNNEL}:50555",
+        f"-e OAL_REDIS_URL=redis://{HUB_TUNNEL}:6379/0",
+        f"-e OAL_DATABASE_URL=postgresql+psycopg2://oal:{pw}@{HUB_TUNNEL}:55432/oal",
+        "-e OAL_STORAGE_BACKEND=local",
+        "-e OAL_STORAGE_DIR=/data/oal",
+        f"-e OAL_NFS_SOURCE={HUB_TUNNEL}:/srv/oal-storage/oal",
+        "-e OAL_NFS_TARGET=/data/oal",
         f"-e OAL_SECRET_KEY={secret}",
         "-e OAL_WORKER_ROLE=engine_worker",
         "-e OAL_ACESTEP_BASE_URL=http://127.0.0.1:8001",
@@ -92,7 +100,40 @@ def worker_env():
         # Vast burst nodes stay hot (keep the model loaded for their short life);
         # the autoscaler tears them down, so no idle-stop is needed.
         "-e OAL_ENGINE_IDLE_STOP_SECONDS=0",
-    ])
+    ]
+    if wg:
+        env += [
+            "-e OAL_WG_UP=1",
+            f"-e OAL_WG_PRIVKEY={wg['privkey']}",
+            f"-e OAL_WG_ADDRESS={wg['ip']}/24",
+            f"-e OAL_WG_PUBKEY={WG_HUB_PUBKEY}",
+            f"-e OAL_WG_ENDPOINT={HUB}:51822",
+        ]
+    return " ".join(env)
+
+
+def gen_wg_slot(nodes):
+    """Generate a keypair and pick a free 10.203.0.x address from the pool."""
+    rc, priv, _ = sh(["wg", "genkey"])
+    if rc or not priv.strip():
+        return None
+    rc, pub, _ = sh(["wg", "pubkey"], stdin=priv.strip())
+    if rc or not pub.strip():
+        return None
+    used = {n.get("wg_ip") for n in nodes}
+    for i in range(WG_POOL_START, WG_POOL_START + WG_POOL_SIZE):
+        ip = f"10.203.0.{i}"
+        if ip not in used:
+            return {"privkey": priv.strip(), "pubkey": pub.strip(), "ip": ip}
+    return None
+
+
+def wg_add_peer(pub, ip):
+    sh(WG_SUDO + ["wg", "set", WG_IFACE, "peer", pub, "allowed-ips", f"{ip}/32"])
+
+
+def wg_remove_peer(pub):
+    sh(WG_SUDO + ["wg", "set", WG_IFACE, "peer", pub, "remove"])
 
 
 def pick_offer():
@@ -130,7 +171,7 @@ def pick_offer():
     return o.get("id")
 
 
-def create_instance(dry_run=False):
+def create_instance(wg=None, dry_run=False):
     offer = pick_offer()
     if not offer:
         log("no eligible North-American offer; will retry")
@@ -138,15 +179,19 @@ def create_instance(dry_run=False):
     if dry_run:
         log(f"[dry-run] would create instance on offer {offer}")
         return -1
+    env = ("--privileged " if wg else "") + worker_env(wg)
     _, out, _ = sh([VASTAI, "create", "instance", str(offer), "--image", IMAGE,
-                    "--disk", DISK, "--env", worker_env(), "--args", "run"])
+                    "--disk", DISK, "--env", env, "--args", "run"])
     ok = "'success': True" in out
     m = re.search(r"'new_contract':\s*(\d+)", out)
     log(f"create offer={offer} ok={ok} out={out.strip()[:160]}")
     # Track the instance whenever Vast returned a contract, even if the CLI
     # reported success:False -- the node booted and is billing, so leaving it
     # untracked would leak it. Only a create with no contract is a true failure.
-    return int(m.group(1)) if m else None
+    cid = int(m.group(1)) if m else None
+    if cid and wg:
+        wg_add_peer(wg["pubkey"], wg["ip"])
+    return cid
 
 
 def destroy_instance(cid, dry_run=False):
@@ -206,9 +251,16 @@ def tick(r, st, dry_run=False):
     want = desired_nodes(depth, st.get("low_since"), now, len(nodes))
 
     if len(nodes) < want:
-        new = create_instance(dry_run)
+        wg = gen_wg_slot(nodes) if WG_HUB_PUBKEY else None
+        if WG_HUB_PUBKEY and wg is None:
+            log("WireGuard pool exhausted; creating without tunnel")
+        new = create_instance(wg, dry_run)
         if new:
-            nodes.append({"contract": new, "created_at": now})
+            node = {"contract": new, "created_at": now}
+            if wg:
+                node.update({"wg_ip": wg["ip"], "wg_pubkey": wg["pubkey"],
+                             "wg_privkey": wg["privkey"]})
+            nodes.append(node)
             st["nodes"] = nodes
             log(f"depth={depth} want={want} -> +1 node {new} (now {len(nodes)})")
     elif len(nodes) > want:
@@ -218,6 +270,8 @@ def tick(r, st, dry_run=False):
         else:
             victim = max(removable, key=lambda n: n["created_at"])  # newest first
             destroy_instance(victim["contract"], dry_run)
+            if victim.get("wg_pubkey") and not dry_run:
+                wg_remove_peer(victim["wg_pubkey"])
             nodes.remove(victim)
             st["nodes"] = nodes
             log(f"depth={depth} want={want} -> -1 node {victim['contract']} (now {len(nodes)})")
@@ -232,6 +286,11 @@ def main():
 
     r = redis.Redis.from_url(REDIS_URL, socket_timeout=5)
     st = load_state()
+    # Re-add tracked WireGuard peers in case wg2 was restarted (dynamic peers
+    # are lost on interface restart).
+    for n in st.get("nodes", []):
+        if n.get("wg_pubkey") and n.get("wg_ip"):
+            wg_add_peer(n["wg_pubkey"], n["wg_ip"])
     log(f"start hub={HUB} queue={QUEUE_KEY} up>={SCALE_UP} jobs/node={JOBS_PER_NODE} "
         f"max={MAX_NODES} baseline={BASELINE} to_one>{int(TO_ONE_SECONDS)}s "
         f"down>{int(SCALE_DOWN_SECONDS)}s min_uptime={int(MIN_UPTIME)}s state={st}")

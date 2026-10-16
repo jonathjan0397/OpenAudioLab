@@ -43,11 +43,18 @@ image.
 
 ## Storage (durable across hosts)
 
-S3-compatible store on the hub (MinIO in production; `moto_server` for local
-validation). Workers push every artifact there; the API proxies ranged reads so
-the bucket stays private. Trained LoRA adapters are uploaded to the bucket and
-recorded as an object prefix + file list, so a profile trained on one node can
-be loaded (downloaded to a node-local cache) on any other node.
+Current hub (home server): the plain filesystem backend (`LocalObjectStorage`,
+`OAL_STORAGE_BACKEND=local`) rooted at `/srv/oal-storage/oal` on the 1TB drive,
+NFS-exported **to the WireGuard subnet only** (`10.203.0.0/24`). The baseline
+worker bind-mounts the host's NFS automount (`/mnt/oal-storage` → `/data/oal`);
+Vast burst nodes mount it in-container via `OAL_NFS_SOURCE` (entrypoint `mount
+-t nfs4`, needs `nfs-common`, in the image). LocalStack was dropped 2026-10-16:
+Community 3.8.1 does not persist S3 state (persistence is a Pro feature) and
+MinIO is not anonymously pullable on these hosts. The `S3ObjectStorage` adapter
+remains for a future VPS/managed-S3 hub. Workers push every artifact to the
+store; the API proxies ranged reads so the bucket stays private. Trained LoRA
+adapters are uploaded and recorded as an object prefix + file list, so a profile
+trained on one node can be loaded (downloaded to a node-local cache) anywhere.
 
 ## Ephemeral node boot sequence
 

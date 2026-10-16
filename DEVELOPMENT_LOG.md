@@ -168,3 +168,24 @@ Updated: `app/queue.py` (`burst_name`), `app/config.py` (`worker_tier`, `dispatc
 Author: opencode. Task type: policy tuning (feature branch `impl/milestone-1`, not merged).
 
 A second 20-job run on the tiered queues showed the **warm dev baseline completing 19 of 20** jobs (Vast took 1 each) — with turbo generation (~3 s per 30 s clip) the always-on baseline absorbs a full 20-job burst on its own, so bursting to Vast at N=8 was premature. Raised the per-worker batch to **N=20** (`OAL_SCALE_JOBS_PER_NODE` and `OAL_DISPATCH_BASELINE_RESERVE` defaults 8→20): the baseline now handles up to 20 jobs alone and the fleet only scales out once total depth reaches 21. Accepted the slower first-job cold kickoff in exchange for near-zero Vast spend on typical bursts. Validation: pytest **106 passed**.
+
+## 2026-10-16 — /lab test harness (basic-auth generate + browse page)
+
+Author: opencode. Task type: developer tooling (feature branch `impl/milestone-1`, not merged).
+
+Added `/lab`: a single-page test harness behind HTTP Basic (`OAL_LAB_BASIC_USER`/`OAL_LAB_BASIC_PASSWORD`, default `admin`), so generation can be exercised from a browser without minting owner tokens. `GET /lab` serves the page; `POST /lab/api/generate` admits jobs through the same durable path as the API (owner `tok_<sha256(lab-token)>`); `GET /lab/api/artifacts` browses **all** owners' artifacts; playback reuses the tokenized `/api/v1/artifacts/{id}/content`. No new storage or queue plumbing.
+
+Updated: `app/routes/lab.py` (new), `app/config.py`, `app/main.py`, `app/routes/__init__.py`, `tests/test_lab.py` (8 tests). Validation: pytest **114 passed**; deployed as `stratastack/oal-backend:bdf89ee` on the home hub and verified end-to-end (generate → 30 s job → playable WAV).
+
+
+## 2026-10-16 — Storage: drop LocalStack, durable filesystem + NFS over the WireGuard subnet
+
+Author: opencode. Task type: storage architecture change (feature branch `impl/milestone-1`, not merged).
+
+LocalStack persistence research settled the restart-loses-objects problem: **snapshot persistence is a licensed (Pro) feature** — Community 3.8.1 ignores `PERSISTENCE=1` (docs: Snapshots → Persistence, "Included in Plans: Base/Ultimate"; Pro image + `LOCALSTACK_AUTH_TOKEN` required). Rather than adopt the Pro image + account token, the owner chose to **drop S3 on the hub entirely**: the built-in `LocalObjectStorage` backend now roots at `/srv/oal-storage/oal` on the 1TB drive (`sdc`, ext4, UUID `f41883fc-…`, fstab `nofail`), which is NFS-exported **only to the WireGuard subnet** `10.203.0.0/24` (`rw,sync,no_subtree_check,no_root_squash`, ufw-limited to 2049/tcp from the tunnel). The dev-host worker bind-mounts the host automount (`/mnt/oal-storage`, fstab `nfs4 defaults,_netdev,nofail,x-systemd.automount`) at `/data/oal`; Vast nodes will mount in-container via the new `OAL_NFS_SOURCE` entrypoint step (`nfs-common` baked into the worker image). The bucket was empty at cutover (restart tests had already wiped it), so no migration was needed.
+
+Durability verified: `/lab` generate → 5.76 MB WAV written by the worker over NFS onto the drive → `docker compose restart api maintenance` → artifact still listed and served (`200 audio/wav`, full byte count).
+
+Networking hardening + Vast WireGuard: Redis `6379` and Postgres `55432` moved from `0.0.0.0` to `127.0.0.1` + `10.203.0.1` (docker-proxy bypasses ufw, so binding is the real fix); the API stays public on `50555` for `/lab`. `scripts/autoscale.py` now provisions Vast burst nodes **through the tunnel**: per-node keypair (`wg genkey`) + pooled `10.203.0.10–25` address, hub-side `wg set wg2 peer … allowed-ips` add/remove (passwordless `sudo -n wg` via `/etc/sudoers.d/oal-wg`), peer re-sync on autoscaler start, `--privileged` prepended to the Vast env string, and worker env switched to `10.203.0.1` endpoints + local storage + NFS. Caveat: earlier field notes found Vast hosts may not grant `NET_ADMIN` even with `--privileged` — first real burst node must confirm the in-container tunnel comes up (`OAL_WG_UP=1`), else fall back to public-IP transport.
+
+Updated: `~/oal-backend/docker-compose.backend.yml` (hub; removed `object-storage`/`bucket-init`, local-storage env + bind mounts, hardened port bindings), `docker/worker-entrypoint.sh` (NFS mount step), `Dockerfile.worker` (`nfs-common`), `scripts/autoscale.py`, `docs/REMOTE_WORKERS.md`, hub `.env.backend` (`OAL_WG_HUB_PUBKEY`, `OAL_WORKER_IMAGE=stratastack/oal-worker:bdf89ee-torch2.10-cu128-wg3`). Validation: pytest **114 passed**; durability test above; autoscaler restarted on the hub with the new code; hardened `ss -tlnp` shows Redis/Postgres off the public interface.

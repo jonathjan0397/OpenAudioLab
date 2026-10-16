@@ -27,11 +27,11 @@ RUN git clone https://github.com/ace-step/ACE-Step-1.5.git . \
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-# --- WireGuard client tooling (late layer so heavy layers stay cached) --------
+# --- WireGuard client + NFS mount tooling (late layer, heavy layers cached) ---
 # Lets a self-contained node bring its own tunnel up (entrypoint wg-quick) when
-# run with NET_ADMIN and a mounted /etc/wireguard/wg0.conf.
+# run with NET_ADMIN, and mount the hub's NFS storage dir (entrypoint mount).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends wireguard-tools iproute2 iptables \
+    && apt-get install -y --no-install-recommends wireguard-tools iproute2 iptables nfs-common \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Bootstrap (app code arrives at runtime from the backend bundle) ---------

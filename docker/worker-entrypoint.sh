@@ -28,6 +28,20 @@ WG
     wg-quick up wg0 || { echo "[worker] wg-quick up failed"; exit 1; }
 fi
 
+# Optional hub NFS mount for the local filesystem storage backend (Vast nodes
+# mount inside the container; trusted hosts bind-mount the dir instead).
+if [ -n "${OAL_NFS_SOURCE:-}" ]; then
+    NFS_TARGET="${OAL_NFS_TARGET:-/data/oal}"
+    mkdir -p "$NFS_TARGET"
+    echo "[worker] mounting $OAL_NFS_SOURCE -> $NFS_TARGET"
+    i=0
+    until mount -t nfs4 -o timeo=50,retrans=3 "$OAL_NFS_SOURCE" "$NFS_TARGET"; do
+        i=$((i + 1))
+        [ "$i" -ge 20 ] && { echo "[worker] NFS mount failed"; exit 1; }
+        sleep 3
+    done
+fi
+
 BACKEND="${OAL_BACKEND_URL:-http://10.0.0.1:50555}"
 APP_DIR="${OAL_APP_DIR:-/srv/openaudiolab/code}"
 ROLES=$(printf '%s' "${OAL_WORKER_ROLE:-engine_worker}" | tr ',' ' ')
