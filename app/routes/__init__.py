@@ -6,6 +6,7 @@ from .uploads import router as uploads_router
 from .exports import router as exports_router
 from .artist import router as artist_router
 from .internal import router as internal_router
+from .lab import router as lab_router
 
 __all__ = [
     "health_router",
@@ -16,4 +17,5 @@ __all__ = [
     "exports_router",
     "artist_router",
     "internal_router",
+    "lab_router",
 ]

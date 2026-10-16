@@ -18,6 +18,7 @@ from .routes import (
     health_router,
     internal_router,
     jobs_router,
+    lab_router,
     models_router,
     projects_router,
     uploads_router,
@@ -95,6 +96,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(exports_router, prefix=API_V1_PREFIX)
     app.include_router(artist_router, prefix=API_V1_PREFIX)
     app.include_router(internal_router, prefix="/internal/v1")
+    # /lab stopgap test harness (self-prefixed routes, HTTP Basic guarded).
+    app.include_router(lab_router)
     # Root aliases for container/compose healthchecks.
     app.include_router(health_router, include_in_schema=False)
     return app

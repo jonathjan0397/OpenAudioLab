@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     max_client_reference_length: int = 200
     poll_after_seconds: int = 3
 
+    # /lab stopgap test harness (single-page UI served by the control plane)
+    lab_enabled: bool = True
+    lab_basic_user: str = "admin"
+    lab_basic_password: str = "3671A113a05786!"
+    lab_owner_token: str = "lab-token"
+
     # Milestone 2: durable orchestration
     redis_url: str = "redis://127.0.0.1:6379/0"
     secret_key: str = "dev-secret-change-me"
