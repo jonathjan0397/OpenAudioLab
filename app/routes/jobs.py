@@ -616,7 +616,10 @@ def artifact_waveform(
         from ..peaks import peaks_json
 
         body = peaks_json(wav.body)
-        request.app.state.storage.put(key, body)
+        try:
+            request.app.state.storage.put(key, body)
+        except OSError:
+            pass
         return Response(content=body, media_type="application/json")
     return Response(content=stored.body, media_type="application/json")
 
