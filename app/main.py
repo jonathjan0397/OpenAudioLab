@@ -45,7 +45,7 @@ class BodyLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         limit = self.max_body_bytes
-        if self.max_upload_bytes and request.url.path.endswith("/data"):
+        if self.max_upload_bytes and (request.url.path.endswith("/data") or request.url.path == "/lab/api/upload"):
             limit = self.max_upload_bytes
         content_length = request.headers.get("Content-Length")
         if content_length is not None and content_length.isdigit():
