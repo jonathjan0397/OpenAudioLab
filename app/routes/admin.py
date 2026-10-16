@@ -158,9 +158,80 @@ def admin_stats(request: Request) -> JSONResponse:
                     "id": w.id,
                     "kind": w.kind,
                     "drain": w.drain,
+                    "gpu_util": w.gpu_util,
+                    "vram_used_mb": w.vram_used_mb,
+                    "vram_total_mb": w.vram_total_mb,
                     "last_heartbeat": w.last_heartbeat.isoformat() if w.last_heartbeat else None,
                 }
                 for w in workers
             ],
         }
+    )
+
+
+@router.get("/admin/stats/timeseries")
+def admin_timeseries(request: Request, days: int = Query(default=14, ge=1, le=90)) -> JSONResponse:
+    """Per-day job counts by status + new users, for admin charts."""
+    from datetime import timedelta
+
+    from ..models import Job
+
+    start = utcnow() - timedelta(days=days - 1, hours=0)
+    start = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    with request.app.state.db.session() as session:
+        job_rows = session.execute(
+            select(Job.created_at, Job.status).where(Job.created_at >= start)
+        ).all()
+        user_rows = session.execute(
+            select(User.created_at).where(User.created_at >= start)
+        ).scalars().all()
+    buckets: dict[str, dict] = {}
+    for offset in range(days):
+        day = (start + timedelta(days=offset)).date().isoformat()
+        buckets[day] = {"date": day, "completed": 0, "failed": 0, "cancelled": 0, "active": 0, "new_users": 0}
+    for created, status in job_rows:
+        day = created.date().isoformat()
+        bucket = buckets.get(day)
+        if bucket is None:
+            continue
+        if status == "succeeded":
+            bucket["completed"] += 1
+        elif status == "failed":
+            bucket["failed"] += 1
+        elif status == "cancelled":
+            bucket["cancelled"] += 1
+        elif status in ("queued", "waiting_for_worker", "running"):
+            bucket["active"] += 1
+    for created in user_rows:
+        day = created.date().isoformat()
+        if day in buckets:
+            buckets[day]["new_users"] += 1
+    return JSONResponse({"days": days, "series": list(buckets.values())})
+
+
+@router.get("/admin/jobs")
+def admin_jobs(request: Request, limit: int = Query(default=10, ge=1, le=100)) -> JSONResponse:
+    """Most recent jobs across all owners, for the admin overview table."""
+    from ..models import Job
+
+    with request.app.state.db.session() as session:
+        rows = list(
+            session.execute(select(Job).order_by(Job.created_at.desc()).limit(limit)).scalars()
+        )
+    return JSONResponse(
+        [
+            {
+                "job_id": j.id,
+                "owner_id": j.owner_id,
+                "operation": j.operation,
+                "status": j.status,
+                "stage": j.stage,
+                "progress": j.progress,
+                "error_code": j.error_code,
+                "created_at": j.created_at.isoformat() if j.created_at else None,
+                "started_at": j.started_at.isoformat() if j.started_at else None,
+                "finished_at": j.finished_at.isoformat() if j.finished_at else None,
+            }
+            for j in rows
+        ]
     )

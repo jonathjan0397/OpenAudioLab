@@ -580,6 +580,39 @@ def artifact_content(
     )
 
 
+@router.get("/artifacts/{asset_id}/waveform")
+def artifact_waveform(
+    asset_id: str,
+    request: Request,
+    token: str | None = Query(default=None),
+) -> Response:
+    from ..deps import owner_from_request
+
+    settings = request.app.state.settings
+    with request.app.state.db.session() as session:
+        asset = session.execute(select(Asset).where(Asset.id == asset_id)).scalar_one_or_none()
+    if asset is None:
+        raise ApiError(404, "ASSET_NOT_FOUND", "Asset not found.")
+    allowed = bool(asset.shared)
+    if not allowed and token:
+        allowed = check_token(settings.secret_key, asset.id, token, utcnow()) is not None
+    if not allowed:
+        try:
+            allowed = owner_from_request(request) == asset.owner_id
+        except ApiError:
+            allowed = False
+    if not allowed:
+        raise ApiError(403, "FORBIDDEN", "Not your asset.")
+    key = asset.storage_key[: -len(".wav")] + ".json" if asset.storage_key.endswith(".wav") else None
+    if key is None:
+        raise ApiError(404, "WAVEFORM_NOT_FOUND", "No waveform for this asset.")
+    try:
+        stored = request.app.state.storage.get(key)
+    except FileNotFoundError:
+        raise ApiError(404, "WAVEFORM_NOT_FOUND", "Waveform peaks have not been generated yet.")
+    return Response(content=stored.body, media_type="application/json")
+
+
 class ArtifactPatch(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     shared: bool | None = None

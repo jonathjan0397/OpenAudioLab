@@ -156,6 +156,9 @@ class Worker(Base):
     id: Mapped[str] = mapped_column(String(120), primary_key=True)
     kind: Mapped[str] = mapped_column(String(40))
     drain: Mapped[bool] = mapped_column(default=False)
+    gpu_util: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    vram_used_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    vram_total_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_heartbeat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

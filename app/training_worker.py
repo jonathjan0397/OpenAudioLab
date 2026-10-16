@@ -41,6 +41,7 @@ from .orchestration import (
     get_job_by_id,
     heartbeat,
     is_cancelling,
+    set_job_stage,
 )
 from .queue import RedisQueue, build_redis
 from .storage import Storage, build_storage
@@ -177,6 +178,7 @@ class TrainingWorker:
             run_row.worker_id = self.worker_id
             session.commit()
 
+        set_job_stage(self.db, job_id, "preparing dataset")
         self._ensure_engine_ready(lambda: heartbeat(self.db, attempt_id, lease_token))
         self.adapter.scan_dataset(str(dataset_dir), f"oal-{job_id[:8]}", all_instrumental)
         self.adapter.preprocess(str(workdir / "tensors"))
@@ -196,6 +198,11 @@ class TrainingWorker:
                 return
             status = self.adapter.training_status()
             heartbeat(self.db, attempt_id, lease_token)
+            done_epochs = int(status.get("current_epoch", 0) or 0)
+            set_job_stage(
+                self.db, job_id, "training",
+                round(min(0.99, done_epochs / max(1, epochs)), 2),
+            )
             if not status.get("is_training", False):
                 break
             if time.monotonic() > deadline:
@@ -214,6 +221,7 @@ class TrainingWorker:
                          str(status["error"])[:300])
             return
 
+        set_job_stage(self.db, job_id, "exporting adapter", 0.97)
         export = self.adapter.export(str(workdir / "lora"), str(workdir / "adapter"))
         adapter_path = self._resolve_adapter_dir(export.get("export_path", str(workdir / "adapter")))
         self._load_fresh(adapter_path)

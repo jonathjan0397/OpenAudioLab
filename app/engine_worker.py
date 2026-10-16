@@ -31,6 +31,7 @@ from .orchestration import (
     get_job_by_id,
     heartbeat,
     is_cancelling,
+    set_job_stage,
 )
 from .queue import RedisQueue, build_redis
 from .storage import Storage, build_storage
@@ -118,6 +119,30 @@ class AceStepProcess:
                 pass
 
 
+def _gpu_telemetry() -> tuple[int, int, int] | None:
+    """Read (util%, used MB, total MB) for the device this worker uses."""
+    import subprocess
+
+    device = os.environ.get("ACESTEP_DEVICE", "cuda:0")
+    gpu_index = device.split(":")[-1] if ":" in device else "0"
+    try:
+        out = subprocess.run(
+            [
+                "nvidia-smi",
+                f"--id={gpu_index}",
+                "--query-gpu=utilization.gpu,memory.used,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        util, used, total = (int(part) for part in out.stdout.strip().split(","))
+        return util, used, total
+    except Exception:
+        return None
+
+
 class EngineWorker:
     def __init__(
         self,
@@ -150,12 +175,15 @@ class EngineWorker:
         self._last_activity = time.monotonic()
 
     def register(self) -> None:
+        telemetry = _gpu_telemetry()
         with self.db.session() as session:
             worker = session.get(Worker, self.worker_id)
             if worker is None:
-                session.add(Worker(id=self.worker_id, kind="acestep"))
-            else:
-                worker.last_heartbeat = utcnow()
+                worker = Worker(id=self.worker_id, kind="acestep")
+                session.add(worker)
+            worker.last_heartbeat = utcnow()
+            if telemetry is not None:
+                worker.gpu_util, worker.vram_used_mb, worker.vram_total_mb = telemetry
             session.commit()
 
     def _touch_heartbeat(self) -> None:
@@ -302,6 +330,7 @@ class EngineWorker:
                     }
             append_event(session, claimed_job, "stage", "running", stage="submitting", attempt_id=attempt_id)
             session.commit()
+        set_job_stage(self.db, claimed_job, "preparing model")
 
         adapter_artifacts = lora_artifacts or profile_artifacts
         profile_path = self._materialize_adapter(adapter_artifacts) if adapter_artifacts else None
@@ -322,6 +351,7 @@ class EngineWorker:
             fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token, exc.code, exc.message)
             return True
 
+        set_job_stage(self.db, claimed_job, "generating audio")
         try:
             return self._run_generation(claimed_job, attempt_id, lease_token, submit)
         finally:

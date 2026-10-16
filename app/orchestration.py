@@ -69,6 +69,15 @@ def append_event(
     return record
 
 
+def set_job_stage(db: "Db", job_id: str, stage: str, progress: float | None = None) -> None:
+    """Best-effort live progress feedback for a running job."""
+    with db.session() as session:
+        job = session.execute(
+            update(Job).where(Job.id == job_id, Job.status == "running").values(stage=stage, progress=progress)
+        )
+        session.commit()
+
+
 def enqueue(session: Session, job: Job, settings: Settings) -> OutboxRecord:
     record = OutboxRecord(job_id=job.id, queue=RedisQueue.queue_name(job.model_id))
     session.add(record)
@@ -292,6 +301,12 @@ def complete_attempt(
         role_name, data = role, body
         key = f"owners/{job.owner_id}/jobs/{job.id}/{attempt_id}/{role_name}.wav"
         checksum = storage.put(key, data)
+        try:
+            from .peaks import peaks_json
+
+            storage.put(key[: -len(".wav")] + ".json", peaks_json(data))
+        except Exception:  # waveform peaks are best-effort decoration
+            pass
         asset = Asset(
             job_id=job.id,
             owner_id=job.owner_id,
