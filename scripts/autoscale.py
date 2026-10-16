@@ -2,9 +2,11 @@
 """Queue-depth autoscaler for OpenAudioLab engine workers.
 
 Policy (multi-node, tiered scale-down): the local GPU worker (dev host, GPU 0)
-is the always-on baseline. Desired Vast burst nodes = 0 while the queue is below
-OAL_SCALE_UP_DEPTH, else min(ceil(depth / OAL_SCALE_JOBS_PER_NODE),
-OAL_SCALE_MAX_NODES); we add at most one node per tick. Scale-down is driven by
+is the always-on baseline (OAL_SCALE_BASELINE_WORKERS, default 1). Desired Vast
+burst nodes = 0 while the queue is below OAL_SCALE_UP_DEPTH, else
+max(0, min(ceil(depth / OAL_SCALE_JOBS_PER_NODE), OAL_SCALE_MAX_NODES) -
+baseline) -- OAL_SCALE_MAX_NODES caps TOTAL workers (baseline + Vast); we add at
+most one Vast node per tick. Scale-down is driven by
 how long demand has been low (depth < OAL_SCALE_UP_DEPTH): hold the fleet for
 OAL_SCALE_TO_ONE_SECONDS, then drop to one hot node, then tear it down after
 OAL_SCALE_DOWN_SECONDS of low demand; any spike back to >= OAL_SCALE_UP_DEPTH
@@ -38,6 +40,7 @@ DISK = os.environ.get("OAL_VAST_DISK", "40")
 SCALE_UP = int(os.environ.get("OAL_SCALE_UP_DEPTH", "2"))
 JOBS_PER_NODE = int(os.environ.get("OAL_SCALE_JOBS_PER_NODE", "2"))
 MAX_NODES = int(os.environ.get("OAL_SCALE_MAX_NODES", "3"))
+BASELINE = int(os.environ.get("OAL_SCALE_BASELINE_WORKERS", "1"))
 SCALE_DOWN_SECONDS = float(os.environ.get("OAL_SCALE_DOWN_SECONDS", "1800"))
 TO_ONE_SECONDS = float(os.environ.get("OAL_SCALE_TO_ONE_SECONDS", "300"))
 MIN_UPTIME = float(os.environ.get("OAL_VAST_MIN_UPTIME", "180"))
@@ -136,7 +139,10 @@ def create_instance(dry_run=False):
     ok = "'success': True" in out
     m = re.search(r"'new_contract':\s*(\d+)", out)
     log(f"create offer={offer} ok={ok} out={out.strip()[:160]}")
-    return int(m.group(1)) if (ok and m) else None
+    # Track the instance whenever Vast returned a contract, even if the CLI
+    # reported success:False -- the node booted and is billing, so leaving it
+    # untracked would leak it. Only a create with no contract is a true failure.
+    return int(m.group(1)) if m else None
 
 
 def destroy_instance(cid, dry_run=False):
@@ -172,7 +178,8 @@ def save_state(st):
 def desired_nodes(depth, low_since, now, current):
     """Target number of Vast burst nodes for the current queue state."""
     if depth >= SCALE_UP:
-        return min(math.ceil(depth / JOBS_PER_NODE), MAX_NODES)
+        total = min(math.ceil(depth / JOBS_PER_NODE), MAX_NODES)
+        return max(0, total - BASELINE)
     # Demand has subsided (depth < SCALE_UP): tier down by how long it has been low.
     if low_since is None:
         return current  # just dropped below threshold; hold during grace
@@ -222,8 +229,8 @@ def main():
     r = redis.Redis.from_url(REDIS_URL, socket_timeout=5)
     st = load_state()
     log(f"start hub={HUB} queue={QUEUE_KEY} up>={SCALE_UP} jobs/node={JOBS_PER_NODE} "
-        f"max={MAX_NODES} to_one>{int(TO_ONE_SECONDS)}s down>{int(SCALE_DOWN_SECONDS)}s "
-        f"min_uptime={int(MIN_UPTIME)}s state={st}")
+        f"max={MAX_NODES} baseline={BASELINE} to_one>{int(TO_ONE_SECONDS)}s "
+        f"down>{int(SCALE_DOWN_SECONDS)}s min_uptime={int(MIN_UPTIME)}s state={st}")
     while True:
         try:
             depth = tick(r, st, args.dry_run)

@@ -221,18 +221,22 @@ in the image for tunnel peers (dev host) even though Vast uses the public IP.
 ## Queue-depth autoscaling (local baseline + Vast burst)
 
 Policy (multi-node, tiered scale-down): the dev host's GPU 0 runs an always-on
-engine worker (the baseline). Desired Vast burst nodes are `0` while the engine
-queue `oal:queue:ace-step-1.5` is below `OAL_SCALE_UP_DEPTH` (default 2), else
-`min(ceil(depth / OAL_SCALE_JOBS_PER_NODE), OAL_SCALE_MAX_NODES)` (defaults 2 and
-3) — a deep queue scales out to several nodes, adding at most one per 15s tick.
-Scale-down is driven by how long demand has been low (depth < `OAL_SCALE_UP_DEPTH`):
-hold the fleet for `OAL_SCALE_TO_ONE_SECONDS` (default 300s), then drop to **one
-hot node**, then tear it down after `OAL_SCALE_DOWN_SECONDS` (default 1800s =
-30 min) of low demand; any spike back to ≥ `OAL_SCALE_UP_DEPTH` resets the timer.
-A node younger than `OAL_VAST_MIN_UPTIME` (default 180s) is never removed.
+engine worker (the baseline, `OAL_SCALE_BASELINE_WORKERS`, default 1). Desired
+Vast burst nodes are `0` while the engine queue `oal:queue:ace-step-1.5` is below
+`OAL_SCALE_UP_DEPTH` (default 2), else `max(0, min(ceil(depth /
+OAL_SCALE_JOBS_PER_NODE), OAL_SCALE_MAX_NODES) - baseline)` (defaults 2 and 3) —
+`OAL_SCALE_MAX_NODES` caps **total** workers (baseline + Vast), so a deep queue
+scales out to several nodes, adding at most one per 15s tick. Scale-down is
+driven by how long demand has been low (depth < `OAL_SCALE_UP_DEPTH`): hold the
+fleet for `OAL_SCALE_TO_ONE_SECONDS` (default 300s), then drop to **one hot
+node**, then tear it down after `OAL_SCALE_DOWN_SECONDS` (default 1800s = 30 min)
+of low demand; any spike back to ≥ `OAL_SCALE_UP_DEPTH` resets the timer. A node
+younger than `OAL_VAST_MIN_UPTIME` (default 180s) is never removed.
 `scripts/autoscale.py` runs on the **hub (home server)** — it needs `vastai` +
 hub reachability (redis is local there) and no GPU — polls every 15s, and
 persists its managed node list to a state file so restarts don't orphan instances.
+A create is tracked whenever Vast returns a `new_contract` (even if the CLI prints
+`success: False`), so a booted-but-reported-failed node is never leaked.
 
 - **Offer selection**: among North-American offers passing `gpu_ram>=16`,
   `cuda_max_good>=12.8`, `verification=verified`, `reliability2>=0.95` and
@@ -268,6 +272,7 @@ OAL_REDIS_URL=redis://127.0.0.1:6379/0 VASTAI=.venv/bin/vastai \
   .venv/bin/python scripts/autoscale.py
 ```
 
-Validated (2026-10-16): enqueuing 3 jobs drove depth to 3 → the autoscaler
-created a burst instance, the local baseline drained the queue (all jobs
-succeeded), and the autoscaler destroyed the instance after the cooldown.
+Validated (2026-10-16): enqueuing 20 jobs drove depth to ~20 → the autoscaler
+scaled out to the cap (baseline + 2 Vast nodes), all 20 jobs succeeded with valid
+`mix_wav` artifacts, and the autoscaler tiered the fleet back down (one hot node,
+then teardown) after the cooldown.
