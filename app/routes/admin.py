@@ -119,3 +119,48 @@ def admin_put_template(payload: TemplateSetting, request: Request) -> JSONRespon
             row.value = payload.value
         session.commit()
     return JSONResponse(content={"template": payload.value})
+
+
+@router.get("/admin/stats")
+def admin_stats(request: Request) -> JSONResponse:
+    from datetime import timedelta
+
+    from sqlalchemy import func as sa_func
+
+    from ..models import Asset, Job, User, Worker, utcnow as _utcnow
+
+    now = utcnow()
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(hours=0)
+    with request.app.state.db.session() as session:
+        users_total = session.execute(select(sa_func.count()).select_from(User)).scalar_one()
+        jobs_today = session.execute(
+            select(sa_func.count()).select_from(Job).where(Job.created_at >= day_start)
+        ).scalar_one()
+        jobs_active = session.execute(
+            select(sa_func.count()).select_from(Job).where(
+                Job.status.in_(("queued", "waiting_for_worker", "running"))
+            )
+        ).scalar_one()
+        assets_total = session.execute(
+            select(sa_func.count()).select_from(Asset).where(
+                Asset.deleted_at.is_(None), Asset.mime.like("audio/%")
+            )
+        ).scalar_one()
+        workers = list(session.execute(select(Worker)).scalars())
+    return JSONResponse(
+        {
+            "users_total": users_total,
+            "jobs_today": jobs_today,
+            "jobs_active": jobs_active,
+            "assets_total": assets_total,
+            "workers": [
+                {
+                    "id": w.id,
+                    "kind": w.kind,
+                    "drain": w.drain,
+                    "last_heartbeat": w.last_heartbeat.isoformat() if w.last_heartbeat else None,
+                }
+                for w in workers
+            ],
+        }
+    )
