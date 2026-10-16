@@ -226,6 +226,11 @@ textarea { resize: vertical; }
   background-size: cover; background-position: center; min-height: 96px;
   padding: 22px 26px; margin-bottom: 22px; position: relative; overflow: hidden;
 }
+.hero-strip::before {
+  content: ""; position: absolute; inset: 0;
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+.hero-strip > * { position: relative; z-index: 1; }
 .hero-strip h1 { margin: 0; font-size: 34px; }
 .hero-strip .sub { color: var(--muted); }
 
