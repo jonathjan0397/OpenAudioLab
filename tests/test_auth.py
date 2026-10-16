@@ -144,3 +144,57 @@ def test_template_setting_roundtrip(client) -> None:
     bad = client.put("/api/v1/admin/settings/template", json={"value": "vaporwave"})
     assert bad.status_code == 422
     assert bad.json()["error"]["code"] == "TEMPLATE_UNKNOWN"
+
+
+def test_cookie_generation_deducts_credits(client) -> None:
+    _register(client)
+    response = client.post(
+        "/api/v1/jobs",
+        json={"operation": "music.generate", "model_id": "ace-step-1.5", "music_description": "test tone", "instrumental": True},
+        headers={"Idempotency-Key": "cookie-gen-1"},
+    )
+    assert response.status_code == 202
+    credits = client.get("/api/v1/credits")
+    assert credits.status_code == 200
+    body = credits.json()
+    assert body["balance"] == 990
+    assert body["entries"][0]["delta"] == -10
+    assert body["entries"][0]["reason"] == "generation"
+
+
+def test_artifact_title_and_favorite(client) -> None:
+    user = _register(client)
+    owner = "usr_" + user["id"]
+    from app.models import Asset, new_uuid, utcnow
+
+    asset_id = new_uuid()
+    with client.app.state.db.session() as session:
+        session.add(
+            Asset(
+                id=asset_id,
+                job_id="job-x",
+                owner_id=owner,
+                storage_key=f"owners/{owner}/{asset_id}/mix.wav",
+                role="mix_wav",
+                mime="audio/wav",
+                bytes=100,
+                sha256="b" * 64,
+                created_at=utcnow(),
+            )
+        )
+        session.commit()
+
+    patched = client.patch(
+        f"/api/v1/artifacts/{asset_id}", json={"title": "Brighter Tomorrow", "shared": True}
+    )
+    assert patched.status_code == 200
+    assert patched.json()["title"] == "Brighter Tomorrow"
+    assert patched.json()["shared"] is True
+
+    fav = client.post(f"/api/v1/artifacts/{asset_id}/favorite")
+    assert fav.json()["favorite"] is True
+    fav = client.post(f"/api/v1/artifacts/{asset_id}/favorite")
+    assert fav.json()["favorite"] is False
+
+    other = client.patch(f"/api/v1/artifacts/{asset_id}", json={"title": "Nope"})
+    assert other.status_code == 200

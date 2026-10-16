@@ -13,6 +13,7 @@ from datetime import timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -255,6 +256,24 @@ def create_job(
             )
             session.add(job)
             session.add(record)
+            if owner_id.startswith("usr_"):
+                from ..models import CreditEntry, User
+
+                user = session.get(User, owner_id[4:])
+                if user is None:
+                    raise ApiError(401, "USER_NOT_FOUND", "Account not found for session owner.")
+                cost = settings.credit_cost_per_generation
+                if user.credits_balance < cost:
+                    raise ApiError(
+                        402,
+                        "INSUFFICIENT_CREDITS",
+                        "Not enough credits for this generation.",
+                        {"cost": cost, "balance": user.credits_balance},
+                    )
+                user.credits_balance -= cost
+                session.add(
+                    CreditEntry(owner_id=owner_id, delta=-cost, reason="generation", job_id=job.id)
+                )
             enqueue(session, job, settings)
             append_event(session, job.id, "queued", "queued")
             try:
@@ -558,4 +577,98 @@ def artifact_content(
         status_code=status_code,
         media_type=asset.mime,
         headers=headers,
+    )
+
+
+class ArtifactPatch(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    shared: bool | None = None
+
+
+@router.patch("/artifacts/{asset_id}")
+def artifact_patch(
+    asset_id: str,
+    payload: ArtifactPatch,
+    request: Request,
+    owner_id: str = Depends(owner_from_request),
+) -> JSONResponse:
+    with request.app.state.db.session() as session:
+        asset = session.execute(select(Asset).where(Asset.id == asset_id)).scalar_one_or_none()
+        if asset is None or asset.owner_id != owner_id:
+            raise ApiError(404, "ASSET_NOT_FOUND", "Asset not found.")
+        if payload.title is not None:
+            asset.title = payload.title
+        if payload.shared is not None:
+            asset.shared = payload.shared
+        session.commit()
+        session.refresh(asset)
+        return JSONResponse(
+            {
+                "asset_id": asset.id,
+                "title": asset.title,
+                "shared": asset.shared,
+                "tags": list(asset.tags_json or []),
+            }
+        )
+
+
+@router.post("/artifacts/{asset_id}/favorite")
+def artifact_favorite(
+    asset_id: str,
+    request: Request,
+    owner_id: str = Depends(owner_from_request),
+) -> JSONResponse:
+    from ..models import Favorite
+
+    with request.app.state.db.session() as session:
+        asset = session.execute(select(Asset).where(Asset.id == asset_id)).scalar_one_or_none()
+        if asset is None or asset.owner_id != owner_id:
+            raise ApiError(404, "ASSET_NOT_FOUND", "Asset not found.")
+        existing = session.execute(
+            select(Favorite).where(Favorite.owner_id == owner_id, Favorite.asset_id == asset_id)
+        ).scalar_one_or_none()
+        if existing is not None:
+            session.delete(existing)
+            session.commit()
+            return JSONResponse({"asset_id": asset_id, "favorite": False})
+        session.add(Favorite(owner_id=owner_id, asset_id=asset_id))
+        session.commit()
+        return JSONResponse({"asset_id": asset_id, "favorite": True})
+
+
+@router.get("/credits")
+def credits_balance(
+    request: Request,
+    owner_id: str = Depends(owner_from_request),
+) -> JSONResponse:
+    from ..models import CreditEntry, User
+
+    with request.app.state.db.session() as session:
+        balance = None
+        if owner_id.startswith("usr_"):
+            user = session.get(User, owner_id[4:])
+            if user is None:
+                raise ApiError(401, "USER_NOT_FOUND", "Account not found for session owner.")
+            balance = user.credits_balance
+        entries = list(
+            session.execute(
+                select(CreditEntry)
+                .where(CreditEntry.owner_id == owner_id)
+                .order_by(CreditEntry.created_at.desc())
+                .limit(20)
+            ).scalars()
+        )
+    return JSONResponse(
+        {
+            "balance": balance,
+            "entries": [
+                {
+                    "delta": e.delta,
+                    "reason": e.reason,
+                    "job_id": e.job_id,
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
+                }
+                for e in entries
+            ],
+        }
     )
