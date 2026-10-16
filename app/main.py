@@ -13,7 +13,9 @@ from .config import Settings, get_settings
 from .db import Db
 from .errors import install_error_handlers
 from .routes import (
+    admin_router,
     artist_router,
+    auth_router,
     exports_router,
     health_router,
     internal_router,
@@ -95,9 +97,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(uploads_router, prefix=API_V1_PREFIX)
     app.include_router(exports_router, prefix=API_V1_PREFIX)
     app.include_router(artist_router, prefix=API_V1_PREFIX)
+    app.include_router(auth_router, prefix=API_V1_PREFIX)
+    app.include_router(admin_router, prefix=API_V1_PREFIX)
     app.include_router(internal_router, prefix="/internal/v1")
     # /lab stopgap test harness (self-prefixed routes, HTTP Basic guarded).
     app.include_router(lab_router)
     # Root aliases for container/compose healthchecks.
     app.include_router(health_router, include_in_schema=False)
+    _bootstrap_site(app)
     return app
+
+
+def _bootstrap_site(app) -> None:
+    """Seed the site template default and the bootstrap admin account."""
+    from sqlalchemy import func, select
+
+    from .auth import hash_password
+    from .models import SiteSetting, User
+    from .routes.admin import DEFAULT_TEMPLATE
+
+    settings = app.state.settings
+    with app.state.db.session() as session:
+        if session.get(SiteSetting, "template") is None:
+            session.add(SiteSetting(key="template", value=DEFAULT_TEMPLATE))
+            session.commit()
+        user_count = session.execute(select(func.count()).select_from(User)).scalar_one()
+        if user_count == 0 and settings.bootstrap_admin_email and settings.bootstrap_admin_password:
+            session.add(
+                User(
+                    email=settings.bootstrap_admin_email.strip().lower(),
+                    username="admin",
+                    password_hash=hash_password(settings.bootstrap_admin_password),
+                    role="admin",
+                )
+            )
+            session.commit()

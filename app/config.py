@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     lab_basic_password: str = "3671A113a05786!"
     lab_owner_token: str = "lab-token"
     acoustid_client_key: str = ""
+    # M6: cookie-session auth for the website.
+    cookie_secure: bool = False
+    bootstrap_admin_email: str = ""
+    bootstrap_admin_password: str = ""
 
     # Milestone 2: durable orchestration
     redis_url: str = "redis://127.0.0.1:6379/0"
