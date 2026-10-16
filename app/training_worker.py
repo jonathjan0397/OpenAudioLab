@@ -110,6 +110,24 @@ class TrainingWorker:
 
     # -- training --------------------------------------------------------------
 
+    def _ensure_engine_ready(self) -> None:
+        """Load the model, waiting for the engine worker to bring the server up.
+
+        The co-located ACE-Step server is owned by the engine worker and may be
+        idle-stopped; the engine worker starts it when it sees queued training
+        work, so retry until /v1/init answers.
+        """
+        deadline = time.monotonic() + 600
+        while True:
+            try:
+                self.adapter.ensure_model(self.settings.acestep_model)
+                return
+            except Exception as exc:
+                if time.monotonic() >= deadline:
+                    raise
+                log.info("engine not ready for training (%s); waiting", exc)
+                time.sleep(5)
+
     def _train(self, job_id: str, attempt_id: str, lease_token: str) -> None:
         with self.db.session() as session:
             job = get_job_by_id(session, job_id)
@@ -156,7 +174,7 @@ class TrainingWorker:
             run_row.worker_id = self.worker_id
             session.commit()
 
-        self.adapter.ensure_model(self.settings.acestep_model)
+        self._ensure_engine_ready()
         self.adapter.scan_dataset(str(dataset_dir), f"oal-{job_id[:8]}", all_instrumental)
         self.adapter.preprocess(str(workdir / "tensors"))
         heartbeat(self.db, attempt_id, lease_token)

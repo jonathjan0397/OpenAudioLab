@@ -173,6 +173,26 @@ class EngineWorker:
             self._touch_heartbeat()
             time.sleep(5)
 
+    def _training_busy(self) -> bool:
+        """True when training work is queued or a run is active on the server.
+
+        The training worker drives the same co-located ACE-Step server over
+        HTTP, so the engine must stay up while training is pending or running.
+        """
+        import json
+
+        for model_id in (self.settings.train_queue_model_id, self.settings.evaluate_queue_model_id):
+            try:
+                if self.queue.length(RedisQueue.queue_name(model_id)) > 0:
+                    return True
+            except Exception:
+                pass
+        try:
+            data = json.loads(self.adapter.transport.get_bytes("/v1/training/status"))
+            return bool(data.get("data", {}).get("is_training"))
+        except Exception:
+            return False
+
     def _maybe_stop_engine(self) -> None:
         proc = self.engine_process
         if proc is None or not proc.is_running():
@@ -220,7 +240,15 @@ class EngineWorker:
         if job_id is None:
             self.register()
             self._touch_heartbeat()
-            self._maybe_stop_engine()
+            if self._training_busy():
+                self._last_activity = time.monotonic()
+                if self.engine_process is not None:
+                    try:
+                        self.engine_process.ensure_running()
+                    except EngineError as exc:
+                        log.warning("engine start failed for training (%s)", exc.code)
+            else:
+                self._maybe_stop_engine()
             return False
         self._last_activity = time.monotonic()
         if self.engine_process is not None:
