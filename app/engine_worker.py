@@ -137,6 +137,14 @@ class EngineWorker:
         self.settings = settings
         self.worker_id = worker_id or f"acestep-{socket.gethostname()}-{os.getpid()}"
         self.queue_name = queue_name or RedisQueue.queue_name("ace-step-1.5")
+        # Baseline tier drains the main queue first (then helps burst when idle);
+        # burst tier (Vast) only ever drains the overflow queue, so it can never
+        # steal a job the always-on baseline could take.
+        self.receive_queues = (
+            [self.queue_name, RedisQueue.burst_name(self.queue_name)]
+            if settings.worker_tier == "baseline"
+            else [RedisQueue.burst_name(self.queue_name)]
+        )
         self.engine_process = engine_process
         self._stop = False
         self._last_activity = time.monotonic()
@@ -208,7 +216,7 @@ class EngineWorker:
         )
 
     def run_once(self) -> bool:
-        job_id = self.queue.receive(self.queue_name, self.settings.worker_brpop_timeout_seconds)
+        job_id = self.queue.receive(self.receive_queues, self.settings.worker_brpop_timeout_seconds)
         if job_id is None:
             self.register()
             self._touch_heartbeat()
@@ -220,7 +228,7 @@ class EngineWorker:
                 self.engine_process.ensure_running()
             except EngineError as exc:
                 log.warning("engine start failed for job %s (%s); requeueing", job_id, exc.code)
-                self.queue.publish(self.queue_name, job_id)
+                self.queue.publish(self.receive_queues[0], job_id)
                 time.sleep(5)
                 return True
         claim = claim_attempt(self.db, job_id, self.worker_id)

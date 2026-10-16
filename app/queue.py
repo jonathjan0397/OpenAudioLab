@@ -32,6 +32,11 @@ class RedisQueue:
     def queue_name(model_id: str) -> str:
         return f"oal:queue:{model_id}"
 
+    @staticmethod
+    def burst_name(queue: str) -> str:
+        """Overflow tier consumed only by burst (Vast) workers."""
+        return f"{queue}:burst"
+
     def publish(self, queue: str, job_id: str) -> None:
         self.client.lpush(queue, job_id)
 

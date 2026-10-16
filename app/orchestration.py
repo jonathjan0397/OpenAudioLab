@@ -83,7 +83,9 @@ class Dispatcher:
         self.queue = queue
         self.settings = settings
 
-    def publish_once(self, limit: int = 50) -> int:
+    def publish_once(self, limit: int = 50, reserve: int | None = None) -> int:
+        if reserve is None:
+            reserve = self.settings.dispatcher_baseline_reserve
         published = 0
         with self.db.session() as session:
             rows = list(
@@ -95,7 +97,14 @@ class Dispatcher:
                 ).scalars()
             )
             for record in rows:
-                self.queue.publish(record.queue, record.job_id)
+                # Baseline-first: keep the baseline queue filled up to `reserve`
+                # pending jobs; overflow goes to the burst tier (Vast only).
+                target = (
+                    record.queue
+                    if self.queue.depth(record.queue) < reserve
+                    else RedisQueue.burst_name(record.queue)
+                )
+                self.queue.publish(target, record.job_id)
                 record.published_at = utcnow()
                 published += 1
             session.commit()

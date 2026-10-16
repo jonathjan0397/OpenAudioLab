@@ -165,3 +165,11 @@ def test_engine_start_failure_requeues(client, orch) -> None:
         ew.time.sleep = original_sleep
     assert _status(orch.db, job_id) == "queued"
     assert proc.ensure_calls == 1
+
+
+def test_worker_receive_queues_by_tier(orch) -> None:
+    base = EngineWorker(orch.db, orch.queue, orch.storage, FakeAdapter([]), orch.settings, worker_id="t-base")
+    assert base.receive_queues == ["oal:queue:ace-step-1.5", "oal:queue:ace-step-1.5:burst"]
+    burst_settings = orch.settings.model_copy(update={"worker_tier": "burst"})
+    burst = EngineWorker(orch.db, orch.queue, orch.storage, FakeAdapter([]), burst_settings, worker_id="t-burst")
+    assert burst.receive_queues == ["oal:queue:ace-step-1.5:burst"]

@@ -226,3 +226,11 @@ def test_sse_replay_with_last_event_id(client, orch) -> None:
     body = replay.text
     assert "event: queued" not in body
     assert "event: succeeded" in body
+
+
+def test_dispatcher_routes_overflow_to_burst(client, orch) -> None:
+    for i in range(5):
+        submit(client, key=f"route-{i}")
+    assert orch.dispatcher.publish_once(reserve=2) == 5
+    assert orch.queue.depth("oal:queue:ace-step-1.5") == 2
+    assert orch.queue.depth("oal:queue:ace-step-1.5:burst") == 3

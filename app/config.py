@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     heartbeat_interval_seconds: int = 10
     dispatcher_poll_seconds: float = 1.0
     worker_brpop_timeout_seconds: int = 5
+    # Baseline-first tiering: the dispatcher fills the baseline queue up to this
+    # many pending jobs before overflowing new jobs to the burst tier (Vast).
+    # Keep in sync with the autoscaler's OAL_SCALE_JOBS_PER_NODE.
+    dispatcher_baseline_reserve: int = 8
+    # Worker queue tier: "baseline" consumes [main, burst] (the always-on dev
+    # worker); "burst" consumes [burst] only (ephemeral Vast nodes, overflow).
+    worker_tier: str = "baseline"
     max_artifact_bytes: int = 200 * 1024 * 1024
     fixture_latency_seconds: float = 0.2
     sse_follow_seconds: float = 30.0

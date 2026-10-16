@@ -249,6 +249,25 @@ A create is tracked whenever Vast returns a `new_contract` (even if the CLI prin
   short burst is usually drained by the local baseline before the node is warm.
   A pre-baked checkpoint volume or a kept-warm node mitigates this.
 
+## Baseline-first tiered queues (dev worker is the entry point)
+
+A single shared FIFO queue let a warm Vast node out-race the cold baseline (in a
+20-job test the dev worker took 1 job while a warm Vast node did 18 at ~3 s each).
+The queue is therefore split into two tiers so the always-on dev worker always
+gets first claim:
+
+- **`main`** (`oal:queue:ace-step-1.5`) — the baseline tier.
+- **`burst`** (`oal:queue:ace-step-1.5:burst`) — the overflow tier.
+- The **dispatcher** fills `main` up to `OAL_DISPATCH_BASELINE_RESERVE` (default 8)
+  pending jobs, then routes new jobs to `burst`.
+- Worker tier via `OAL_WORKER_TIER`: `baseline` (dev) does `BRPOP [main, burst]`
+  (prefers `main`, helps `burst` when idle); `burst` (Vast) does `BRPOP [burst]`
+  only, so Vast can never steal a `main` job.
+- The autoscaler counts **both** tiers for depth and uses the same per-worker
+  batch `OAL_SCALE_JOBS_PER_NODE` (default 8): `≤8` jobs run on the baseline alone
+  (no Vast); beyond that, overflow drives Vast nodes. Keep the reserve and
+  `JOBS_PER_NODE` equal.
+
 ## Worker cold/idle lifecycle (GPU freed between jobs)
 
 The engine worker now **owns** the co-located ACE-Step server: it starts the

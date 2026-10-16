@@ -34,11 +34,12 @@ import redis
 
 HUB = os.environ.get("OAL_HUB_IP", "192.151.156.124")
 QUEUE_KEY = os.environ.get("OAL_QUEUE_KEY", "oal:queue:ace-step-1.5")
+BURST_KEY = QUEUE_KEY + ":burst"
 REDIS_URL = os.environ.get("OAL_REDIS_URL", f"redis://{HUB}:6379/0")
 IMAGE = os.environ.get("OAL_WORKER_IMAGE", "stratastack/oal-worker:ca1e85f-torch2.10-cu128-wg")
 DISK = os.environ.get("OAL_VAST_DISK", "40")
 SCALE_UP = int(os.environ.get("OAL_SCALE_UP_DEPTH", "2"))
-JOBS_PER_NODE = int(os.environ.get("OAL_SCALE_JOBS_PER_NODE", "2"))
+JOBS_PER_NODE = int(os.environ.get("OAL_SCALE_JOBS_PER_NODE", "8"))
 MAX_NODES = int(os.environ.get("OAL_SCALE_MAX_NODES", "3"))
 BASELINE = int(os.environ.get("OAL_SCALE_BASELINE_WORKERS", "1"))
 SCALE_DOWN_SECONDS = float(os.environ.get("OAL_SCALE_DOWN_SECONDS", "1800"))
@@ -85,6 +86,9 @@ def worker_env():
         f"-e OAL_SECRET_KEY={secret}",
         "-e OAL_WORKER_ROLE=engine_worker",
         "-e OAL_ACESTEP_BASE_URL=http://127.0.0.1:8001",
+        # Burst tier: Vast nodes drain only the overflow queue, so the always-on
+        # baseline worker keeps first claim on the main queue.
+        "-e OAL_WORKER_TIER=burst",
         # Vast burst nodes stay hot (keep the model loaded for their short life);
         # the autoscaler tears them down, so no idle-stop is needed.
         "-e OAL_ENGINE_IDLE_STOP_SECONDS=0",
@@ -192,7 +196,7 @@ def desired_nodes(depth, low_since, now, current):
 
 
 def tick(r, st, dry_run=False):
-    depth = r.llen(QUEUE_KEY)
+    depth = r.llen(QUEUE_KEY) + r.llen(BURST_KEY)
     now = time.time()
     nodes = st.get("nodes", [])
     if depth >= SCALE_UP:
