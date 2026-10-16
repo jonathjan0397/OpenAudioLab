@@ -98,7 +98,7 @@ class Settings(BaseSettings):
     s3_access_key: str = ""
     s3_secret_key: str = ""
     s3_prefix: str = ""
-    adapter_cache_dir: str = "./adapter-cache"
+    adapter_cache_dir: str = "/opt/acestep/adapter-cache"
     build_revision: str = "dev"
 
     @field_validator("cors_origins", mode="before")
