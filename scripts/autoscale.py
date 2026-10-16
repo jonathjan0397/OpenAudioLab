@@ -39,6 +39,9 @@ MIN_RELIABILITY = float(os.environ.get("OAL_VAST_MIN_RELIABILITY", "0.95"))
 # Exclude old architectures (e.g. Volta V100 = 7.0) that the cu128 ACE-Step build
 # is not validated on; keeps Turing/Ampere/Ada/Blackwell.
 MIN_COMPUTE_CAP = float(os.environ.get("OAL_VAST_MIN_COMPUTE_CAP", "7.5"))
+# Approx worker image size (GB), used only to estimate cold-start pull time when
+# ranking offers by cost-per-download-Mbps (cheapest AND fastest to pull).
+IMAGE_GB = float(os.environ.get("OAL_WORKER_IMAGE_GB", "13"))
 
 
 def log(msg):
@@ -76,19 +79,36 @@ def worker_env():
 def pick_offer():
     _, out, _ = sh([VASTAI, "search", "offers",
                     "gpu_ram>=16 num_gpus=1 rentable=true cuda_max_good>=12.8 verification=verified",
-                    "--raw", "-o", "dph_total"])
+                    "--raw", "-o", "dph_total", "--limit", "200"])
     try:
         offers = json.loads(out)
     except Exception:
         return None
+    # Rank by an image-pull-cost proxy: hourly price per Mbps of download. This
+    # favours offers that are BOTH cheap and fast to pull (cold start is the
+    # dominant burst cost), rather than the cheapest-but-slowest node.
+    best = None
     for o in offers:
         geo = str(o.get("geolocation", ""))
         cc = o.get("compute_cap") or 0
-        if (geo.endswith(", US") or geo.endswith(", CA")) \
-                and (o.get("reliability2") or 0) >= MIN_RELIABILITY \
-                and cc >= MIN_COMPUTE_CAP:
-            return o.get("id")
-    return None
+        rel = o.get("reliability2") or 0
+        dph = o.get("dph_total") or 0
+        down = o.get("inet_down") or 0
+        if not (geo.endswith(", US") or geo.endswith(", CA")):
+            continue
+        if rel < MIN_RELIABILITY or cc < MIN_COMPUTE_CAP or dph <= 0 or down <= 0:
+            continue
+        score = dph / down
+        if best is None or score < best[0]:
+            best = (score, o)
+    if not best:
+        return None
+    o = best[1]
+    pull_min = IMAGE_GB * 8000 / (o.get("inet_down") or 1) / 60
+    log(f"picked offer {o.get('id')} {o.get('gpu_name')} {o.get('geolocation')} "
+        f"dph=${o.get('dph_total'):.3f}/hr inet_down={o.get('inet_down')}Mbps "
+        f"~pull={pull_min:.1f}min score={best[0]:.5f}")
+    return o.get("id")
 
 
 def create_instance(dry_run=False):

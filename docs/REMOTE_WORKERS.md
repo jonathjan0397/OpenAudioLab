@@ -229,10 +229,12 @@ queue is empty for `OAL_SCALE_DOWN_SECONDS` (default 120s) after an
 (GPU 0 + `vastai` + hub reachability), polls every 15s, and persists the managed
 contract to a state file so restarts don't orphan instances.
 
-- **Offer selection**: cheapest North-American offer with `gpu_ram>=16`,
+- **Offer selection**: among North-American offers passing `gpu_ram>=16`,
   `cuda_max_good>=12.8`, `verification=verified`, `reliability2>=0.95` and
   `compute_cap>=7.5` (excludes Volta, which the cu128 ACE-Step build isn't
-  validated on).
+  validated on), it ranks by **cost-per-download-Mbps** (`dph_total / inet_down`)
+  and takes the best — the cheapest node that is also **fastest to pull** (cold
+  start is the dominant burst cost), not the cheapest-but-slowest one.
 - **Cold-start caveat**: a Vast node re-pulls the ~13 GB image (minutes) and
   lazy-loads the model, so a burst worker only pays off for sustained load; a
   short burst is usually drained by the local baseline before the node is warm.
