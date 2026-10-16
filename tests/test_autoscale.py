@@ -31,11 +31,11 @@ def test_desired_nodes_scale_down_tiers(monkeypatch):
     assert autoscale.desired_nodes(1, now - 2000, now, 2) == 0
 
 
-def test_desired_nodes_n8_counts_baseline(monkeypatch):
-    _configure(monkeypatch, SCALE_UP=2, JOBS_PER_NODE=8, MAX_NODES=3, BASELINE=1)
+def test_desired_nodes_n20_counts_baseline(monkeypatch):
+    _configure(monkeypatch, SCALE_UP=2, JOBS_PER_NODE=20, MAX_NODES=3, BASELINE=1)
     now = 1000.0
-    assert autoscale.desired_nodes(8, None, now, 0) == 0
-    assert autoscale.desired_nodes(9, None, now, 0) == 1
-    assert autoscale.desired_nodes(16, None, now, 0) == 1
-    assert autoscale.desired_nodes(17, None, now, 0) == 2
-    assert autoscale.desired_nodes(40, None, now, 0) == 2
+    assert autoscale.desired_nodes(20, None, now, 0) == 0
+    assert autoscale.desired_nodes(21, None, now, 0) == 1
+    assert autoscale.desired_nodes(40, None, now, 0) == 1
+    assert autoscale.desired_nodes(41, None, now, 0) == 2
+    assert autoscale.desired_nodes(100, None, now, 0) == 2

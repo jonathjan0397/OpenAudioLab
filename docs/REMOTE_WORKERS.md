@@ -258,15 +258,15 @@ gets first claim:
 
 - **`main`** (`oal:queue:ace-step-1.5`) — the baseline tier.
 - **`burst`** (`oal:queue:ace-step-1.5:burst`) — the overflow tier.
-- The **dispatcher** fills `main` up to `OAL_DISPATCH_BASELINE_RESERVE` (default 8)
+- The **dispatcher** fills `main` up to `OAL_DISPATCH_BASELINE_RESERVE` (default 20)
   pending jobs, then routes new jobs to `burst`.
 - Worker tier via `OAL_WORKER_TIER`: `baseline` (dev) does `BRPOP [main, burst]`
   (prefers `main`, helps `burst` when idle); `burst` (Vast) does `BRPOP [burst]`
   only, so Vast can never steal a `main` job.
 - The autoscaler counts **both** tiers for depth and uses the same per-worker
-  batch `OAL_SCALE_JOBS_PER_NODE` (default 8): `≤8` jobs run on the baseline alone
-  (no Vast); beyond that, overflow drives Vast nodes. Keep the reserve and
-  `JOBS_PER_NODE` equal.
+  batch `OAL_SCALE_JOBS_PER_NODE` (default 20): `≤20` jobs run on the baseline
+  alone (no Vast); the fleet only scales out once depth reaches 21. Keep the
+  reserve and `JOBS_PER_NODE` equal.
 
 ## Worker cold/idle lifecycle (GPU freed between jobs)
 
