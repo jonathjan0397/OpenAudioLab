@@ -83,6 +83,18 @@ def test_download_token_required_and_range(client, orch) -> None:
     assert ranged.headers["content-range"].startswith("bytes 0-99/")
 
 
+def test_content_missing_file_returns_404(client, orch) -> None:
+    job_id = _run_pipeline(client, orch)
+    asset_id = client.get(f"/api/v1/jobs/{job_id}/artifacts", headers=auth(TOKEN_A)).json()["artifacts"][0]["asset_id"]
+    url = client.post(f"/api/v1/artifacts/{asset_id}/download-url", headers=auth(TOKEN_A)).json()["url"]
+    with orch.db.session() as session:
+        key = session.execute(select(Asset.storage_key).where(Asset.id == asset_id)).scalar_one()
+    orch.storage.delete(key)
+    missing = client.get(url)
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "ASSET_FILE_MISSING"
+
+
 def test_cross_owner_asset_paths(client, orch) -> None:
     job_id = _run_pipeline(client, orch)
     asset_id = client.get(f"/api/v1/jobs/{job_id}/artifacts", headers=auth(TOKEN_A)).json()["artifacts"][0]["asset_id"]

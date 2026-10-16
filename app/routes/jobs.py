@@ -525,7 +525,10 @@ def artifact_content(
     if expiry is None:
         raise ApiError(403, "DOWNLOAD_TOKEN_INVALID", "Download token is invalid or expired.")
     byte_range = parse_range(request.headers.get("Range"), asset.bytes)
-    stored = request.app.state.storage.get(asset.storage_key, byte_range)
+    try:
+        stored = request.app.state.storage.get(asset.storage_key, byte_range)
+    except FileNotFoundError:
+        raise ApiError(404, "ASSET_FILE_MISSING", "Stored file is missing.")
     headers = {"Accept-Ranges": "bytes"}
     status_code = 200
     if stored.content_range is not None:
