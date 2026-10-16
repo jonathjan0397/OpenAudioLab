@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/api.ts","./src/main.tsx","./src/pages/Admin.tsx","./src/pages/Main.tsx","./src/pages/Studio.tsx"],"version":"5.9.3"}
+{"root":["./src/App.tsx","./src/api.ts","./src/main.tsx","./src/components/AuthMenu.tsx","./src/components/CreateWidget.tsx","./src/components/Trending.tsx","./src/pages/Admin.tsx","./src/pages/Main.tsx","./src/pages/Studio.tsx"],"version":"5.9.3"}

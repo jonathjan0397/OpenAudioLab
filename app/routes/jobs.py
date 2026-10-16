@@ -672,3 +672,41 @@ def credits_balance(
             ],
         }
     )
+
+
+@router.get("/public/tracks")
+def public_tracks(
+    request: Request,
+    limit: int = Query(default=12, ge=1, le=50),
+) -> JSONResponse:
+    settings = request.app.state.settings
+    now = utcnow()
+    with request.app.state.db.session() as session:
+        rows = list(
+            session.execute(
+                select(Asset)
+                .where(
+                    Asset.shared.is_(True),
+                    Asset.deleted_at.is_(None),
+                    Asset.mime.like("audio/%"),
+                )
+                .order_by(Asset.created_at.desc())
+                .limit(limit)
+            ).scalars()
+        )
+    items = []
+    for asset in rows:
+        if asset.expires_at is not None and as_utc(asset.expires_at) <= now:
+            continue
+        expiry = now + timedelta(hours=24)
+        token = make_token(settings.secret_key, asset.id, expiry)
+        items.append(
+            {
+                "asset_id": asset.id,
+                "title": asset.title,
+                "duration_seconds": asset.duration_seconds,
+                "created_at": asset.created_at.isoformat() if asset.created_at else None,
+                "url": f"/api/v1/artifacts/{asset.id}/content?token={token}",
+            }
+        )
+    return JSONResponse({"tracks": items})

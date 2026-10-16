@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, SiteInfo } from "./api";
+import AuthMenu from "./components/AuthMenu";
 import MainPage from "./pages/Main";
 import StudioPage from "./pages/Studio";
 import AdminPage from "./pages/Admin";
@@ -32,6 +33,7 @@ export default function App() {
           <NavLink to="/admin">Admin</NavLink>
         </nav>
         <span className="spacer" />
+        <AuthMenu />
         <select
           style={{ width: 160 }}
           value={theme}
