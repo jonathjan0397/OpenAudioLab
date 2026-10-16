@@ -22,13 +22,22 @@ export interface Playable {
 
 interface PlayerState {
   current: Playable | null;
+  queue: Playable[];
+  index: number;
   playing: boolean;
+  shuffle: boolean;
+  repeat: boolean;
   progress: number;
   position: number;
   duration: number;
   volume: number;
   play: (track: Playable) => void;
+  playQueue: (tracks: Playable[], startIndex?: number) => void;
   toggle: () => void;
+  next: () => void;
+  prev: () => void;
+  toggleShuffle: () => void;
+  toggleRepeat: () => void;
   seek: (ratio: number) => void;
   setVolume: (v: number) => void;
 }
@@ -40,18 +49,42 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   if (audioRef.current === null && typeof Audio !== "undefined") {
     audioRef.current = new Audio();
   }
-  const [current, setCurrent] = useState<Playable | null>(null);
+  const [queue, setQueue] = useState<Playable[]>([]);
+  const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [shuffle, setShuffle] = useState(false);
+  const [repeat, setRepeat] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolumeState] = useState(() => Number(localStorage.getItem("oal-volume") ?? 1));
+  const repeatRef = useRef(repeat);
+  repeatRef.current = repeat;
+
+  const current = queue[index] ?? null;
+
+  const load = useCallback((track: Playable, autoplay = true) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.src = track.url;
+    setPosition(0);
+    setDuration(track.duration || 0);
+    if (autoplay) void audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+  }, []);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
     const onTime = () => setPosition(audio.currentTime);
     const onMeta = () => setDuration(audio.duration || 0);
-    const onEnd = () => setPlaying(false);
+    const onEnd = () => {
+      if (repeatRef.current) {
+        audio.currentTime = 0;
+        void audio.play();
+        return;
+      }
+      setPlaying(false);
+      window.dispatchEvent(new CustomEvent("oal:track-end"));
+    };
     audio.addEventListener("timeupdate", onTime);
     audio.addEventListener("loadedmetadata", onMeta);
     audio.addEventListener("ended", onEnd);
@@ -66,17 +99,57 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
 
-  const play = useCallback((track: Playable) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (current?.asset_id !== track.asset_id) {
-      audio.src = track.url;
-      setCurrent(track);
-      setPosition(0);
-      setDuration(track.duration || 0);
-    }
-    void audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
-  }, [current]);
+  const play = useCallback(
+    (track: Playable) => {
+      if (current?.asset_id === track.asset_id) {
+        const audio = audioRef.current;
+        if (audio && audio.paused) void audio.play().then(() => setPlaying(true)).catch(() => {});
+        return;
+      }
+      setQueue([track]);
+      setIndex(0);
+      load(track);
+    },
+    [current, load]
+  );
+
+  const playQueue = useCallback(
+    (tracks: Playable[], startIndex = 0) => {
+      setQueue(tracks);
+      setIndex(startIndex);
+      if (tracks[startIndex]) load(tracks[startIndex]);
+    },
+    [load]
+  );
+
+  const step = useCallback(
+    (dir: 1 | -1) => {
+      if (queue.length === 0) return;
+      let nextIndex: number;
+      if (shuffle && queue.length > 1) {
+        do {
+          nextIndex = Math.floor(Math.random() * queue.length);
+        } while (nextIndex === index);
+      } else {
+        nextIndex = (index + dir + queue.length) % queue.length;
+      }
+      setIndex(nextIndex);
+      load(queue[nextIndex]);
+    },
+    [queue, index, shuffle, load]
+  );
+
+  const next = useCallback(() => step(1), [step]);
+  const prev = useCallback(() => step(-1), [step]);
+
+  // auto-advance on track end
+  useEffect(() => {
+    const onEnd = () => {
+      if (queue.length > 1) next();
+    };
+    window.addEventListener("oal:track-end", onEnd);
+    return () => window.removeEventListener("oal:track-end", onEnd);
+  }, [next, queue.length]);
 
   const toggle = useCallback(() => {
     const audio = audioRef.current;
@@ -103,17 +176,26 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const value = useMemo<PlayerState>(
     () => ({
       current,
+      queue,
+      index,
       playing,
+      shuffle,
+      repeat,
       progress: duration > 0 ? position / duration : 0,
       position,
       duration,
       volume,
       play,
+      playQueue,
       toggle,
+      next,
+      prev,
+      toggleShuffle: () => setShuffle((s) => !s),
+      toggleRepeat: () => setRepeat((r) => !r),
       seek,
       setVolume,
     }),
-    [current, playing, position, duration, volume, play, toggle, seek, setVolume]
+    [current, queue, index, playing, shuffle, repeat, position, duration, volume, play, playQueue, toggle, next, prev, seek, setVolume]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -127,9 +209,19 @@ export function usePlayer(): PlayerState {
 
 export function PlayerBar() {
   const p = usePlayer();
+  const [showQueue, setShowQueue] = useState(false);
+  const barRef = useRef<HTMLDivElement>(null);
   if (!p.current) return null;
+
+  const fullscreen = () => {
+    const el = barRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void el.requestFullscreen?.();
+  };
+
   return (
-    <div className="player-bar">
+    <div className="player-bar" ref={barRef}>
       <div className="now">
         <ArtworkTile seed={p.current.asset_id} size={44} />
         <div style={{ minWidth: 0 }}>
@@ -138,14 +230,24 @@ export function PlayerBar() {
         </div>
       </div>
       <div className="transport">
-        <button className="btn btn-icon btn-ghost" onClick={p.toggle} aria-label={p.playing ? "Pause" : "Play"}>
+        <button className={`btn btn-icon btn-ghost${p.shuffle ? " on" : ""}`} onClick={p.toggleShuffle} title="Shuffle">⤨</button>
+        <button className="btn btn-icon btn-ghost" onClick={p.prev} title="Previous">⏮</button>
+        <button className="btn btn-icon btn-primary" onClick={p.toggle} aria-label={p.playing ? "Pause" : "Play"}>
           {p.playing ? "❚❚" : "▶"}
         </button>
+        <button className="btn btn-icon btn-ghost" onClick={p.next} title="Next">⏭</button>
+        <button className={`btn btn-icon btn-ghost${p.repeat ? " on" : ""}`} onClick={p.toggleRepeat} title="Repeat">⟳</button>
       </div>
       <div className="seek">
         <span className="time">{fmtTime(p.position)}</span>
         <div style={{ flex: 1 }}>
-          <Waveform assetId={p.current.asset_id} token={p.current.url.split("token=")[1]} progress={p.progress} onSeek={p.seek} height={34} />
+          <Waveform
+            assetId={p.current.asset_id}
+            token={p.current.url.split("token=")[1]}
+            progress={p.progress}
+            onSeek={p.seek}
+            height={34}
+          />
         </div>
         <span className="time">{fmtTime(p.duration)}</span>
       </div>
@@ -159,6 +261,27 @@ export function PlayerBar() {
         onChange={(e) => p.setVolume(Number(e.target.value))}
         aria-label="Volume"
       />
+      <div style={{ position: "relative" }}>
+        <button className="btn btn-icon btn-ghost" onClick={() => setShowQueue((s) => !s)} title="Queue">☰</button>
+        {showQueue && (
+          <div className="card queue-pop">
+            {p.queue.map((t, i) => (
+              <div
+                key={t.asset_id + i}
+                className={`queue-item${i === p.index ? " active" : ""}`}
+                onClick={() => {
+                  p.playQueue(p.queue, i);
+                  setShowQueue(false);
+                }}
+              >
+                <ArtworkTile seed={t.asset_id} size={28} />
+                <span className="t">{t.title}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <button className="btn btn-icon btn-ghost" onClick={fullscreen} title="Fullscreen">⛶</button>
     </div>
   );
 }

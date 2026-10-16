@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, SiteInfo } from "./api";
 import AuthMenu from "./components/AuthMenu";
 import { PlayerBar, PlayerProvider } from "./components/PlayerContext";
+import { ThemeCtx } from "./theme";
 import MainPage from "./pages/Main";
 import StudioPage from "./pages/Studio";
 import AdminPage from "./pages/Admin";
@@ -26,6 +27,7 @@ export default function App() {
   }, [theme]);
 
   return (
+    <ThemeCtx.Provider value={theme}>
     <PlayerProvider>
       <header className="site-header">
         <span className="logo">
@@ -71,5 +73,6 @@ export default function App() {
       </Routes>
       <PlayerBar />
     </PlayerProvider>
+    </ThemeCtx.Provider>
   );
 }

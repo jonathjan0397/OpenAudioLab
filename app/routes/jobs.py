@@ -707,6 +707,32 @@ def credits_balance(
     )
 
 
+def _creator_names(session, owner_ids: set[str]) -> dict[str, str]:
+    from ..models import User
+
+    user_ids = {o[4:] for o in owner_ids if o.startswith("usr_")}
+    names: dict[str, str] = {}
+    if user_ids:
+        for u in session.execute(select(User).where(User.id.in_(user_ids))).scalars():
+            names["usr_" + u.id] = u.username
+    return names
+
+
+def _like_counts(session, asset_ids: list[str]) -> dict[str, int]:
+    from sqlalchemy import func as sa_func
+
+    from ..models import Favorite
+
+    if not asset_ids:
+        return {}
+    rows = session.execute(
+        select(Favorite.asset_id, sa_func.count())
+        .where(Favorite.asset_id.in_(asset_ids))
+        .group_by(Favorite.asset_id)
+    ).all()
+    return {aid: int(n) for aid, n in rows}
+
+
 @router.get("/public/tracks")
 def public_tracks(
     request: Request,
@@ -727,6 +753,8 @@ def public_tracks(
                 .limit(limit)
             ).scalars()
         )
+        likes = _like_counts(session, [a.id for a in rows])
+        creators = _creator_names(session, {a.owner_id for a in rows})
     items = []
     for asset in rows:
         if asset.expires_at is not None and as_utc(asset.expires_at) <= now:
@@ -739,6 +767,8 @@ def public_tracks(
                 "title": asset.title,
                 "duration_seconds": asset.duration_seconds,
                 "created_at": asset.created_at.isoformat() if asset.created_at else None,
+                "like_count": likes.get(asset.id, 0),
+                "creator": creators.get(asset.owner_id, "community"),
                 "url": f"/api/v1/artifacts/{asset.id}/content?token={token}",
             }
         )
@@ -769,6 +799,7 @@ def my_tracks(
                 select(Favorite.asset_id).where(Favorite.owner_id == owner_id)
             ).scalars()
         )
+        likes = _like_counts(session, [a.id for a in rows])
     items = []
     for asset in rows:
         expired = asset.expires_at is not None and as_utc(asset.expires_at) <= now
@@ -780,6 +811,7 @@ def my_tracks(
                 "title": asset.title,
                 "shared": asset.shared,
                 "favorite": asset.id in favorite_ids,
+                "like_count": likes.get(asset.id, 0),
                 "duration_seconds": asset.duration_seconds,
                 "created_at": asset.created_at.isoformat() if asset.created_at else None,
                 "expired": expired,

@@ -52,7 +52,12 @@ export default function Waveform({
     const data = peaks.data?.peaks;
     const styles = getComputedStyle(document.documentElement);
     const accent = styles.getPropertyValue("--accent").trim() || "#f4511e";
+    const waveA = styles.getPropertyValue("--wave-a").trim() || accent;
+    const waveB = styles.getPropertyValue("--wave-b").trim() || accent;
     const idle = styles.getPropertyValue("--border").trim() || "#ccc";
+    const grad = ctx.createLinearGradient(0, 0, w, 0);
+    grad.addColorStop(0, waveA);
+    grad.addColorStop(1, waveB);
     if (!data || data.length === 0) {
       // deterministic placeholder bars so the layout never looks broken
       ctx.fillStyle = idle;
@@ -65,7 +70,7 @@ export default function Waveform({
     const bw = w / data.length;
     data.forEach((v, i) => {
       const bh = Math.max(2, v * h * 0.92);
-      ctx.fillStyle = i / data.length <= progress ? accent : idle;
+      ctx.fillStyle = i / data.length <= progress ? grad : idle;
       ctx.fillRect(i * bw + bw * 0.15, (h - bh) / 2, Math.max(1, bw * 0.7), bh);
     });
   }, [peaks.data, progress, height]);

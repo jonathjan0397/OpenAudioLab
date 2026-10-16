@@ -146,6 +146,9 @@ def admin_stats(request: Request) -> JSONResponse:
                 Asset.deleted_at.is_(None), Asset.mime.like("audio/%")
             )
         ).scalar_one()
+        storage_bytes = session.execute(
+            select(sa_func.coalesce(sa_func.sum(Asset.bytes), 0)).where(Asset.deleted_at.is_(None))
+        ).scalar_one()
         workers = list(session.execute(select(Worker)).scalars())
     return JSONResponse(
         {
@@ -153,6 +156,7 @@ def admin_stats(request: Request) -> JSONResponse:
             "jobs_today": jobs_today,
             "jobs_active": jobs_active,
             "assets_total": assets_total,
+            "storage_bytes": int(storage_bytes),
             "workers": [
                 {
                     "id": w.id,
@@ -233,5 +237,37 @@ def admin_jobs(request: Request, limit: int = Query(default=10, ge=1, le=100)) -
                 "finished_at": j.finished_at.isoformat() if j.finished_at else None,
             }
             for j in rows
+        ]
+    )
+
+
+@router.get("/admin/trainings")
+def admin_trainings(request: Request, limit: int = Query(default=5, ge=1, le=50)) -> JSONResponse:
+    """Recent training runs with live progress, for the admin overview."""
+    from ..models import ArtistProfile, ArtistProfileVersion, Job, TrainingRun
+
+    with request.app.state.db.session() as session:
+        rows = list(
+            session.execute(
+                select(TrainingRun, Job.status, Job.progress, Job.stage, Job.created_at, ArtistProfile.name)
+                .join(Job, Job.id == TrainingRun.job_id)
+                .outerjoin(ArtistProfileVersion, ArtistProfileVersion.id == TrainingRun.profile_version_id)
+                .outerjoin(ArtistProfile, ArtistProfile.id == ArtistProfileVersion.profile_id)
+                .order_by(Job.created_at.desc())
+                .limit(limit)
+            ).all()
+        )
+    return JSONResponse(
+        [
+            {
+                "run_id": run.id,
+                "profile": name or "unnamed",
+                "status": status,
+                "stage": stage,
+                "progress": progress,
+                "created_at": created.isoformat() if created else None,
+                "hardware": run.hardware,
+            }
+            for run, status, progress, stage, created, name in rows
         ]
     )
