@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
+import ArtworkTile from "./ArtworkTile";
+import Waveform from "./Waveform";
+import { usePlayer } from "./PlayerContext";
+import { fmtTime } from "./ui";
 
 interface JobAccepted {
   job_id: string;
@@ -8,6 +12,7 @@ interface JobAccepted {
 interface JobDetail {
   status: string;
   stage?: string | null;
+  progress?: number | null;
   error_code?: string | null;
   error_message?: string | null;
 }
@@ -16,18 +21,25 @@ interface ArtifactItem {
   role: string;
   mime: string;
   duration_seconds: number | null;
-}
-interface ArtifactsResp {
-  artifacts: ArtifactItem[];
+  title?: string | null;
 }
 interface DownloadResp {
   url: string;
 }
 
-export default function CreateWidget() {
+const DURATIONS = [
+  { value: 30, label: "~30 seconds" },
+  { value: 60, label: "~1 minute" },
+  { value: 120, label: "~2 minutes" },
+  { value: 180, label: "~3 minutes" },
+  { value: 240, label: "~4 minutes" },
+];
+
+export default function CreateWidget({ compact = false }: { compact?: boolean }) {
+  const player = usePlayer();
   const [desc, setDesc] = useState("A dreamy indie pop song about chasing a brighter tomorrow");
-  const [duration, setDuration] = useState(30);
-  const [instrumental, setInstrumental] = useState(true);
+  const [duration, setDuration] = useState(60);
+  const [instrumental, setInstrumental] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -58,7 +70,7 @@ export default function CreateWidget() {
 
   const artifacts = useQuery({
     queryKey: ["job-artifacts", jobId],
-    queryFn: () => api.get<ArtifactsResp>(`/api/v1/jobs/${jobId}/artifacts`),
+    queryFn: () => api.get<{ artifacts: ArtifactItem[] }>(`/api/v1/jobs/${jobId}/artifacts`),
     enabled: job.data?.status === "succeeded",
   });
 
@@ -76,42 +88,110 @@ export default function CreateWidget() {
   });
 
   const status = job.data?.status;
-  const busy = generate.isPending || (status && status !== "succeeded" && status !== "failed");
+  const busy = generate.isPending || (status ? status !== "succeeded" && status !== "failed" : false);
+  const result = (artifacts.data?.artifacts || []).filter((a) => a.mime.startsWith("audio/"))[0];
 
   return (
-    <div className="card">
-      <textarea rows={2} value={desc} onChange={(e) => setDesc(e.target.value)} />
-      <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
-        <label style={{ display: "flex", gap: 6, alignItems: "center", width: "auto" }}>
-          <input style={{ width: 70 }} type="number" min={1} max={600} value={duration}
-            onChange={(e) => setDuration(Number(e.target.value))} />
-          sec
-        </label>
-        <label style={{ display: "flex", gap: 6, alignItems: "center", width: "auto" }}>
-          <input style={{ width: "auto" }} type="checkbox" checked={instrumental}
-            onChange={(e) => setInstrumental(e.target.checked)} />
-          Instrumental
-        </label>
-        <button className="primary" disabled={!!busy} onClick={() => generate.mutate()}>
-          {busy ? "Generating..." : "Generate"}
-        </button>
-        {error && <span style={{ color: "crimson" }}>{error}</span>}
-        {status === "failed" && <span style={{ color: "crimson" }}>{job.data?.error_code}</span>}
+    <div className="card create-panel">
+      <div className="field">
+        <textarea
+          rows={compact ? 2 : 3}
+          maxLength={500}
+          value={desc}
+          onChange={(e) => setDesc(e.target.value)}
+          placeholder="Describe the music you want…"
+        />
+        <span className="char-count">{desc.length}/500</span>
       </div>
-      {status && status !== "succeeded" && status !== "failed" && (
-        <p style={{ color: "var(--muted)" }}>Status: {status}{job.data?.stage ? ` / ${job.data.stage}` : ""}</p>
+      <div className="create-controls">
+        <div className="field">
+          <label>Track type</label>
+          <div className="segmented">
+            <button type="button" className={!instrumental ? "active" : ""} onClick={() => setInstrumental(false)}>
+              ♪ Vocal
+            </button>
+            <button type="button" className={instrumental ? "active" : ""} onClick={() => setInstrumental(true)}>
+              ⇍ Instrumental
+            </button>
+          </div>
+        </div>
+        <div className="field">
+          <label>Duration</label>
+          <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
+            {DURATIONS.map((d) => (
+              <option key={d.value} value={d.value}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <button className="btn btn-primary btn-lg" disabled={!!busy} onClick={() => generate.mutate()}>
+          {busy ? "✦ Generating…" : "✦ Generate"} →
+        </button>
+      </div>
+      {error && <p className="pill err" style={{ marginTop: 12 }}>{error}</p>}
+      {status === "failed" && (
+        <p className="pill err" style={{ marginTop: 12 }}>
+          {job.data?.error_code}: {job.data?.error_message}
+        </p>
       )}
-      {urls.data &&
-        artifacts.data?.artifacts
-          .filter((a) => a.mime.startsWith("audio/"))
-          .map((a) => (
-            <div key={a.asset_id} style={{ marginTop: 12 }}>
-              <audio controls src={urls.data[a.asset_id]} style={{ width: "100%" }} />
-              <a href={urls.data[a.asset_id]} download style={{ marginLeft: 8 }}>
-                WAV
-              </a>
+      {busy && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--muted)", marginBottom: 5 }}>
+            <span>{job.data?.stage ? `${job.data.stage}…` : "Queued…"}</span>
+            <span>{job.data?.progress != null ? `${Math.round(job.data.progress * 100)}%` : ""}</span>
+          </div>
+          <div className="progress">
+            <i style={{ width: `${Math.round((job.data?.progress ?? 0.08) * 100)}%` }} />
+          </div>
+        </div>
+      )}
+      {result && urls.data?.[result.asset_id] && (
+        <div className="track-row" style={{ marginTop: 14, borderBottom: 0 }}>
+          <ArtworkTile
+            seed={result.asset_id}
+            size={64}
+            onPlay={() =>
+              player.play({
+                asset_id: result.asset_id,
+                title: result.title || "New track",
+                url: urls.data[result.asset_id],
+                duration: result.duration_seconds,
+                subtitle: "Just generated",
+              })
+            }
+          />
+          <div className="meta">
+            <div className="title">{result.title || "New track"}</div>
+            <div className="sub">
+              {fmtTime(result.duration_seconds)} · {instrumental ? "Instrumental" : "Vocal"}
             </div>
-          ))}
+          </div>
+          <div className="wave">
+            <Waveform
+              assetId={result.asset_id}
+              token={urls.data[result.asset_id].split("token=")[1]}
+              progress={player.current?.asset_id === result.asset_id ? player.progress : 0}
+              onSeek={(r) => {
+                player.play({
+                  asset_id: result.asset_id,
+                  title: result.title || "New track",
+                  url: urls.data[result.asset_id],
+                  duration: result.duration_seconds,
+                });
+                setTimeout(() => player.seek(r), 60);
+              }}
+            />
+          </div>
+          <div className="actions">
+            <a className="btn" href={urls.data[result.asset_id]} download>
+              ↓ WAV
+            </a>
+            <button className="btn" disabled title="Coming soon">MP3</button>
+            <button className="btn" disabled title="Coming soon">Stems</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { NavLink, Route, Routes } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, SiteInfo } from "./api";
 import AuthMenu from "./components/AuthMenu";
+import { PlayerBar, PlayerProvider } from "./components/PlayerContext";
 import MainPage from "./pages/Main";
 import StudioPage from "./pages/Studio";
 import AdminPage from "./pages/Admin";
@@ -25,18 +26,29 @@ export default function App() {
   }, [theme]);
 
   return (
-    <>
+    <PlayerProvider>
       <header className="site-header">
-        <span className="logo">OpenAudioLab.io</span>
+        <span className="logo">
+          OpenAudioLab<span className="tld">.io</span>
+        </span>
+        <span className="brand-tag">{theme.replace(/-/g, " ")}</span>
         <nav>
-          <NavLink to="/">Create</NavLink>
+          <NavLink to="/" end>Create</NavLink>
+          <NavLink to="/artists">Explore</NavLink>
           <NavLink to="/studio">Studio</NavLink>
           <NavLink to="/admin">Admin</NavLink>
         </nav>
         <span className="spacer" />
+        <span className="header-search">
+          <span aria-hidden>⌕</span>
+          <input placeholder="Search tracks, artists, prompts…" />
+        </span>
+        <span className="bell" title="Notifications">
+          🔔<span className="dot" />
+        </span>
         <AuthMenu />
         <select
-          style={{ width: 160 }}
+          style={{ width: 150 }}
           value={theme}
           onChange={(e) => {
             window.localStorage.setItem("oal-theme-preview", e.target.value);
@@ -57,6 +69,7 @@ export default function App() {
         <Route path="/artists" element={<ArtistPage />} />
         <Route path="/artists/:slug" element={<ArtistPage />} />
       </Routes>
-    </>
+      <PlayerBar />
+    </PlayerProvider>
   );
 }

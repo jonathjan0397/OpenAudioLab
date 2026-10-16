@@ -1,12 +1,40 @@
+/* Neon-Studio — near-black, purple→cyan gradients, glow, Space Grotesk */
 [data-theme="neon-studio"] {
-  --bg: #0a0e1f;
-  --surface: #111731;
-  --text: #e8ecff;
-  --muted: #8d97c4;
-  --border: #232c52;
+  --bg: #0a0a12;
+  --surface: #12121e;
+  --surface-2: #1a1a2b;
+  --text: #f2f2f8;
+  --muted: #8d8da6;
+  --border: #262638;
   --accent: #8b5cf6;
   --accent-2: #22d3ee;
+  --accent-3: #ec4899;
   --accent-text: #ffffff;
-  --radius: 12px;
-  --font-heading: var(--font);
+  --radius: 14px;
+  --font: "Space Grotesk", system-ui, sans-serif;
+  --font-heading: "Space Grotesk", system-ui, sans-serif;
+  --shadow: 0 2px 14px rgba(0, 0, 0, 0.5);
+  --glow: 0 0 18px rgba(139, 92, 246, 0.45);
+  --hero-image: url("/themes/neon-studio/hero.png");
 }
+[data-theme="neon-studio"] .site-header { background: #0c0c16; }
+[data-theme="neon-studio"] .logo .tld { color: var(--accent-2); }
+[data-theme="neon-studio"] .hero-title .grad {
+  background: linear-gradient(90deg, #8b5cf6, #22d3ee);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+[data-theme="neon-studio"] .main-hero { grid-template-columns: 1.1fr 0.9fr; }
+[data-theme="neon-studio"] .hero-art { min-height: 340px; }
+[data-theme="neon-studio"] .btn-primary {
+  background: linear-gradient(90deg, #8b5cf6, #22d3ee); border: 0;
+}
+[data-theme="neon-studio"] .card { background: #12121e; }
+[data-theme="neon-studio"] .chip.active { border-color: var(--accent-2); color: var(--accent-2); }
+[data-theme="neon-studio"] .segmented button.active { background: linear-gradient(90deg, #8b5cf6, #22d3ee); }
+[data-theme="neon-studio"] .art-tile { box-shadow: 0 0 14px rgba(139, 92, 246, 0.25); }
+[data-theme="neon-studio"] .main-cols { display: grid; grid-template-columns: 1fr 320px; gap: 26px; align-items: start; }
+[data-theme="neon-studio"] .dash-sidebar a.active {
+  background: linear-gradient(90deg, rgba(139, 92, 246, 0.35), rgba(34, 211, 238, 0.25));
+  color: #fff;
+}
+[data-theme="neon-studio"] .progress > i { background: linear-gradient(90deg, #8b5cf6, #22d3ee); }
