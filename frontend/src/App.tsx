@@ -65,7 +65,7 @@ export default function App() {
         </select>
       </header>
       <Routes>
-        <Route path="/" element={<MainPage theme={theme} />} />
+        <Route path="/" element={<MainPage />} />
         <Route path="/studio" element={<StudioPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/artists" element={<ArtistPage />} />

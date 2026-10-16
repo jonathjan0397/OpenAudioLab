@@ -26,6 +26,9 @@ interface ArtifactItem {
 interface DownloadResp {
   url: string;
 }
+interface LoraList {
+  loras: { id: string; name: string; kind: string }[];
+}
 
 const DURATIONS = [
   { value: 30, label: "~30 seconds" },
@@ -35,13 +38,27 @@ const DURATIONS = [
   { value: 240, label: "~4 minutes" },
 ];
 
-export default function CreateWidget({ compact = false }: { compact?: boolean }) {
+export default function CreateWidget({
+  variant = "card",
+  showStyle = false,
+}: {
+  variant?: "card" | "wide" | "panel";
+  showStyle?: boolean;
+}) {
   const player = usePlayer();
   const [desc, setDesc] = useState("A dreamy indie pop song about chasing a brighter tomorrow");
   const [duration, setDuration] = useState(60);
   const [instrumental, setInstrumental] = useState(false);
+  const [loraId, setLoraId] = useState("");
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState("");
+
+  const loras = useQuery({
+    queryKey: ["loras"],
+    queryFn: () => api.get<LoraList>("/api/v1/loras"),
+    enabled: showStyle,
+    staleTime: 300000,
+  });
 
   const generate = useMutation({
     mutationFn: () =>
@@ -51,6 +68,7 @@ export default function CreateWidget({ compact = false }: { compact?: boolean })
         music_description: desc,
         duration_seconds: duration,
         instrumental,
+        ...(loraId ? { lora_id: loraId } : {}),
         outputs: ["mix_wav"],
       }),
     onSuccess: (d) => {
@@ -90,44 +108,84 @@ export default function CreateWidget({ compact = false }: { compact?: boolean })
   const status = job.data?.status;
   const busy = generate.isPending || (status ? status !== "succeeded" && status !== "failed" : false);
   const result = (artifacts.data?.artifacts || []).filter((a) => a.mime.startsWith("audio/"))[0];
+  const resultUrl = result ? urls.data?.[result.asset_id] : undefined;
 
   return (
-    <div className="card create-panel">
-      <div className="field">
+    <div className={`card create-panel create-${variant}`}>
+      <div className="create-input-row">
+        <span className="input-spark" aria-hidden>✦</span>
         <textarea
-          rows={compact ? 2 : 3}
+          rows={variant === "wide" ? 1 : variant === "panel" ? 4 : 3}
           maxLength={500}
           value={desc}
           onChange={(e) => setDesc(e.target.value)}
           placeholder="Describe the music you want…"
         />
-        <span className="char-count">{desc.length}/500</span>
+        {variant !== "wide" && <span className="char-count">{desc.length}/500</span>}
+        {variant === "wide" && (
+          <button className="btn btn-primary btn-lg gen-wide" disabled={!!busy} onClick={() => generate.mutate()}>
+            {busy ? "✦ Generating…" : "✦ Generate"} →
+          </button>
+        )}
       </div>
       <div className="create-controls">
-        <div className="field">
-          <label>Track type</label>
-          <div className="segmented">
-            <button type="button" className={!instrumental ? "active" : ""} onClick={() => setInstrumental(false)}>
-              ♪ Vocal
-            </button>
-            <button type="button" className={instrumental ? "active" : ""} onClick={() => setInstrumental(true)}>
-              ⇍ Instrumental
-            </button>
+        {showStyle && (
+          <div className="field ctrl">
+            <span className="ctrl-icon" aria-hidden>♪</span>
+            <div className="field">
+              <label>Style</label>
+              <select value={loraId} onChange={(e) => setLoraId(e.target.value)}>
+                <option value="">Auto</option>
+                {(loras.data?.loras || []).map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
+        <div className="field ctrl">
+          <span className="ctrl-icon" aria-hidden>☺</span>
+          <div className="field">
+            <label title="Mood presets coming soon">Mood</label>
+            <select disabled title="Coming soon">
+              <option>Hopeful</option>
+            </select>
           </div>
         </div>
-        <div className="field">
-          <label>Duration</label>
-          <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-            {DURATIONS.map((d) => (
-              <option key={d.value} value={d.value}>
-                {d.label}
-              </option>
-            ))}
-          </select>
+        <div className="field ctrl">
+          <span className="ctrl-icon" aria-hidden>⇍</span>
+          <div className="field">
+            <label>Instrumental / Vocal</label>
+            <div className="segmented">
+              <button type="button" className={!instrumental ? "active" : ""} onClick={() => setInstrumental(false)}>
+                Vocal
+              </button>
+              <button type="button" className={instrumental ? "active" : ""} onClick={() => setInstrumental(true)}>
+                Instrumental
+              </button>
+            </div>
+          </div>
         </div>
-        <button className="btn btn-primary btn-lg" disabled={!!busy} onClick={() => generate.mutate()}>
-          {busy ? "✦ Generating…" : "✦ Generate"} →
-        </button>
+        <div className="field ctrl">
+          <span className="ctrl-icon" aria-hidden>◷</span>
+          <div className="field">
+            <label>Duration</label>
+            <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
+              {DURATIONS.map((d) => (
+                <option key={d.value} value={d.value}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {variant !== "wide" && (
+          <button className="btn btn-primary btn-lg" disabled={!!busy} onClick={() => generate.mutate()}>
+            {busy ? "✦ Generating…" : "✦ Generate"} →
+          </button>
+        )}
       </div>
       {error && <p className="pill err" style={{ marginTop: 12 }}>{error}</p>}
       {status === "failed" && (
@@ -146,7 +204,7 @@ export default function CreateWidget({ compact = false }: { compact?: boolean })
           </div>
         </div>
       )}
-      {result && urls.data?.[result.asset_id] && (
+      {result && resultUrl && (
         <div className="track-row" style={{ marginTop: 14, borderBottom: 0 }}>
           <ArtworkTile
             seed={result.asset_id}
@@ -155,7 +213,7 @@ export default function CreateWidget({ compact = false }: { compact?: boolean })
               player.play({
                 asset_id: result.asset_id,
                 title: result.title || "New track",
-                url: urls.data[result.asset_id],
+                url: resultUrl,
                 duration: result.duration_seconds,
                 subtitle: "Just generated",
               })
@@ -170,23 +228,16 @@ export default function CreateWidget({ compact = false }: { compact?: boolean })
           <div className="wave">
             <Waveform
               assetId={result.asset_id}
-              token={urls.data[result.asset_id].split("token=")[1]}
+              token={resultUrl.split("token=")[1]}
               progress={player.current?.asset_id === result.asset_id ? player.progress : 0}
               onSeek={(r) => {
-                player.play({
-                  asset_id: result.asset_id,
-                  title: result.title || "New track",
-                  url: urls.data[result.asset_id],
-                  duration: result.duration_seconds,
-                });
+                player.play({ asset_id: result.asset_id, title: result.title || "New track", url: resultUrl, duration: result.duration_seconds });
                 setTimeout(() => player.seek(r), 60);
               }}
             />
           </div>
           <div className="actions">
-            <a className="btn" href={urls.data[result.asset_id]} download>
-              ↓ WAV
-            </a>
+            <a className="btn" href={resultUrl} download>↓ WAV</a>
             <button className="btn" disabled title="Coming soon">MP3</button>
             <button className="btn" disabled title="Coming soon">Stems</button>
           </div>

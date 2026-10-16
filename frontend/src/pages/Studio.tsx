@@ -160,7 +160,7 @@ export default function StudioPage() {
 
         <div className="main-cols" style={{ marginTop: 22 }}>
           <div style={{ minWidth: 0 }}>
-            <CreateWidget compact />
+            <CreateWidget variant="panel" showStyle />
             <div className="card" style={{ marginTop: 20 }}>
               <div className="card-header">
                 <h2>My Tracks</h2>

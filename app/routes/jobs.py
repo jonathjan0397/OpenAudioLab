@@ -733,6 +733,22 @@ def _like_counts(session, asset_ids: list[str]) -> dict[str, int]:
     return {aid: int(n) for aid, n in rows}
 
 
+@router.get("/loras")
+def list_loras(request: Request) -> JSONResponse:
+    """Public style-LoRA registry for the create widget's Style dropdown."""
+    from ..models import Lora
+
+    with request.app.state.db.session() as session:
+        rows = list(
+            session.execute(
+                select(Lora).where(Lora.state == "active").order_by(Lora.kind, Lora.name)
+            ).scalars()
+        )
+    return JSONResponse(
+        {"loras": [{"id": l.id, "name": l.name, "kind": l.kind} for l in rows]}
+    )
+
+
 @router.get("/public/tracks")
 def public_tracks(
     request: Request,
