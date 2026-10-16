@@ -254,22 +254,29 @@ window.onerror = function (m) {
 };
 </script>
 <script>
-const $ = (id) => document.getElementById(id);
-const esc = (s) => (s == null ? "" : String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])) ;
-const fmtTime = (iso) => { if (!iso) return ""; const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString(); };
-const fmtDur = (s) => (s == null ? "" : (Math.round(s * 10) / 10) + "s");
-
-async function api(path, opts) {
-  const res = await fetch(path, opts);
-  if (res.status === 401) { setStatus("Authentication failed - reload and re-enter credentials."); return null; }
-  return res;
-}
+var $ = function (id) { return document.getElementById(id); };
+var esc = function (s) { return s == null ? "" : String(s).replace(/[&<>"]/g, function (c) { return ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]; }); };
+var fmtTime = function (iso) { if (!iso) return ""; var d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString(); };
+var fmtDur = function (s) { return s == null ? "" : (Math.round(s * 10) / 10) + "s"; };
 
 function setStatus(t) { $("status").textContent = t || ""; }
 
+function xhr(method, url, body, cb) {
+  var x = new XMLHttpRequest();
+  x.open(method, url, true);
+  x.onreadystatechange = function () {
+    if (x.readyState !== 4) return;
+    if (x.status === 0) { setStatus("Network error - is the server up?"); cb(null); return; }
+    if (x.status === 401) { setStatus("Authentication failed - reload and re-enter credentials."); cb(null); return; }
+    cb(x);
+  };
+  if (body != null) x.setRequestHeader("Content-Type", "application/json");
+  x.send(body == null ? null : body);
+}
+
 function audioBlock(a) {
-  const expired = a.expired ? ' <span class="tag">expired</span>' : "";
-  const synth = a.synthetic ? ' <span class="tag">synthetic</span>' : "";
+  var expired = a.expired ? ' <span class="tag">expired</span>' : "";
+  var synth = a.synthetic ? ' <span class="tag">synthetic</span>' : "";
   return '<div class="art"><div class="meta">'
     + '<span class="tag">' + esc(a.role || "audio") + '</span>'
     + '<span>' + fmtDur(a.duration_seconds) + '</span>'
@@ -278,60 +285,66 @@ function audioBlock(a) {
     + '</div><audio controls preload="none" src="' + esc(a.url) + '"></audio></div>';
 }
 
-async function loadArtifacts() {
-  const res = await api("/lab/api/artifacts?limit=50");
-  if (!res) return;
-  const data = await res.json();
-  const items = data.artifacts || [];
-  $("list").innerHTML = items.length
-    ? items.map(audioBlock).join("")
-    : '<li class="empty">No audio artifacts yet - generate one above.</li>';
+function loadArtifacts() {
+  xhr("GET", "/lab/api/artifacts?limit=50", null, function (x) {
+    if (!x) return;
+    var data;
+    try { data = JSON.parse(x.responseText); } catch (e) { return; }
+    var items = data.artifacts || [];
+    $("list").innerHTML = items.length
+      ? items.map(audioBlock).join("")
+      : '<li class="empty">No audio artifacts yet - generate one above.</li>';
+  });
 }
 
-let pollTimer = null;
-async function pollJob(jobId) {
-  const res = await api("/lab/api/jobs/" + encodeURIComponent(jobId));
-  if (!res) return;
-  const job = await res.json();
-  if (job.status === "succeeded") {
-    setStatus("Done.");
-    $("result").innerHTML = (job.artifacts || []).map(audioBlock).join("") || '<div class="empty">No audio produced.</div>';
-    $("go").disabled = false;
-    loadArtifacts();
-    return;
-  }
-  if (job.status === "failed" || job.status === "cancelled") {
-    setStatus("Failed: " + (job.error_code || job.status) + (job.error_message ? " - " + job.error_message : ""));
-    $("go").disabled = false;
-    return;
-  }
-  setStatus("Working... " + job.status + (job.stage ? " / " + job.stage : "") + (job.progress != null ? " (" + Math.round(job.progress * 100) + "%)" : ""));
-  pollTimer = setTimeout(() => pollJob(jobId), 2000);
+var pollTimer = null;
+function pollJob(jobId) {
+  xhr("GET", "/lab/api/jobs/" + encodeURIComponent(jobId), null, function (x) {
+    if (!x) return;
+    var job;
+    try { job = JSON.parse(x.responseText); } catch (e) { return; }
+    if (job.status === "succeeded") {
+      setStatus("Done.");
+      $("result").innerHTML = (job.artifacts || []).map(audioBlock).join("") || '<div class="empty">No audio produced.</div>';
+      $("go").disabled = false;
+      loadArtifacts();
+      return;
+    }
+    if (job.status === "failed" || job.status === "cancelled") {
+      setStatus("Failed: " + (job.error_code || job.status) + (job.error_message ? " - " + job.error_message : ""));
+      $("go").disabled = false;
+      return;
+    }
+    setStatus("Working... " + job.status + (job.stage ? " / " + job.stage : "") + (job.progress != null ? " (" + Math.round(job.progress * 100) + "%)" : ""));
+    pollTimer = setTimeout(function () { pollJob(jobId); }, 2000);
+  });
 }
 
-async function generate() {
+function generate() {
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
-  const body = {
+  if (!$("desc").value.trim()) { setStatus("Enter a description first."); return; }
+  var body = {
     music_description: $("desc").value.trim(),
     duration_seconds: $("dur").value ? parseInt($("dur").value, 10) : null,
     instrumental: $("inst").checked,
-    model_id: "ace-step-1.5",
+    model_id: "ace-step-1.5"
   };
-  if (!$("desc").value.trim()) { setStatus("Enter a description first."); return; }
   if ($("seed").value !== "") body.seed = parseInt($("seed").value, 10);
   $("go").disabled = true; $("result").innerHTML = ""; setStatus("Submitting...");
-  const res = await api("/lab/api/generate", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  xhr("POST", "/lab/api/generate", JSON.stringify(body), function (x) {
+    if (!x) { $("go").disabled = false; return; }
+    if (x.status < 200 || x.status >= 300) {
+      var err = {};
+      try { err = JSON.parse(x.responseText).error || {}; } catch (e) {}
+      setStatus("Rejected: " + (err.code || x.status));
+      $("go").disabled = false;
+      return;
+    }
+    var data;
+    try { data = JSON.parse(x.responseText); } catch (e) { $("go").disabled = false; return; }
+    setStatus("Queued " + (data.job_id || "").slice(0, 8) + "...");
+    pollJob(data.job_id);
   });
-  if (!res) { $("go").disabled = false; return; }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    setStatus("Rejected: " + ((err.error && err.error.code) || res.status));
-    $("go").disabled = false; return;
-  }
-  const data = await res.json();
-  setStatus("Queued " + (data.job_id || "").slice(0, 8) + "...");
-  pollJob(data.job_id);
 }
 
 $("go").addEventListener("click", generate);
