@@ -423,7 +423,7 @@ img.avatar { padding: 0; }
 .panel-title .sub { color: var(--muted); font-weight: 400; font-size: 13px; }
 .panel-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .panel-head .spacer { flex: 1; }
-.profile-tiles { display: flex; gap: 10px; }
+.profile-tiles { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
 .ptile { text-align: center; width: 76px; }
 .ptile img, .ptile .ptile-none {
   width: 76px; height: 92px; object-fit: cover; border-radius: 10px; display: flex;
