@@ -130,9 +130,11 @@ the home server (star topology), so they never need to be mercury peers.
   `deploy/wireguard/worker-peer.conf.template`.
 - **Backend (containerized)**: `docker-compose.backend.yml` runs api, dispatcher,
   postgres, redis, object-storage (S3), migrate, bucket-init and maintenance on
-  the hub, published on `10.203.0.1` — API `:50555`, Postgres `:5432`, Redis
-  `:6379`, S3 `:9000`. Image `stratastack/oal-backend:<rev>` (slim FastAPI, no
-  torch). Workers point `OAL_*` at `10.203.0.1`.
+  the hub, published on `0.0.0.0` so both tunnel peers and public-IP nodes reach
+  them — API `:50555`, Postgres `:55432` (55432 avoids florist's
+  `127.0.0.1:5432`), Redis `:6379`, S3 `:9000`. Image `stratastack/oal-backend:<rev>`
+  (slim FastAPI, no torch). Tunnel peers (dev host) point `OAL_*` at `10.203.0.1`;
+  Vast nodes point them at the public IP `192.151.156.124`.
 - **S3 note**: localstack 3.8.1 is used here because MinIO is not pullable on
   these hosts (removed from Docker Hub; quay.io anonymous pulls 401; localstack
   2026.x needs a license token). Production should use MinIO (with a quay login)
@@ -161,3 +163,57 @@ generation:
 
 This confirms the full remote-worker flow against the containerized home-server
 backend over the WireGuard overlay.
+
+## Vast.ai end-to-end (public-IP hub, 2026-10-16)
+
+Ran a real on-demand Vast node against the home-server hub and completed a full
+generation end-to-end. Two findings changed the transport decision:
+
+- **NET_ADMIN is not available** in Vast containers: `ip link add wg0 type
+  wireguard` → `RTNETLINK answers: Operation not permitted`. Passing
+  `--cap-add NET_ADMIN` or `--privileged` through the CLI `--env` string did not
+  change this, so **in-container WireGuard is not usable on Vast** via the CLI.
+- **Vast's default launch mode needs an `ssh` binary** the image lacks; without
+  it `/.launch` loops on `ssh: command not found` and the image entrypoint never
+  runs. Use **args launch mode** (`--args <cmd>`) so Vast runs the image
+  entrypoint as-is (no sshd injection).
+
+Therefore Vast workers connect to the hub over the hub's **public IP** (the home
+server holds `192.151.156.124` directly on `ens18`, gateway `.121`, no router
+NAT). `docker-compose.backend.yml` now publishes the worker-facing services on
+`0.0.0.0` (API `:50555`, Redis `:6379`, S3 `:9000`, Postgres `:55432`) and UFW
+allows them; the WireGuard overlay still serves trusted peers (the dev host).
+
+Working recipe (cheapest NA Blackwell; image cached on the host → ~2–3 min to
+consuming):
+
+```
+vastai create instance <offer> \
+  --image stratastack/oal-worker:ca1e85f-torch2.10-cu128-wg --disk 40 \
+  --env "-e OAL_BACKEND_URL=http://192.151.156.124:50555 \
+         -e OAL_REDIS_URL=redis://192.151.156.124:6379/0 \
+         -e OAL_DATABASE_URL=postgresql+psycopg2://oal:<pw>@192.151.156.124:55432/oal \
+         -e OAL_STORAGE_BACKEND=s3 -e OAL_S3_ENDPOINT_URL=http://192.151.156.124:9000 \
+         -e OAL_S3_BUCKET=oal -e OAL_S3_REGION=us-east-1 \
+         -e OAL_S3_ACCESS_KEY=oal -e OAL_S3_SECRET_KEY=<s3secret> \
+         -e OAL_SECRET_KEY=<secret> -e OAL_WORKER_ROLE=engine_worker \
+         -e OAL_ACESTEP_BASE_URL=http://127.0.0.1:8001" \
+  --args run
+```
+
+Evidence (contract `56173069`, RTX 5060 Ti 16 GB, ~$0.13–0.17/hr):
+
+| Step | Result |
+| --- | --- |
+| Entrypoint fetches code bundle from public API | revision `ede182f` |
+| Co-located ACE-Step on the node | ready on 8001 (RTX 5060 Ti) |
+| `POST /jobs` over the public hub | 202 queued → consumed by the node |
+| Generation | status **succeeded** |
+| Artifact push-back to hub S3 | `owners/<owner>/jobs/<job>/<attempt>/mix_wav.wav` |
+| API delivery over the public hub | 200, 2,304,044 bytes, valid RIFF |
+
+Notes: the first generation is slow (the model loads on first request on the
+consumer card); a warm node is faster. Exposing Redis/Postgres/S3 publicly is
+fine for validation; production should firewall the hub to worker IPs (or use a
+VPS hub) and MinIO/managed S3. The `wireguard-tools`/entrypoint wg bring-up stays
+in the image for tunnel peers (dev host) even though Vast uses the public IP.

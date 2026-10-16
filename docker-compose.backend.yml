@@ -1,9 +1,12 @@
 name: oal-backend
 
 # Home-server hub deployment of the OpenAudioLab control plane, reachable by
-# ephemeral worker nodes over the WireGuard overlay (hub 10.203.0.1, UDP 51822).
-# GPU engine/training workers run on the nodes, not in this stack. Services are
-# published on the hub's tunnel address so nodes reach them without public ports.
+# ephemeral worker nodes. GPU engine/training workers run on the nodes, not in
+# this stack. Services are published on 0.0.0.0 so nodes reach them over the
+# hub's public IP: Vast containers lack NET_ADMIN, so in-container WireGuard is
+# unavailable and workers connect directly (Postgres on 55432 to avoid florist's
+# 127.0.0.1:5432). The WireGuard overlay (hub 10.203.0.1, UDP 51822) still serves
+# trusted peers like the dev host.
 # S3 is localstack 3.x here (MinIO is not pullable on these hosts: gone from
 # Docker Hub, quay.io anonymous pulls 401; localstack 2026.x needs a license).
 # Swap object-storage for MinIO/managed S3 in production.
@@ -26,7 +29,7 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
-    ports: ["10.203.0.1:5432:5432"]
+    ports: ["55432:5432"]
     environment:
       POSTGRES_DB: oal
       POSTGRES_USER: oal
@@ -41,7 +44,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    ports: ["10.203.0.1:6379:6379"]
+    ports: ["6379:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -54,7 +57,7 @@ services:
     environment:
       SERVICES: s3
       AWS_DEFAULT_REGION: ${OAL_S3_REGION:-us-east-1}
-    ports: ["10.203.0.1:9000:4566"]
+    ports: ["9000:4566"]
     volumes: ["object-storage-data:/var/lib/localstack"]
 
   bucket-init:
@@ -78,7 +81,7 @@ services:
   api:
     image: stratastack/oal-backend:${OAL_IMAGE_TAG:-dev}
     restart: unless-stopped
-    ports: ["10.203.0.1:50555:50555"]
+    ports: ["50555:50555"]
     environment: *app-env
     depends_on:
       postgres: {condition: service_healthy}
