@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
+from app.worker import generate_fixture_wav
 from conftest import submit
 
 
@@ -152,3 +153,62 @@ def test_admin_credit_adjust_and_ledger(client) -> None:
 def test_billing_webhook_signature(client) -> None:
     response = client.post("/api/v1/billing/webhook", content=b"{}", headers={"content-type": "application/json"})
     assert response.status_code == 503  # no webhook secret configured in tests
+
+
+def _seed_admin(client, email: str, username: str) -> str:
+    from app.models import User
+
+    owner = _seed_owner(client, email, username)
+    with client.app.state.db.session() as session:
+        session.get(User, owner).role = "admin"
+        session.commit()
+    return owner
+
+
+def test_admin_lora_pipeline(client) -> None:
+    from app.models import ArtistProfileVersion, Job
+    from sqlalchemy import select as _select
+
+    owner = _seed_admin(client, "m14-lora@example.com", "m14lora")
+    wav = generate_fixture_wav("lora1", 5, 2)
+    files = [
+        ("files", ("01 - Midnight Drive.wav", wav, "audio/wav")),
+        ("files", ("Sunrise Avenue [official].wav", wav, "audio/wav")),
+    ]
+    response = client.post(
+        "/api/v1/admin/loras/upload",
+        data={"name": "Test Artist", "tags": "lofi, rainy"},
+        files=files,
+    )
+    assert response.status_code == 202
+    body = response.json()
+    assert body["titles"] == ["Midnight Drive", "Sunrise Avenue"]
+    with client.app.state.db.session() as session:
+        job = session.execute(_select(Job).where(Job.id == body["job_id"])).scalar_one()
+        assert job.operation == "artist.train"
+
+    assert client.get("/api/v1/admin/loras").json()["loras"] == []
+
+    with client.app.state.db.session() as session:
+        version = ArtistProfileVersion(
+            profile_id="p1", owner_id="usr_" + owner, mechanism="fine_tuned_adapter",
+            base_model_id="ace-step-1.5", base_revision="r", recipe_revision="rec",
+            artifacts_json={"adapter_object_prefix": "owners/x/adapters/v1", "adapter_files": ["a.safetensors"]},
+            state="candidate",
+        )
+        session.add(version)
+        session.commit()
+        version_id = version.id
+    response = client.post(
+        "/api/v1/admin/loras",
+        json={"profile_version_id": version_id, "name": "Test Artist Style", "tags": "lofi, midnight drive"},
+    )
+    assert response.status_code == 201
+    lora_id = response.json()["id"]
+
+    rows = client.get("/api/v1/admin/loras").json()["loras"]
+    assert rows[0]["name"] == "Test Artist Style" and rows[0]["auto_apply"] is True
+
+    response = client.patch(f"/api/v1/admin/loras/{lora_id}", json={"auto_apply": False, "state": "retired"})
+    assert response.status_code == 200 and response.json()["state"] == "retired"
+    assert client.delete(f"/api/v1/admin/loras/{lora_id}").status_code == 204

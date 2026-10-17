@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
@@ -387,6 +387,7 @@ def admin_trainings(request: Request, limit: int = Query(default=5, ge=1, le=50)
             {
                 "run_id": run.id,
                 "profile": name or "unnamed",
+                "profile_version_id": run.profile_version_id,
                 "user": username or "—",
                 "status": status,
                 "stage": stage,
@@ -856,3 +857,221 @@ def admin_user_ledger(user_id: str, request: Request, limit: int = Query(default
             ]
         }
     )
+
+
+# --- M14e: admin LoRA training pipeline ---------------------------------------
+
+
+def _song_title(filename: str) -> str:
+    import re
+
+    stem = filename.rsplit(".", 1)[0]
+    stem = re.sub(r"^\s*\d+[\s._-]+", "", stem)
+    stem = re.sub(r"\s*[\[(].{0,30}[\])]\s*$", "", stem)
+    return stem.strip() or filename
+
+
+@router.post("/admin/loras/upload", status_code=202)
+async def admin_lora_upload(
+    request: Request,
+    user: User = Depends(require_admin),
+    name: str = Form(..., max_length=200),
+    tags: str = Form(default="", max_length=500),
+    files: list = File(...),
+) -> JSONResponse:
+    """Upload song files (title parsed from filename) and start LoRA training."""
+    import hashlib as _hashlib
+    import json as _json
+
+    from ..models import ArtistProfile, Asset, Dataset, DatasetTrack, DatasetVersion, Job, TrainingRun
+    from ..orchestration import append_event, enqueue
+    from ..models import new_uuid, utcnow as _utcnow
+
+    settings = request.app.state.settings
+    owner_id = "usr_" + user.id
+    tag_list = [t.strip().lower() for t in tags.split(",") if t.strip()]
+    if not files:
+        raise ApiError(422, "NO_FILES", "Attach at least one audio file.")
+
+    with request.app.state.db.session() as session:
+        profile = ArtistProfile(id=new_uuid(), owner_id=owner_id, name=name, slug=_hashlib.sha1(name.encode()).hexdigest()[:8])
+        session.add(profile)
+        dataset = Dataset(id=new_uuid(), owner_id=owner_id, profile_id=profile.id, name=f"{name} dataset")
+        session.add(dataset)
+        session.flush()
+
+        titles = []
+        for upload in files:
+            body = await upload.read()
+            if not body:
+                raise ApiError(422, "EMPTY_FILE", f"{upload.filename} is empty.")
+            title = _song_title(upload.filename or "untitled")
+            titles.append(title)
+            key = f"owners/{owner_id}/uploads/lora-{dataset.id}/{new_uuid()}.wav"
+            checksum = request.app.state.storage.put(key, body)
+            caption = ", ".join(tag_list + [name.lower()])
+            asset = Asset(
+                id=new_uuid(), owner_id=owner_id, storage_key=key, role="mix_wav", kind="uploaded",
+                mime=upload.content_type or "audio/wav", bytes=len(body), sha256=checksum,
+                title=title, finalized_at=_utcnow(),
+            )
+            session.add(asset)
+            session.flush()
+            session.add(
+                DatasetTrack(
+                    id=new_uuid(), dataset_id=dataset.id, owner_id=owner_id, asset_id=asset.id,
+                    labels_json={"caption": f"{caption}, {title.lower()}"},
+                )
+            )
+        session.flush()
+
+        tracks = list(session.execute(select(DatasetTrack).where(DatasetTrack.dataset_id == dataset.id)).scalars())
+        ordered = sorted(tracks, key=lambda t: t.id)
+        if len(ordered) >= 3:
+            splits = {t.id: ("holdout" if i == len(ordered) - 1 else "validation" if i == len(ordered) - 2 else "train") for i, t in enumerate(ordered)}
+        elif len(ordered) == 2:
+            splits = {ordered[0].id: "train", ordered[1].id: "holdout"}
+        else:
+            splits = {ordered[0].id: "train"}
+        for t in tracks:
+            t.split = splits[t.id]
+        frozen = _hashlib.sha256("\n".join(sorted(splits)).encode()).hexdigest()
+        version = DatasetVersion(
+            id=new_uuid(), dataset_id=dataset.id, owner_id=owner_id, version_number=1, frozen_sha256=frozen,
+            split_json={"tracks": [{"track_id": t.id, "asset_id": t.asset_id, "split": splits[t.id]} for t in ordered]},
+            report_json={"recordings": len(ordered), "source": "admin-upload"},
+        )
+        session.add(version)
+        dataset.status = "finalized"
+
+        recipe = settings.train_recipe_revision
+        job = Job(
+            id=new_uuid(), owner_id=owner_id, operation="artist.train",
+            model_id=settings.train_queue_model_id, model_revision=recipe, status="queued",
+            request_json={
+                "profile_id": profile.id, "dataset_version_id": version.id,
+                "base_model_id": "ace-step-1.5", "recipe_revision": recipe,
+            },
+            request_hash=f"admin-lora:{dataset.id}", idempotency_key=new_uuid(),
+        )
+        session.add(job)
+        session.add(TrainingRun(id=new_uuid(), job_id=job.id, budget_json={"max_epochs": 60, "max_wall_seconds": settings.train_max_wall_seconds}, hyperparams_json={}, status="queued"))
+        enqueue(session, job, settings)
+        append_event(session, job.id, "queued", "queued")
+        session.commit()
+        profile_id, dataset_id, job_id, version_id = profile.id, dataset.id, job.id, version.id
+    return JSONResponse(
+        status_code=202,
+        content={"profile_id": profile_id, "dataset_id": dataset_id, "dataset_version_id": version_id, "job_id": job_id, "titles": titles},
+    )
+
+
+class AdminLoraPublish(BaseModel):
+    profile_version_id: str
+    name: str = Field(max_length=200)
+    tags: str = Field(default="", max_length=500)
+    auto_apply: bool = True
+    priority: int = 0
+
+
+@router.post("/admin/loras", status_code=201)
+def admin_lora_publish(payload: AdminLoraPublish, request: Request) -> JSONResponse:
+    from ..models import ArtistProfileVersion, Lora, new_uuid
+
+    with request.app.state.db.session() as session:
+        version = session.get(ArtistProfileVersion, payload.profile_version_id)
+        if version is None:
+            raise ApiError(404, "VERSION_NOT_FOUND", "Profile version not found.")
+        artifacts = version.artifacts_json or {}
+        if not artifacts.get("adapter_object_prefix") or not artifacts.get("adapter_files"):
+            raise ApiError(409, "NO_ADAPTER", "Profile version has no exported adapter.")
+        if session.execute(select(Lora).where(Lora.name == payload.name)).scalar_one_or_none():
+            raise ApiError(409, "NAME_TAKEN", "A style model with this name exists.")
+        lora = Lora(
+            id=new_uuid(),
+            name=payload.name,
+            kind="style",
+            tags_json=[t.strip().lower() for t in payload.tags.split(",") if t.strip()],
+            storage_prefix=artifacts["adapter_object_prefix"],
+            files_json=list(artifacts["adapter_files"]),
+            base_model_id=version.base_model_id,
+            base_revision=version.base_revision,
+            auto_apply=payload.auto_apply,
+            priority=payload.priority,
+            state="active",
+            provenance="trained",
+            profile_version_id=version.id,
+        )
+        session.add(lora)
+        version.state = "active"
+        session.commit()
+        body = {"id": lora.id, "name": lora.name, "tags": lora.tags_json, "auto_apply": lora.auto_apply}
+    return JSONResponse(status_code=201, content=body)
+
+
+class AdminLoraPatch(BaseModel):
+    tags: str | None = Field(default=None, max_length=500)
+    auto_apply: bool | None = None
+    priority: int | None = None
+    state: str | None = Field(default=None, pattern=r"^(active|retired)$")
+    default_scale: float | None = Field(default=None, ge=0.0, le=2.0)
+
+
+@router.get("/admin/loras")
+def admin_loras(request: Request) -> JSONResponse:
+    from ..models import ArtistProfileVersion, Lora, TrainingRun
+
+    with request.app.state.db.session() as session:
+        rows = list(session.execute(select(Lora).order_by(Lora.created_at.desc())).scalars())
+        out = []
+        for l in rows:
+            run_status = None
+            if l.profile_version_id:
+                version = session.get(ArtistProfileVersion, l.profile_version_id)
+                if version is not None:
+                    run = session.execute(select(TrainingRun).where(TrainingRun.profile_version_id == version.id)).scalar_one_or_none()
+                    run_status = run.status if run else None
+            out.append(
+                {
+                    "id": l.id, "name": l.name, "kind": l.kind, "tags": l.tags_json,
+                    "state": l.state, "auto_apply": l.auto_apply, "priority": l.priority,
+                    "default_scale": l.default_scale, "provenance": l.provenance,
+                    "profile_version_id": l.profile_version_id, "training_status": run_status,
+                }
+            )
+    return JSONResponse({"loras": out})
+
+
+@router.patch("/admin/loras/{lora_id}")
+def admin_lora_patch(lora_id: str, payload: AdminLoraPatch, request: Request) -> JSONResponse:
+    from ..models import Lora
+
+    with request.app.state.db.session() as session:
+        lora = session.get(Lora, lora_id)
+        if lora is None:
+            raise ApiError(404, "LORA_NOT_FOUND", "Style model not found.")
+        if payload.tags is not None:
+            lora.tags_json = [t.strip().lower() for t in payload.tags.split(",") if t.strip()]
+        if payload.auto_apply is not None:
+            lora.auto_apply = payload.auto_apply
+        if payload.priority is not None:
+            lora.priority = payload.priority
+        if payload.state is not None:
+            lora.state = payload.state
+        if payload.default_scale is not None:
+            lora.default_scale = payload.default_scale
+        session.commit()
+    return JSONResponse({"id": lora.id, "state": lora.state, "tags": lora.tags_json, "auto_apply": lora.auto_apply})
+
+
+@router.delete("/admin/loras/{lora_id}", status_code=204)
+def admin_lora_delete(lora_id: str, request: Request) -> JSONResponse:
+    from ..models import Lora
+
+    with request.app.state.db.session() as session:
+        lora = session.get(Lora, lora_id)
+        if lora is None:
+            raise ApiError(404, "LORA_NOT_FOUND", "Style model not found.")
+        session.delete(lora)
+        session.commit()
+    return JSONResponse(status_code=204, content=None)

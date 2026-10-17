@@ -65,6 +65,7 @@ interface Service {
 interface Training {
   run_id: string;
   profile: string;
+  profile_version_id: string | null;
   user: string;
   status: string;
   stage: string | null;
@@ -156,6 +157,7 @@ const SIDEBAR = [
   { to: "/admin/services", label: "Model Services", icon: "▣" },
   { to: "/admin/workers", label: "GPU Workers", icon: "▦" },
   { to: "/admin/training", label: "Artist Training", icon: "◈" },
+  { to: "/admin/loras", label: "Style Models", icon: "♪" },
   { to: "/admin/storage", label: "Storage", icon: "▤" },
   { to: "/admin/billing", label: "Billing", icon: "▥" },
   { to: "/admin/api", label: "API Access", icon: "</>" },
@@ -275,6 +277,50 @@ export default function AdminPage() {
     enabled,
     refetchInterval: 15000,
   });
+  const [loraName, setLoraName] = useState("");
+  const [loraTags, setLoraTags] = useState("");
+  const [loraFiles, setLoraFiles] = useState<FileList | null>(null);
+  const loras = useQuery({
+    queryKey: ["admin-loras"],
+    queryFn: () => api.get<{ loras: { id: string; name: string; tags: string[]; state: string; auto_apply: boolean; priority: number; default_scale: number; provenance: string; profile_version_id: string | null; training_status: string | null }[] }>("/api/v1/admin/loras"),
+    enabled: enabled && section === "loras",
+  });
+  const invalidateLoras = () => {
+    qc.invalidateQueries({ queryKey: ["admin-loras"] });
+    qc.invalidateQueries({ queryKey: ["admin-trainings"] });
+  };
+  const uploadLora = useMutation({
+    mutationFn: async () => {
+      const fd = new FormData();
+      fd.append("name", loraName);
+      fd.append("tags", loraTags);
+      Array.from(loraFiles || []).forEach((f) => fd.append("files", f));
+      const res = await fetch("/api/v1/admin/loras/upload", { method: "POST", credentials: "include", body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error?.message || "Upload failed");
+      return data as { titles: string[] };
+    },
+    onSuccess: () => { setLoraName(""); setLoraTags(""); setLoraFiles(null); invalidateLoras(); },
+    onError: (e: Error) => setError(e.message),
+  });
+  const publishLora = useMutation({
+    mutationFn: (t: Training) =>
+      api.post<{ id: string }>("/api/v1/admin/loras", {
+        profile_version_id: t.profile_version_id,
+        name: `${t.profile} style`,
+        tags: t.profile.toLowerCase().replace(/\s+/g, "-"),
+      }),
+    onSuccess: invalidateLoras,
+  });
+  const patchLora = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) => api.patch(`/api/v1/admin/loras/${id}`, body),
+    onSuccess: invalidateLoras,
+  });
+  const deleteLora = useMutation({
+    mutationFn: (id: string) => fetch(`/api/v1/admin/loras/${id}`, { method: "DELETE", credentials: "include" }),
+    onSuccess: invalidateLoras,
+  });
+
   const trainings = useQuery({
     queryKey: ["admin-trainings"],
     queryFn: () => api.get<Training[]>("/api/v1/admin/trainings?limit=8"),
@@ -827,6 +873,63 @@ export default function AdminPage() {
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+
+        {section === "loras" && (
+          <div className="card">
+            <div className="card-header">
+              <h2>Style models (LoRA)</h2>
+              <span className="spacer" />
+              <span className="sub" style={{ fontSize: 12 }}>Upload song files — the title is read from the filename and used as a style keyword</span>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+              <input style={{ width: 180 }} placeholder="style model name" value={loraName} onChange={(e) => setLoraName(e.target.value)} />
+              <input style={{ width: 200 }} placeholder="tags (comma separated)" value={loraTags} onChange={(e) => setLoraTags(e.target.value)} />
+              <input type="file" accept="audio/*" multiple onChange={(e) => setLoraFiles(e.target.files)} />
+              <button
+                className="btn btn-primary"
+                disabled={!loraName || !loraFiles?.length || uploadLora.isPending}
+                onClick={() => uploadLora.mutate()}
+              >
+                {uploadLora.isPending ? "Uploading…" : "Upload & train"}
+              </button>
+              {error && <span className="pill err">{error}</span>}
+            </div>
+            {(trainings.data || []).some((t) => t.status === "succeeded" && t.profile_version_id && !(loras.data?.loras || []).some((l) => l.profile_version_id === t.profile_version_id)) && (
+              <div style={{ marginBottom: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {(trainings.data || [])
+                  .filter((t) => t.status === "succeeded" && t.profile_version_id && !(loras.data?.loras || []).some((l) => l.profile_version_id === t.profile_version_id))
+                  .map((t) => (
+                    <button key={t.run_id} className="btn" onClick={() => publishLora.mutate(t)}>
+                      ⇈ Publish “{t.profile}” as style model
+                    </button>
+                  ))}
+              </div>
+            )}
+            <table className="table">
+              <thead><tr><th>Name</th><th>Tags</th><th>State</th><th>Auto-apply</th><th>Priority</th><th>Scale</th><th /></tr></thead>
+              <tbody>
+                {(loras.data?.loras || []).map((l) => (
+                  <tr key={l.id}>
+                    <td>{l.name}<div className="mono" style={{ fontSize: 11 }}>{l.provenance}</div></td>
+                    <td>
+                      <input
+                        style={{ width: 180 }}
+                        defaultValue={l.tags.join(", ")}
+                        onBlur={(e) => { if (e.target.value !== l.tags.join(", ")) patchLora.mutate({ id: l.id, body: { tags: e.target.value } }); }}
+                      />
+                    </td>
+                    <td><button className="btn" onClick={() => patchLora.mutate({ id: l.id, body: { state: l.state === "active" ? "retired" : "active" } })}>{l.state}</button></td>
+                    <td><button className="btn" onClick={() => patchLora.mutate({ id: l.id, body: { auto_apply: !l.auto_apply } })}>{l.auto_apply ? "on" : "off"}</button></td>
+                    <td>{l.priority}</td>
+                    <td>{l.default_scale.toFixed(2)}</td>
+                    <td><button className="btn btn-ghost" onClick={() => deleteLora.mutate(l.id)}>✕</button></td>
+                  </tr>
+                ))}
+                {loras.data && loras.data.loras.length === 0 && <tr><td colSpan={7} style={{ color: "var(--muted)" }}>No style models yet — upload a few songs to train one.</td></tr>}
+              </tbody>
+            </table>
           </div>
         )}
 

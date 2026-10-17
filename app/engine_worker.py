@@ -352,6 +352,10 @@ class EngineWorker:
                         "adapter_object_prefix": lora.storage_prefix,
                         "adapter_files": list(lora.files_json),
                     }
+                    # M14e: the LoRA's tags act as style keywords guiding generation.
+                    extra = ", ".join(t for t in (lora.tags_json or []) if t)
+                    if extra:
+                        payload["prompt"] = f"{payload.get('prompt', '')}, {extra}".strip(", ")
             append_event(session, claimed_job, "stage", "running", stage="submitting", attempt_id=attempt_id)
             session.commit()
         set_job_stage(self.db, claimed_job, "preparing model")
