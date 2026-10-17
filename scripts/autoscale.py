@@ -90,6 +90,10 @@ RECONCILE_SECONDS = float(os.environ.get("OAL_VAST_RECONCILE_SECONDS", "120"))
 TRAIN_QUEUE = os.environ.get("OAL_TRAIN_QUEUE_KEY", "oal:queue:training")
 TRAIN_WAIT_LOCAL = float(os.environ.get("OAL_TRAIN_VAST_AFTER_SECONDS", "120"))
 TRAIN_DOWN_SECONDS = float(os.environ.get("OAL_TRAIN_DOWN_SECONDS", "240"))
+TRAIN_LOADING_STALL_SECONDS = float(os.environ.get("OAL_TRAIN_LOADING_STALL_SECONDS", "1200"))
+TRAIN_CREATE_GUARD_SECONDS = float(os.environ.get("OAL_TRAIN_CREATE_GUARD_SECONDS", "600"))
+PRUNE_SECONDS = float(os.environ.get("OAL_PRUNE_SECONDS", "3600"))
+RETENTION_DAYS = int(os.environ.get("OAL_RETENTION_DAYS", "30"))
 
 
 def log(msg):
@@ -199,7 +203,15 @@ def worker_env(transport="wg", slot=None, role="engine_worker"):
         # Training node: engine runs in external mode (entrypoint starts and
         # health-checks it) so the training worker can rely on it without an
         # engine_worker process also claiming generation jobs.
-        env += ["-e OAL_ENGINE_AUTOSTART=0"]
+        env += [
+            "-e OAL_ENGINE_AUTOSTART=0",
+            # Absolute workdir: the default ./training-data resolves against
+            # the container CWD and the engine rejects it as unsafe.
+            "-e OAL_TRAIN_WORKDIR=/opt/acestep/training-data",
+            # The node's own engine holds most VRAM; without this the training
+            # worker defers forever waiting for free memory that never comes.
+            "-e OAL_TRAIN_MIN_FREE_MB=0",
+        ]
     else:
         # Burst tier: Vast nodes drain only the overflow queue, so the always-on
         # baseline worker keeps first claim on the main queue.
@@ -268,7 +280,7 @@ def wg_remove_peer(pub):
 
 def pick_offer():
     _, out, _ = sh([VASTAI, "search", "offers",
-                    "gpu_ram>=16 num_gpus=1 rentable=true cuda_max_good>=12.8 verification=verified",
+                    "gpu_ram>=24000 num_gpus=1 rentable=true cuda_max_good>=12.8 verification=verified",
                     "--raw", "-o", "dph_total", "--limit", "200"])
     try:
         offers = json.loads(out)
@@ -363,20 +375,64 @@ def live_statuses():
     return {str(r.get("id")): str(r.get("actual_status", "")) for r in rows}
 
 
+def prune():
+    """30-day rotation: job_events, error_logs, and purging soft-deleted users."""
+    d = _engine()
+    if d is None:
+        return
+    try:
+        from sqlalchemy import text
+
+        with d.begin() as conn:
+            conn.execute(text(
+                "DELETE FROM job_events WHERE created_at < now() - make_interval(days => :days)"
+            ), {"days": RETENTION_DAYS})
+            conn.execute(text(
+                "DELETE FROM error_logs WHERE created_at < now() - make_interval(days => :days)"
+            ), {"days": RETENTION_DAYS})
+            conn.execute(text(
+                "DELETE FROM users WHERE deleted_at IS NOT NULL "
+                "AND deleted_at < now() - make_interval(days => :days)"
+            ), {"days": RETENTION_DAYS})
+    except Exception as e:
+        log(f"prune failed: {e}")
+
+
 def reconcile(st):
     """Drop state entries Vast no longer knows about (evicted stopped nodes)."""
     statuses = live_statuses()
     if statuses is None:
         return
-    alive = {"running", "starting", "creating", "restarting", "warming", "processing", "rebooting"}
+    now = time.time()
+    alive = {"running", "starting", "creating", "restarting", "warming", "processing", "rebooting", "loading"}
     for key in ("nodes", "train_nodes"):
         kept = []
         for n in st.get(key, []):
             cid = str(n["contract"])
-            if cid in statuses and statuses[cid] in alive:
+            status = statuses.get(cid)
+            if status == "loading":
+                n["loading_since"] = n.get("loading_since") or n.get("created_at") or now
+                if now - n["loading_since"] > TRAIN_LOADING_STALL_SECONDS:
+                    log(f"reconcile: {key} node {cid} stuck loading >{int(TRAIN_LOADING_STALL_SECONDS)}s -> destroy")
+                    destroy_instance(cid, False)
+                    registry_remove(cid)
+                else:
+                    kept.append(n)
+                continue
+            n.pop("loading_since", None)
+            if cid in statuses and status in alive:
+                n.pop("missing_since", None)
                 kept.append(n)
+            elif cid not in statuses:
+                # Transient CLI gaps happen; only evict after a grace window.
+                n["missing_since"] = n.get("missing_since") or now
+                if now - n["missing_since"] > 300:
+                    log(f"reconcile: {key} node {cid} missing from Vast >300s")
+                    registry_remove(cid)
+                else:
+                    kept.append(n)
             else:
-                log(f"reconcile: {key} node {cid} gone from Vast ({statuses.get(cid, 'missing')})")
+                log(f"reconcile: {key} node {cid} gone from Vast ({status})")
                 registry_remove(cid)
         st[key] = kept
     for key in ("stopped", "train_stopped"):
@@ -528,10 +584,15 @@ def training_tick(r, st, now, dry_run=False):
                 else:
                     registry_remove(node["contract"])
             if not tnodes:
-                cid = create_instance(None, dry_run, VAST_TRANSPORT, role="training_worker")
-                if cid:
-                    tnodes.append({"contract": cid, "created_at": now, "transport": VAST_TRANSPORT})
-                    log(f"training pending={train_depth} -> +1 training node {cid}")
+                last_created = st.get("train_last_created_at") or 0
+                if now - last_created >= TRAIN_CREATE_GUARD_SECONDS:
+                    cid = create_instance(None, dry_run, VAST_TRANSPORT, role="training_worker")
+                    if cid:
+                        st["train_last_created_at"] = now
+                        tnodes.append({"contract": cid, "created_at": now, "transport": VAST_TRANSPORT})
+                        log(f"training pending={train_depth} -> +1 training node {cid}")
+                else:
+                    log(f"training create guard active ({int(now - last_created)}s since last create)")
             st["train_nodes"] = tnodes
     else:
         st["train_pending_since"] = None
@@ -569,12 +630,16 @@ def main():
         f"max={MAX_NODES} baseline={BASELINE} to_one>{int(TO_ONE_SECONDS)}s "
         f"down>{int(SCALE_DOWN_SECONDS)}s min_uptime={int(MIN_UPTIME)}s state={st}")
     last_reconcile = 0.0
+    last_prune = 0.0
     while True:
         try:
             depth = tick(r, st, args.dry_run)
             if time.time() - last_reconcile >= RECONCILE_SECONDS:
                 reconcile(st)
                 last_reconcile = time.time()
+            if time.time() - last_prune >= PRUNE_SECONDS:
+                prune()
+                last_prune = time.time()
             save_state(st)
         except Exception as e:
             log(f"tick error: {e}")

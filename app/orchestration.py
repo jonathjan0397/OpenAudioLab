@@ -350,7 +350,17 @@ def fail_attempt(
     lease_token: str,
     error_code: str,
     error_message: str,
+    component: str = "worker",
 ) -> str:
+    from .errorlog import record_error
+
+    record_error(
+        db,
+        component=component,
+        error_code=error_code,
+        message=error_message,
+        job_id=job_id,
+    )
     with db.session() as session:
         if not _finish_attempt(session, attempt_id, lease_token, "failed"):
             session.commit()

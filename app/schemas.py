@@ -73,6 +73,7 @@ class JobDetailResponse(BaseModel):
     lyrics_sha256: str | None
     lyrics_origin: str | None
     client_reference: str | None
+    seed: int | None = None
     error_code: str | None
     error_message: str | None
     created_at: datetime
@@ -239,6 +240,7 @@ class ArtistProfileCreate(StrictModel):
     name: str = Field(min_length=1, max_length=200)
     style: dict[str, Any] = Field(default_factory=dict)
     singer: dict[str, Any] = Field(default_factory=dict)
+    bio: str | None = Field(default=None, max_length=1000)
 
 
 class ArtistProfilePatch(StrictModel):
@@ -246,12 +248,15 @@ class ArtistProfilePatch(StrictModel):
     style: dict[str, Any] | None = None
     singer: dict[str, Any] | None = None
     sharing: str | None = Field(default=None, pattern=r"^(private|public)$")
+    bio: str | None = Field(default=None, max_length=1000)
 
 
 class ArtistProfileResponse(BaseModel):
     profile_id: str
     name: str
     slug: str | None = None
+    bio: str | None = None
+    avatar_key: str | None = None
     style: dict[str, Any]
     singer: dict[str, Any]
     sharing_policy: str

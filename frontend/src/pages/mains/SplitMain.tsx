@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../../api";
 import CreateWidget from "../../components/CreateWidget";
 import ArtworkTile from "../../components/ArtworkTile";
 import Waveform from "../../components/Waveform";
@@ -49,6 +51,14 @@ export default function SplitMain() {
   const hero = HEROES[theme] || HEROES["neon-studio"];
   const tracks = usePublicTracks(4);
   const artists = usePublicArtists();
+  const featuredArtists = useQuery({
+    queryKey: ["featured-artists"],
+    queryFn: () =>
+      api.get<{ profile_id: string; name: string; slug: string; bio?: string | null; avatar_url?: string | null }[]>(
+        "/api/v1/public/artists?limit=10"
+      ),
+    staleTime: 120000,
+  });
   const spot = useSpotlight();
   const list = tracks.data?.tracks || [];
   const [tab, setTab] = useState("Create");
@@ -143,6 +153,26 @@ export default function SplitMain() {
               </div>
             ))}
             {list.length === 0 && <p style={{ color: "var(--muted)" }}>Nothing shared yet.</p>}
+          </div>
+
+          <div className="section-head" style={{ marginTop: 26 }}>
+            <h2>Featured Artists</h2>
+            <span className="sub">Latest public profiles</span>
+            <span className="spacer" />
+            <a className="link" href="/artists">All artists →</a>
+          </div>
+          <div className="artist-strip">
+            {(featuredArtists.data || []).slice(0, 10).map((a) => (
+              <a className="artist-tile card" key={a.profile_id} href={`/artists/${a.slug}`}>
+                {a.avatar_url ? (
+                  <img src={a.avatar_url} alt="" className="avatar round" style={{ width: 44, height: 44 }} />
+                ) : (
+                  <span className="avatar round" style={{ width: 44, height: 44, background: "var(--surface-2, #333)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>☺</span>
+                )}
+                <span className="fc-title" style={{ fontSize: 13 }}>{a.name}</span>
+              </a>
+            ))}
+            {(featuredArtists.data || []).length === 0 && <p style={{ color: "var(--muted)" }}>No public artists yet.</p>}
           </div>
         </section>
 

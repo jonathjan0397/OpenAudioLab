@@ -11,15 +11,17 @@ import hashlib
 import json
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import select
+from pydantic import BaseModel
+from sqlalchemy import func, select
 
 from ..deps import owner_from_request
 from ..errors import ApiError
 from ..models import (
     ArtistProfile,
     ArtistProfileVersion,
+    ArtistSong,
     Asset,
     Dataset,
     DatasetTrack,
@@ -64,6 +66,8 @@ def _profile_response(profile: ArtistProfile) -> ArtistProfileResponse:
         profile_id=profile.id,
         name=profile.name,
         slug=profile.slug,
+        bio=profile.bio,
+        avatar_key=profile.avatar_key,
         style=profile.style_json,
         singer=profile.singer_json,
         sharing_policy=profile.sharing_policy,
@@ -196,6 +200,7 @@ def create_profile(payload: ArtistProfileCreate, request: Request, owner_id: str
     with request.app.state.db.session() as session:
         profile = ArtistProfile(id=new_uuid(), owner_id=owner_id, name=payload.name,
                                 style_json=payload.style, singer_json=payload.singer,
+                                bio=payload.bio,
                                 slug=_unique_slug(session, payload.name))
         session.add(profile)
         session.commit()
@@ -235,6 +240,8 @@ def patch_profile(profile_id: str, payload: ArtistProfilePatch, request: Request
             profile.singer_json = payload.singer
         if payload.sharing is not None:
             profile.sharing_policy = payload.sharing
+        if payload.bio is not None:
+            profile.bio = payload.bio
         profile.etag_version += 1
         session.commit()
         body = _profile_response(profile)
@@ -246,6 +253,111 @@ def delete_profile(profile_id: str, request: Request, owner_id: str = Depends(ow
     with request.app.state.db.session() as session:
         profile = _get_owned_profile(session, profile_id, owner_id)
         profile.deleted_at = utcnow()
+        session.commit()
+    return Response(status_code=204)
+
+
+# --- M17: artist avatar + curated songs --------------------------------------
+
+
+class ArtistSongCreate(BaseModel):
+    asset_id: str
+
+
+@router.post("/artist-profiles/{profile_id}/avatar", status_code=201)
+async def upload_artist_avatar(
+    profile_id: str,
+    request: Request,
+    owner_id: str = Depends(owner_from_request),
+    file: UploadFile = File(...),
+) -> JSONResponse:
+    from .auth import AVATAR_MAX_BYTES, AVATAR_MEDIA
+
+    content_type = (file.content_type or "").lower()
+    if not content_type.startswith("image/"):
+        raise ApiError(422, "INVALID_FILE", "Avatar must be an image.")
+    body = await file.read()
+    if not body:
+        raise ApiError(422, "EMPTY_FILE", "Avatar file is empty.")
+    if len(body) > AVATAR_MAX_BYTES:
+        raise ApiError(413, "FILE_TOO_LARGE", "Avatar must be 2 MB or smaller.")
+    suffix = ".png" if content_type == "image/png" else ".jpg"
+    for ext in AVATAR_MEDIA:
+        if (file.filename or "").lower().endswith(ext):
+            suffix = ext
+            break
+    key = f"owners/{owner_id}/artist-avatar-{new_uuid()}{suffix}"
+    request.app.state.storage.put(key, body)
+    with request.app.state.db.session() as session:
+        profile = _get_owned_profile(session, profile_id, owner_id)
+        profile.avatar_key = key
+        profile.etag_version += 1
+        session.commit()
+    return JSONResponse(status_code=201, content={"ok": True, "avatar_key": key})
+
+
+@router.get("/artist-profiles/{profile_id}/avatar")
+def get_artist_avatar(profile_id: str, request: Request) -> Response:
+    from .auth import AVATAR_MEDIA
+
+    with request.app.state.db.session() as session:
+        profile = session.get(ArtistProfile, profile_id)
+    if profile is None or not profile.avatar_key:
+        raise ApiError(404, "AVATAR_NOT_FOUND", "Artist has no avatar.")
+    stored = request.app.state.storage.get(profile.avatar_key)
+    media = AVATAR_MEDIA.get(profile.avatar_key[profile.avatar_key.rfind("."):].lower(), "application/octet-stream")
+    return Response(content=stored.body, media_type=media, headers={"Cache-Control": "public, max-age=300"})
+
+
+@router.get("/artist-profiles/{profile_id}/songs")
+def list_artist_songs(profile_id: str, request: Request,
+                      owner_id: str = Depends(owner_from_request)) -> JSONResponse:
+    with request.app.state.db.session() as session:
+        _get_owned_profile(session, profile_id, owner_id)
+        rows = list(session.execute(
+            select(ArtistSong, Asset)
+            .join(Asset, Asset.id == ArtistSong.asset_id)
+            .where(ArtistSong.profile_id == profile_id, Asset.deleted_at.is_(None))
+            .order_by(ArtistSong.position, ArtistSong.created_at)
+        ).all())
+    return JSONResponse(content=[
+        {"song_id": s.id, "asset_id": a.id, "title": a.title, "position": s.position}
+        for s, a in rows
+    ])
+
+
+@router.post("/artist-profiles/{profile_id}/songs", status_code=201)
+def add_artist_song(profile_id: str, payload: ArtistSongCreate, request: Request,
+                    owner_id: str = Depends(owner_from_request)) -> JSONResponse:
+    with request.app.state.db.session() as session:
+        _get_owned_profile(session, profile_id, owner_id)
+        asset = session.get(Asset, payload.asset_id)
+        if asset is None or asset.owner_id != owner_id:
+            raise ApiError(404, "ASSET_NOT_FOUND", "Asset not found.")
+        duplicate = session.execute(
+            select(ArtistSong).where(ArtistSong.profile_id == profile_id, ArtistSong.asset_id == payload.asset_id)
+        ).scalar_one_or_none()
+        if duplicate is not None:
+            raise ApiError(409, "SONG_DUPLICATE", "Song is already on this profile.")
+        max_pos = session.execute(
+            select(func.max(ArtistSong.position)).where(ArtistSong.profile_id == profile_id)
+        ).scalar_one_or_none()
+        song = ArtistSong(id=new_uuid(), profile_id=profile_id, owner_id=owner_id,
+                          asset_id=payload.asset_id, position=(max_pos or 0) + 1)
+        session.add(song)
+        session.commit()
+    return JSONResponse(status_code=201, content={"song_id": song.id, "asset_id": song.asset_id, "position": song.position})
+
+
+@router.delete("/artist-profiles/{profile_id}/songs/{song_id}", status_code=204)
+def remove_artist_song(profile_id: str, song_id: str, request: Request,
+                       owner_id: str = Depends(owner_from_request)) -> Response:
+    with request.app.state.db.session() as session:
+        _get_owned_profile(session, profile_id, owner_id)
+        song = session.get(ArtistSong, song_id)
+        if song is None or song.profile_id != profile_id:
+            raise ApiError(404, "SONG_NOT_FOUND", "Curated song not found on this profile.")
+        session.delete(song)
         session.commit()
     return Response(status_code=204)
 
@@ -552,7 +664,13 @@ def public_artists(request: Request, limit: int = Query(default=50, ge=1, le=200
         )
     return JSONResponse(
         [
-            {"profile_id": p.id, "name": p.name, "slug": p.slug}
+            {
+                "profile_id": p.id,
+                "name": p.name,
+                "slug": p.slug,
+                "bio": p.bio,
+                "avatar_url": f"/api/v1/artist-profiles/{p.id}/avatar" if p.avatar_key else None,
+            }
             for p in rows
             if p.slug
         ]
@@ -575,17 +693,31 @@ def public_artist(slug: str, request: Request) -> JSONResponse:
             raise ApiError(404, "ARTIST_NOT_FOUND", "Public artist profile not found.")
         tracks = list(
             session.execute(
-                select(Asset)
+                select(ArtistSong, Asset)
+                .join(Asset, Asset.id == ArtistSong.asset_id)
                 .where(
-                    Asset.owner_id == profile.owner_id,
-                    Asset.shared.is_(True),
+                    ArtistSong.profile_id == profile.id,
                     Asset.deleted_at.is_(None),
                     Asset.mime.like("audio/%"),
                 )
-                .order_by(Asset.created_at.desc())
-                .limit(20)
-            ).scalars()
+                .order_by(ArtistSong.position, ArtistSong.created_at)
+            ).all()
         )
+        if not tracks:
+            tracks = [
+                (None, a)
+                for a in session.execute(
+                    select(Asset)
+                    .where(
+                        Asset.owner_id == profile.owner_id,
+                        Asset.shared.is_(True),
+                        Asset.deleted_at.is_(None),
+                        Asset.mime.like("audio/%"),
+                    )
+                    .order_by(Asset.created_at.desc())
+                    .limit(20)
+                ).scalars()
+            ]
     from datetime import timedelta
 
     from ..models import utcnow
@@ -597,8 +729,15 @@ def public_artist(slug: str, request: Request) -> JSONResponse:
             "title": a.title,
             "url": f"/api/v1/artifacts/{a.id}/content?token={make_token(settings.secret_key, a.id, expiry)}",
         }
-        for a in tracks
+        for _, a in tracks
     ]
     return JSONResponse(
-        {"profile_id": profile.id, "name": profile.name, "slug": profile.slug, "tracks": items}
+        {
+            "profile_id": profile.id,
+            "name": profile.name,
+            "slug": profile.slug,
+            "bio": profile.bio,
+            "avatar_url": f"/api/v1/artist-profiles/{profile.id}/avatar" if profile.avatar_key else None,
+            "tracks": items,
+        }
     )

@@ -88,6 +88,20 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
+        try:
+            from .errorlog import record_error
+
+            record_error(
+                request.app.state.db,
+                component="api",
+                error_code="INTERNAL",
+                message=str(exc) or exc.__class__.__name__,
+                exc=exc,
+                route=f"{request.method} {request.url.path}",
+                http_status=500,
+            )
+        except Exception:  # noqa: BLE001
+            pass
         return JSONResponse(
             status_code=500,
             content=_envelope(request, "INTERNAL", "Internal server error.", {}),

@@ -19,6 +19,8 @@ interface Track {
   created_at: string | null;
   expired: boolean;
   url: string;
+  job_id?: string | null;
+  seed?: number | null;
 }
 interface JobRow {
   job_id: string;
@@ -26,6 +28,32 @@ interface JobRow {
   stage?: string | null;
   progress?: number | null;
   created_at?: string | null;
+}
+interface Workspace {
+  workspace_id: string;
+  name: string;
+  song_count: number;
+}
+interface WorkspaceSong {
+  song_id: string;
+  workspace_id: string;
+  title: string | null;
+  description: string | null;
+  lyrics: string | null;
+  style_tags: string[];
+  seed: number | null;
+  duration_seconds: number | null;
+  instrumental: boolean;
+  asset_id: string | null;
+  job_id: string | null;
+}
+interface ArtistRow {
+  profile_id: string;
+  name: string;
+  slug: string | null;
+  bio: string | null;
+  sharing_policy: string;
+  etag: string;
 }
 
 const SIDEBAR = [
@@ -69,10 +97,27 @@ export default function StudioPage() {
   const [renameValue, setRenameValue] = useState("");
   const [filter, setFilter] = useState("all");
   const [stemsFor, setStemsFor] = useState<string | null>(null);
+  const [wsActive, setWsActive] = useState<string | null>(null);
+  const [wsNewName, setWsNewName] = useState("");
   const stemsQuery = useQuery<{ asset_id: string; stems: { category: string | null; asset_id: string; url: string }[] }>({
     queryKey: ["stems", stemsFor],
     queryFn: () => api.get(`/api/v1/artifacts/${stemsFor}/stems`),
     enabled: !!stemsFor,
+  });
+  const workspaces = useQuery({
+    queryKey: ["workspaces"],
+    queryFn: () => api.get<{ workspaces: Workspace[] }>("/api/v1/workspaces"),
+    enabled: !!me.data?.user,
+  });
+  const wsSongs = useQuery({
+    queryKey: ["workspace-songs", wsActive],
+    queryFn: () => api.get<{ songs: WorkspaceSong[] }>(`/api/v1/workspaces/${wsActive}/songs`),
+    enabled: !!wsActive,
+  });
+  const artists = useQuery({
+    queryKey: ["artist-profiles"],
+    queryFn: () => api.get<ArtistRow[]>("/api/v1/artist-profiles"),
+    enabled: !!me.data?.user,
   });
 
   const toggle = useMutation({
@@ -92,6 +137,64 @@ export default function StudioPage() {
       qc.invalidateQueries({ queryKey: ["my-tracks"] });
     },
   });
+  const wsCreate = useMutation({
+    mutationFn: (name: string) => api.post<{ workspace_id: string }>("/api/v1/workspaces", { name }),
+    onSuccess: () => {
+      setWsNewName("");
+      qc.invalidateQueries({ queryKey: ["workspaces"] });
+    },
+  });
+  const wsDelete = useMutation({
+    mutationFn: (id: string) => api.delete(`/api/v1/workspaces/${id}`),
+    onSuccess: () => {
+      setWsActive(null);
+      qc.invalidateQueries({ queryKey: ["workspaces"] });
+    },
+  });
+  const wsSave = useMutation({
+    mutationFn: ({ wsId, jobId, title }: { wsId: string; jobId: string; title: string }) =>
+      api.post(`/api/v1/workspaces/${wsId}/songs`, { job_id: jobId, title }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["workspaces"] });
+      qc.invalidateQueries({ queryKey: ["workspace-songs"] });
+    },
+  });
+  const wsRemove = useMutation({
+    mutationFn: ({ wsId, songId }: { wsId: string; songId: string }) =>
+      api.delete(`/api/v1/workspaces/${wsId}/songs/${songId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["workspace-songs"] });
+      qc.invalidateQueries({ queryKey: ["workspaces"] });
+    },
+  });
+  const artistPatch = useMutation({
+    mutationFn: ({ id, etag, body }: { id: string; etag: string; body: Record<string, unknown> }) =>
+      api.patch(`/api/v1/artist-profiles/${id}`, body, { "If-Match": etag }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["artist-profiles"] }),
+  });
+
+  const rerollSong = (s: WorkspaceSong, sameSeed: boolean) => {
+    const parts = [s.description || "", ...(s.style_tags || [])].filter(Boolean);
+    api
+      .post<{ job_id: string }>(
+        "/api/v1/jobs",
+        {
+          operation: "music.generate",
+          model_id: "ace-step-1.5",
+          music_description: parts.join(", ") || s.title || "Untitled",
+          ...(s.lyrics && !s.instrumental ? { lyrics: s.lyrics, lyrics_origin: "frontend_llm" } : {}),
+          seed: sameSeed ? s.seed ?? Math.floor(Math.random() * 1_000_000_000) : Math.floor(Math.random() * 1_000_000_000),
+          ...(s.duration_seconds ? { duration_seconds: s.duration_seconds } : {}),
+          instrumental: !!s.instrumental,
+          outputs: ["mix_wav"],
+        },
+        { "Idempotency-Key": crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}` }
+      )
+      .then(() => {
+        qc.invalidateQueries({ queryKey: ["my-jobs"] });
+        qc.invalidateQueries({ queryKey: ["my-tracks"] });
+      });
+  };
 
   if (!me.data?.user) {
     return (
@@ -245,6 +348,20 @@ export default function StudioPage() {
                     </button>
                     <a className="btn" href={t.url} download>WAV</a>
                     <button className="btn" onClick={() => exportArtifact(t.asset_id, "mp3")}>MP3</button>
+                    {t.job_id && (workspaces.data?.workspaces || []).length > 0 && (
+                      <button
+                        className="btn"
+                        title="Save recipe to workspace"
+                        onClick={() => {
+                          const wsId = wsActive && (workspaces.data?.workspaces || []).some((w) => w.workspace_id === wsActive)
+                            ? wsActive
+                            : workspaces.data!.workspaces[0].workspace_id;
+                          wsSave.mutate({ wsId, jobId: t.job_id!, title: t.title || "Untitled" });
+                        }}
+                      >
+                        + Workspace
+                      </button>
+                    )}
                     <button
                       className="btn"
                       style={stemsFor === t.asset_id ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
@@ -278,6 +395,92 @@ export default function StudioPage() {
                   </div>
                 )}
               </>
+              ))}
+            </div>
+
+            <div className="card" style={{ marginTop: 20 }}>
+              <div className="card-header">
+                <h2>Workspaces</h2>
+                <span className="spacer" />
+                <input
+                  value={wsNewName}
+                  onChange={(e) => setWsNewName(e.target.value)}
+                  placeholder="New workspace name"
+                  maxLength={80}
+                  style={{ width: 180 }}
+                />
+                <button className="btn" disabled={!wsNewName.trim() || wsCreate.isPending} onClick={() => wsCreate.mutate(wsNewName.trim())}>
+                  + Add
+                </button>
+              </div>
+              {(workspaces.data?.workspaces || []).length === 0 && (
+                <p style={{ color: "var(--muted)", fontSize: 13 }}>No workspaces yet — create one and save tracks into it.</p>
+              )}
+              <div className="style-chips">
+                {(workspaces.data?.workspaces || []).map((w) => (
+                  <button
+                    key={w.workspace_id}
+                    type="button"
+                    className={`chip${wsActive === w.workspace_id ? " chip-picked" : ""}`}
+                    onClick={() => setWsActive(wsActive === w.workspace_id ? null : w.workspace_id)}
+                  >
+                    {w.name} ({w.song_count})
+                  </button>
+                ))}
+              </div>
+              {wsActive && (
+                <div style={{ marginTop: 10 }}>
+                  {(wsSongs.data?.songs || []).length === 0 && (
+                    <p style={{ color: "var(--muted)", fontSize: 13 }}>Empty — use “+ Workspace” on any track below.</p>
+                  )}
+                  {(wsSongs.data?.songs || []).map((s) => (
+                    <div key={s.song_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid color-mix(in srgb, var(--border) 40%, transparent)" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="title" style={{ fontSize: 14 }}>{s.title || "Untitled"}</div>
+                        <div className="sub" style={{ fontSize: 12 }}>
+                          seed {s.seed ?? "—"}{s.duration_seconds ? ` · ${fmtTime(s.duration_seconds)}` : ""}{s.instrumental ? " · instrumental" : ""}
+                        </div>
+                      </div>
+                      <button className="btn" title="Regenerate with the same seed (reproducible)" onClick={() => rerollSong(s, true)}>↻ Replay</button>
+                      <button className="btn" title="Regenerate with a new seed" onClick={() => rerollSong(s, false)}>✦ Reroll</button>
+                      <button className="btn" onClick={() => wsRemove.mutate({ wsId: wsActive, songId: s.song_id })}>✕</button>
+                    </div>
+                  ))}
+                  <div style={{ marginTop: 8 }}>
+                    <button className="btn btn-ghost" onClick={() => wsDelete.mutate(wsActive)}>Delete workspace</button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="card" style={{ marginTop: 20 }}>
+              <div className="card-header">
+                <h3>My Artists</h3>
+                <span className="spacer" />
+                <NavLink to="/artists" className="btn">Browse all</NavLink>
+              </div>
+              {(artists.data || []).length === 0 && (
+                <p style={{ color: "var(--muted)", fontSize: 13 }}>No artist profiles yet.</p>
+              )}
+              {(artists.data || []).map((a) => (
+                <div key={a.profile_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="title" style={{ fontSize: 14 }}>{a.name}</div>
+                    <div className="sub" style={{ fontSize: 12 }}>/{a.slug} · {a.sharing_policy}{a.bio ? ` · ${a.bio.slice(0, 40)}` : ""}</div>
+                  </div>
+                  <button
+                    className="btn"
+                    onClick={() =>
+                      artistPatch.mutate({
+                        id: a.profile_id,
+                        etag: a.etag,
+                        body: { sharing: a.sharing_policy === "public" ? "private" : "public" },
+                      })
+                    }
+                  >
+                    {a.sharing_policy === "public" ? "Make private" : "Make public"}
+                  </button>
+                </div>
               ))}
             </div>
           </div>

@@ -8,6 +8,8 @@ interface PublicArtist {
   profile_id: string;
   name: string;
   slug: string;
+  bio?: string | null;
+  avatar_url?: string | null;
 }
 interface ArtistDetail extends PublicArtist {
   tracks: { asset_id: string; title: string | null; url: string }[];
@@ -34,10 +36,16 @@ export default function ArtistPage() {
     return (
       <main className="page">
         <div className="hero-strip">
-          <div>
-            <h1>{artist.data.name}</h1>
-            <div className="sub">
-              {fmtCount(stats.data?.tracks)} tracks · {fmtCount(stats.data?.followers)} followers · {fmtCount(stats.data?.plays)} plays
+          <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+            {artist.data.avatar_url && (
+              <img src={artist.data.avatar_url} alt="" style={{ width: 72, height: 72, borderRadius: "50%", objectFit: "cover" }} />
+            )}
+            <div>
+              <h1>{artist.data.name}</h1>
+              <div className="sub">
+                {fmtCount(stats.data?.tracks)} tracks · {fmtCount(stats.data?.followers)} followers · {fmtCount(stats.data?.plays)} plays
+              </div>
+              {artist.data.bio && <p style={{ marginTop: 6, maxWidth: 560 }}>{artist.data.bio}</p>}
             </div>
           </div>
           <div className="strip-controls">
@@ -61,8 +69,16 @@ export default function ArtistPage() {
     <main className="page">
       <h1>Artists</h1>
       {(list.data || []).map((a) => (
-        <div className="card" key={a.profile_id} style={{ marginBottom: 8 }}>
-          <a href={`/artists/${a.slug}`}>{a.name}</a>
+        <div className="card" key={a.profile_id} style={{ marginBottom: 8, display: "flex", alignItems: "center", gap: 12 }}>
+          {a.avatar_url ? (
+            <img src={a.avatar_url} alt="" style={{ width: 40, height: 40, borderRadius: "50%", objectFit: "cover" }} />
+          ) : (
+            <span style={{ width: 40, height: 40, borderRadius: "50%", background: "var(--surface-2, #333)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>☺</span>
+          )}
+          <div>
+            <a href={`/artists/${a.slug}`}>{a.name}</a>
+            {a.bio && <div className="sub" style={{ fontSize: 12 }}>{a.bio.slice(0, 80)}</div>}
+          </div>
         </div>
       ))}
       {list.data?.length === 0 && <p style={{ color: "var(--muted)" }}>No public artists yet.</p>}

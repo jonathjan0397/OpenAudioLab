@@ -123,6 +123,33 @@ interface AuditRow {
   operation: string;
   created_at: string | null;
 }
+interface AdminErrorRow {
+  id: number;
+  component: string;
+  route: string | null;
+  http_status: number | null;
+  error_code: string;
+  message: string;
+  job_id: string | null;
+  worker_id: string | null;
+  resolved: boolean;
+  created_at: string | null;
+}
+interface AdminErrorDetail extends AdminErrorRow {
+  traceback: string | null;
+  context_json: Record<string, unknown>;
+  user_id: string | null;
+  fingerprint: string | null;
+  agent_brief: string;
+}
+interface PricingRow {
+  id: string;
+  kind: string;
+  name: string;
+  price_usd: number;
+  credits: number;
+  position: number;
+}
 interface CreditRow {
   id: string;
   owner_id: string;
@@ -175,6 +202,8 @@ const SIDEBAR = [
   { to: "/admin/storage", label: "Storage", icon: "▤" },
   { to: "/admin/billing", label: "Billing", icon: "▥" },
   { to: "/admin/api", label: "API Access", icon: "</>" },
+  { to: "/admin/errors", label: "Errors", icon: "⚠" },
+  { to: "/admin/pricing", label: "Pricing", icon: "$" },
   { to: "/admin/audit", label: "Audit Log", icon: "▦" },
   { to: "/admin/settings", label: "Settings", icon: "⚙" },
 ];
@@ -227,6 +256,7 @@ export default function AdminPage() {
   const [auditEvent, setAuditEvent] = useState("");
   const [auditLimit, setAuditLimit] = useState(50);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [errorId, setErrorId] = useState<number | null>(null);
   const [creditDraft, setCreditDraft] = useState<{ id: string; value: string } | null>(null);
   const [keyName, setKeyName] = useState("");
   const [newSecret, setNewSecret] = useState<string | null>(null);
@@ -475,6 +505,47 @@ export default function AdminPage() {
   const cancelTraining = useMutation({
     mutationFn: (id: string) => api.post<{ status: string }>(`/api/v1/admin/trainings/${id}/cancel`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-trainings"] }),
+  });
+  const deleteUser = useMutation({
+    mutationFn: (id: string) => api.delete(`/api/v1/admin/users/${id}`),
+    onSuccess: invalidate,
+  });
+
+  const [errorsLimit, setErrorsLimit] = useState(10);
+  const errors = useQuery({
+    queryKey: ["admin-errors", errorsLimit],
+    queryFn: () =>
+      api.get<{ items: AdminErrorRow[]; total: number }>(`/api/v1/admin/errors?limit=${errorsLimit}`),
+    enabled: enabled && section === "errors",
+    refetchInterval: section === "errors" ? 10000 : false,
+  });
+  const errorDetail = useQuery({
+    queryKey: ["admin-error-detail", errorId],
+    queryFn: () => api.get<AdminErrorDetail>(`/api/v1/admin/errors/${errorId}`),
+    enabled: !!errorId,
+  });
+  const resolveError = useMutation({
+    mutationFn: ({ id, resolved }: { id: number; resolved: boolean }) =>
+      api.patch(`/api/v1/admin/errors/${id}`, { resolved }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-errors"] });
+      qc.invalidateQueries({ queryKey: ["admin-error-detail", errorId] });
+    },
+  });
+
+  const pricing = useQuery({
+    queryKey: ["admin-pricing"],
+    queryFn: () => api.get<{ plan: PricingRow[]; pack: PricingRow[] }>("/api/v1/admin/pricing"),
+    enabled: enabled && section === "pricing",
+  });
+  const [pricingDraft, setPricingDraft] = useState<PricingRow[] | null>(null);
+  const savePricing = useMutation({
+    mutationFn: (items: PricingRow[]) =>
+      api.put<{ plan: PricingRow[]; pack: PricingRow[] }>("/api/v1/admin/pricing", { items }),
+    onSuccess: () => {
+      setPricingDraft(null);
+      qc.invalidateQueries({ queryKey: ["admin-pricing"] });
+    },
   });
   const createKey = useMutation({
     mutationFn: () => api.post<KeyRow>("/api/v1/api-keys", { name: keyName || "default" }),
@@ -865,6 +936,15 @@ export default function AdminPage() {
                       )}
                     </td>
                     <td><button className="btn btn-ghost" onClick={() => setLedgerFor(u)}>ledger</button></td>
+                    <td>
+                      <button
+                        className="btn btn-ghost"
+                        title="Soft-delete (purged after 30 days)"
+                        onClick={() => window.confirm(`Delete ${u.username}?`) && deleteUser.mutate(u.id)}
+                      >
+                        ✕
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1219,6 +1299,106 @@ export default function AdminPage() {
                 {(keys.data?.items || []).length === 0 && <tr><td colSpan={6} style={{ color: "var(--muted)" }}>No API keys yet — create one to call the API with Authorization: Bearer …</td></tr>}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {section === "errors" && (
+          <div className="card">
+            <div className="card-header">
+              <h2>Errors ({errors.data?.total ?? 0})</h2>
+              <span className="spacer" />
+              <span className="sub" style={{ fontSize: 12 }}>auto-purged after 30 days</span>
+            </div>
+            <table className="table">
+              <thead><tr><th>When</th><th>Component</th><th>Code</th><th>Message</th><th>Links</th><th>State</th><th /></tr></thead>
+              <tbody>
+                {(errors.data?.items || []).map((e) => (
+                  <tr key={e.id}>
+                    <td className="mono">{e.created_at?.slice(5, 16).replace("T", " ")}</td>
+                    <td>{e.component}</td>
+                    <td><span className="pill err">{e.error_code}</span></td>
+                    <td style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={e.message}>{e.message}</td>
+                    <td className="mono" style={{ fontSize: 11 }}>{[e.job_id?.slice(0, 8), e.worker_id].filter(Boolean).join(" ") || "—"}</td>
+                    <td>{e.resolved ? <span className="pill">resolved</span> : <span className="pill info">open</span>}</td>
+                    <td style={{ display: "flex", gap: 6 }}>
+                      <button className="btn" onClick={() => setErrorId(e.id)}>View</button>
+                      <button className="btn" onClick={() => resolveError.mutate({ id: e.id, resolved: !e.resolved })}>
+                        {e.resolved ? "Reopen" : "Resolve"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {(errors.data?.items || []).length === 0 && <tr><td colSpan={7} style={{ color: "var(--muted)" }}>No errors logged.</td></tr>}
+              </tbody>
+            </table>
+            {(errors.data?.items.length ?? 0) < (errors.data?.total ?? 0) && (
+              <div style={{ marginTop: 10 }}>
+                <button className="btn" onClick={() => setErrorsLimit((n) => n + 20)}>View full log (+20)</button>
+              </div>
+            )}
+            {errorId !== null && errorDetail.data && (
+              <div className="card" style={{ marginTop: 14, background: "color-mix(in srgb, var(--surface) 70%, transparent)" }}>
+                <div className="card-header">
+                  <h3>#{errorDetail.data.id} — {errorDetail.data.error_code}</h3>
+                  <span className="spacer" />
+                  <button
+                    className="btn"
+                    onClick={() => navigator.clipboard?.writeText(errorDetail.data.agent_brief)}
+                  >
+                    Copy agent brief
+                  </button>
+                  <button className="btn btn-ghost" onClick={() => setErrorId(null)}>✕</button>
+                </div>
+                <pre className="mono" style={{ whiteSpace: "pre-wrap", fontSize: 12, maxHeight: 320, overflow: "auto" }}>
+                  {errorDetail.data.agent_brief}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
+
+        {section === "pricing" && (
+          <div className="card" style={{ maxWidth: 640 }}>
+            <div className="card-header">
+              <h2>Pricing</h2>
+              <span className="spacer" />
+              <button
+                className="btn btn-primary"
+                disabled={!pricingDraft || savePricing.isPending}
+                onClick={() => pricingDraft && savePricing.mutate(pricingDraft)}
+              >
+                Save
+              </button>
+            </div>
+            {(["plan", "pack"] as const).map((kind) => (
+              <div key={kind}>
+                <div className="label" style={{ color: "var(--muted)", fontSize: 12, margin: "10px 0 6px", textTransform: "capitalize" }}>{kind}s</div>
+                <table className="table">
+                  <thead><tr><th>Name</th><th>Price USD</th><th>Credits</th></tr></thead>
+                  <tbody>
+                    {(kind === "plan" ? pricing.data?.plan : pricing.data?.pack)?.map((row) => {
+                      const draft = pricingDraft?.find((p) => p.id === row.id) || row;
+                      const set = (patch: Partial<PricingRow>) =>
+                        setPricingDraft((d) => (d || [...(pricing.data?.plan || []), ...(pricing.data?.pack || [])]).map((p) => (p.id === row.id ? { ...p, ...patch } : p)));
+                      return (
+                        <tr key={row.id}>
+                          <td>{draft.name} <span className="mono" style={{ fontSize: 11 }}>({draft.id})</span></td>
+                          <td>
+                            <input style={{ width: 90 }} type="number" min={0} value={draft.price_usd} onChange={(e) => set({ price_usd: Number(e.target.value) })} />
+                          </td>
+                          <td>
+                            <input style={{ width: 110 }} type="number" min={0} value={draft.credits} onChange={(e) => set({ credits: Number(e.target.value) })} />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+            <p className="sub" style={{ fontSize: 12, marginTop: 8 }}>
+              Plan credits are monthly grants; pack credits are one-time top-ups. Changes apply immediately.
+            </p>
           </div>
         )}
 

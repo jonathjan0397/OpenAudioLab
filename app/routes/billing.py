@@ -30,11 +30,47 @@ def _grant(session, user: User, delta: int, reason: str) -> None:
     session.add(CreditEntry(owner_id="usr_" + user.id, delta=delta, reason=reason))
 
 
+def load_pricing(session) -> dict[str, list[dict]]:
+    """Read pricing rows; seed defaults from PLANS/PACKS when empty."""
+    from sqlalchemy import select
+
+    from ..models import Pricing
+
+    rows = list(session.execute(select(Pricing).order_by(Pricing.position)).scalars())
+    if not rows:
+        defaults = [
+            Pricing(id=k, kind="plan", name=v["name"], price_usd=v["price_usd"], credits=v["monthly_credits"], position=i)
+            for i, (k, v) in enumerate(PLANS.items())
+        ] + [
+            Pricing(id=k, kind="pack", name=v["name"], price_usd=v["price_usd"], credits=v["credits"], position=10 + i)
+            for i, (k, v) in enumerate(PACKS.items())
+        ]
+        session.add_all(defaults)
+        session.commit()
+        rows = defaults
+    out: dict[str, list[dict]] = {"plan": [], "pack": []}
+    for p in rows:
+        out.setdefault(p.kind, []).append(
+            {"id": p.id, "kind": p.kind, "name": p.name, "price_usd": p.price_usd, "credits": p.credits, "position": p.position}
+        )
+    return out
+
+
+def _plan_map(session) -> dict[str, dict]:
+    data = load_pricing(session)
+    return {
+        p["id"]: {"id": p["id"], "name": p["name"], "price_usd": p["price_usd"], "monthly_credits": p["credits"]}
+        for p in data["plan"]
+    }
+
+
 @router.get("/billing/plans")
-def billing_plans(user: User = Depends(current_user)) -> JSONResponse:
+def billing_plans(request: Request, user: User = Depends(current_user)) -> JSONResponse:
+    with request.app.state.db.session() as session:
+        plans = list(_plan_map(session).values())
     return JSONResponse(
         {
-            "plans": list(PLANS.values()),
+            "plans": plans,
             "current": user.plan,
             "credits_balance": user.credits_balance,
             "topup_credits": TOPUP_CREDITS,
@@ -44,8 +80,8 @@ def billing_plans(user: User = Depends(current_user)) -> JSONResponse:
 
 @router.post("/billing/subscribe")
 def billing_subscribe(payload: SubscribeRequest, request: Request, user: User = Depends(current_user)) -> JSONResponse:
-    plan = PLANS[payload.plan]
     with request.app.state.db.session() as session:
+        plan = _plan_map(session).get(payload.plan) or PLANS[payload.plan]
         fresh = session.get(User, user.id)
         _grant(session, fresh, plan["monthly_credits"], "subscription")
         fresh.plan = payload.plan
@@ -99,8 +135,10 @@ class CheckoutRequest(BaseModel):
 
 
 @router.get("/billing/packs")
-def billing_packs(user: User = Depends(current_user)) -> JSONResponse:
-    return JSONResponse({"packs": list(PACKS.values())})
+def billing_packs(request: Request, user: User = Depends(current_user)) -> JSONResponse:
+    with request.app.state.db.session() as session:
+        packs = load_pricing(session)["pack"]
+    return JSONResponse({"packs": packs})
 
 
 @router.post("/billing/checkout", status_code=201)
@@ -117,9 +155,11 @@ def billing_checkout(
     import stripe
 
     stripe.api_key = settings.stripe_secret_key
+    with request.app.state.db.session() as db:
+        pricing = load_pricing(db)
     if payload.kind == "plan":
-        item = PLANS[payload.plan]
-        name, unit, credits = item["name"], item["price_usd"] * 100, item["monthly_credits"]
+        item = next((p for p in pricing["plan"] if p["id"] == payload.plan), None) or PLANS[payload.plan]
+        name, unit, credits = item["name"], item["price_usd"] * 100, item.get("monthly_credits", item.get("credits", 0))
         line = {
             "price_data": {
                 "currency": "usd",
@@ -131,7 +171,7 @@ def billing_checkout(
         }
         mode = "subscription"
     else:
-        item = PACKS[payload.pack]
+        item = next((p for p in pricing["pack"] if p["id"] == payload.pack), None) or PACKS[payload.pack]
         name, unit, credits = item["name"], item["price_usd"] * 100, item["credits"]
         line = {
             "price_data": {

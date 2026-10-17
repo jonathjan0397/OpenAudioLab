@@ -215,6 +215,8 @@ class ArtistProfile(Base):
     owner_id: Mapped[str] = mapped_column(String(80), index=True)
     name: Mapped[str] = mapped_column(String(200))
     slug: Mapped[str | None] = mapped_column(String(220), nullable=True, unique=True)
+    bio: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    avatar_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
     style_json: Mapped[dict] = mapped_column(JSON, default=dict)
     singer_json: Mapped[dict] = mapped_column(JSON, default=dict)
     sharing_policy: Mapped[str] = mapped_column(String(20), default="private")
@@ -359,6 +361,7 @@ class User(Base):
     credits_balance: Mapped[int] = mapped_column(Integer, default=1000)
     avatar_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
     bio: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -449,3 +452,84 @@ class CreditEntry(Base):
     note: Mapped[str | None] = mapped_column(String(200), nullable=True)
     job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Workspace(Base):
+    """Customer-facing song collection for organising tracks (M17)."""
+
+    __tablename__ = "workspaces"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    owner_id: Mapped[str] = mapped_column(String(80), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class WorkspaceSong(Base):
+    """A saved song recipe (name, lyrics, tags, seed) so it can be reproduced."""
+
+    __tablename__ = "workspace_songs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    workspace_id: Mapped[str] = mapped_column(String(36), index=True)
+    owner_id: Mapped[str] = mapped_column(String(80), index=True)
+    title: Mapped[str] = mapped_column(String(200), default="Untitled")
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    lyrics: Mapped[str | None] = mapped_column(Text, nullable=True)
+    style_tags: Mapped[list] = mapped_column(JSON, default=list)
+    seed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    instrumental: Mapped[bool] = mapped_column(default=False)
+    asset_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ErrorLog(Base):
+    """Advanced structured error log for agent triage (M17)."""
+
+    __tablename__ = "error_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    component: Mapped[str] = mapped_column(String(40), index=True)
+    route: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_code: Mapped[str] = mapped_column(String(60), index=True)
+    message: Mapped[str] = mapped_column(Text)
+    traceback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    worker_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    fingerprint: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    resolved: Mapped[bool] = mapped_column(default=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class ArtistSong(Base):
+    """Curated song on a public artist profile (M17)."""
+
+    __tablename__ = "artist_songs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    profile_id: Mapped[str] = mapped_column(String(36), index=True)
+    owner_id: Mapped[str] = mapped_column(String(80), index=True)
+    asset_id: Mapped[str] = mapped_column(String(36), index=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Pricing(Base):
+    """DB-backed plan/pack pricing so admins can edit it (M17)."""
+
+    __tablename__ = "pricing"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(10), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    price_usd: Mapped[int] = mapped_column(Integer, default=0)
+    credits: Mapped[int] = mapped_column(Integer, default=0)
+    position: Mapped[int] = mapped_column(Integer, default=0)

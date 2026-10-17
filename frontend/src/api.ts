@@ -20,9 +20,10 @@ export const api = {
     request<T>(path, { method: "POST", body: data === undefined ? undefined : JSON.stringify(data), headers }),
   put: <T>(path: string, data?: unknown) =>
     request<T>(path, { method: "PUT", body: data === undefined ? undefined : JSON.stringify(data) }),
-  patch: <T>(path: string, data?: unknown) =>
-    request<T>(path, { method: "PATCH", body: data === undefined ? undefined : JSON.stringify(data) }),
+  patch: <T>(path: string, data?: unknown, headers?: Record<string, string>) =>
+    request<T>(path, { method: "PATCH", body: data === undefined ? undefined : JSON.stringify(data), headers }),
   del: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+  delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 };
 
 export interface SiteInfo {

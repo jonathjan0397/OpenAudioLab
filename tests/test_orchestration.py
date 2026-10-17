@@ -103,8 +103,8 @@ def test_cross_owner_asset_paths(client, orch) -> None:
 
 
 def test_fixture_is_deterministic(client, orch) -> None:
-    first = _run_pipeline(client, orch, key="det-1")
-    second = _run_pipeline(client, orch, key="det-2")
+    first = _run_pipeline(client, orch, key="det-1", seed=42)
+    second = _run_pipeline(client, orch, key="det-2", seed=42)
     with orch.db.session() as session:
         hashes = [
             asset.sha256

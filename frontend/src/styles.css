@@ -631,3 +631,9 @@ img.avatar { padding: 0; }
 .profile-avatar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .form-error { color: crimson; font-size: 12px; margin: 6px 0; }
 .form-note { color: var(--muted); font-size: 12px; margin: 6px 0; }
+
+/* --- M17: AI Assistant button, artist strip, workspace rows --- */
+.ai-assistant-btn { white-space: nowrap; }
+.artist-strip { display: flex; gap: 10px; flex-wrap: wrap; }
+.artist-tile { display: flex; align-items: center; gap: 10px; padding: 10px 14px; text-decoration: none; color: inherit; }
+.artist-tile:hover { border-color: var(--accent); }

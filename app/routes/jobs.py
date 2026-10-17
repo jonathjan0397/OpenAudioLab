@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import random
 import time
 from datetime import timedelta, timezone
 
@@ -60,6 +61,7 @@ def _detail(job: Job, poll_after: int) -> JobDetailResponse:
         lyrics_sha256=job.lyrics_sha256,
         lyrics_origin=job.lyrics_origin,
         client_reference=job.client_reference,
+        seed=(job.request_json or {}).get("seed"),
         error_code=job.error_code,
         error_message=job.error_message,
         created_at=job.created_at,
@@ -254,6 +256,9 @@ def create_job(
                 )
             job = _get_owned_job(session, existing.job_id, owner_id)
         else:
+            request_json = payload.model_dump(mode="json")
+            if payload.operation == "music.generate" and request_json.get("seed") is None:
+                request_json["seed"] = random.randint(1, 1_000_000_000)
             job = Job(
                 id=new_uuid(),
                 owner_id=owner_id,
@@ -261,7 +266,7 @@ def create_job(
                 model_id=payload.model_id,
                 model_revision=MODEL_RELEASES[payload.model_id].revision,
                 status="queued",
-                request_json=payload.model_dump(mode="json"),
+                request_json=request_json,
                 request_hash=request_hash,
                 lyrics=payload.lyrics,
                 lyrics_sha256=(
@@ -914,6 +919,13 @@ def my_tracks(
             ).scalars()
         )
         likes = _like_counts(session, [a.id for a in rows])
+        job_ids = [a.job_id for a in rows if a.job_id]
+        seeds: dict[str, int | None] = {}
+        if job_ids:
+            for jid, rjson in session.execute(
+                select(Job.id, Job.request_json).where(Job.id.in_(job_ids))
+            ).all():
+                seeds[jid] = (rjson or {}).get("seed")
     items = []
     for asset in rows:
         expired = asset.expires_at is not None and as_utc(asset.expires_at) <= now
@@ -928,6 +940,8 @@ def my_tracks(
                 "favorite": asset.id in favorite_ids,
                 "like_count": likes.get(asset.id, 0),
                 "duration_seconds": asset.duration_seconds,
+                "job_id": asset.job_id,
+                "seed": seeds.get(asset.job_id),
                 "created_at": asset.created_at.isoformat() if asset.created_at else None,
                 "expired": expired,
                 "url": f"/api/v1/artifacts/{asset.id}/content?token={token}",

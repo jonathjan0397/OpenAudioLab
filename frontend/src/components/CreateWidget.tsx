@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import ArtworkTile from "./ArtworkTile";
@@ -68,6 +68,21 @@ const QUALITY = [
   { value: 32, label: "Fine (slow)" },
 ];
 
+const EXAMPLES = [
+  "A dreamy indie pop song about chasing a brighter tomorrow",
+  "Rainy lo-fi beat for a late-night study session",
+  "Anthemic stadium rock about never giving up",
+  "Smooth jazz in a smoky café at midnight",
+  "Upbeat synthwave about driving through neon city lights",
+  "Folk ballad about coming home after a long winter",
+  "Funk groove about a dance-off on a Saturday night",
+  "Cinematic orchestral swell for a hero's last stand",
+  "Reggae sunset vibe about taking life slow",
+  "Hyperpop glitch about falling in love with a robot",
+  "Country twang about a dirt road and an old pickup",
+  "Ambient drone for deep focus and slow breathing",
+];
+
 export default function CreateWidget({
   variant = "card",
   showStyle = false,
@@ -84,7 +99,7 @@ export default function CreateWidget({
   const [draftOpen, setDraftOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [desc, setDesc] = useState("A dreamy indie pop song about chasing a brighter tomorrow");
+  const [desc, setDesc] = useState(() => EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)]);
   const [style, setStyle] = useState("");
   const [lyrics, setLyrics] = useState("");
   const [drafted, setDrafted] = useState(false);
@@ -119,6 +134,8 @@ export default function CreateWidget({
     mutationFn: () =>
       api.post<{ lyrics: string; style: string; title?: string }>("/api/v1/llm/draft", {
         prompt: desc,
+        duration_seconds: duration,
+        instrumental,
         lora_tags: (loras.data?.loras || []).flatMap((l) => [l.name.toLowerCase()]),
       }),
     onSuccess: (d) => {
@@ -132,15 +149,7 @@ export default function CreateWidget({
     onError: (e: Error) => setError(e.message),
   });
 
-  const draftedDesc = useRef("");
-  useEffect(() => {
-    if (!easy || desc.trim().length < 8 || desc === draftedDesc.current) return;
-    const t = setTimeout(() => {
-      draftedDesc.current = desc;
-      draft.mutate();
-    }, 900);
-    return () => clearTimeout(t);
-  }, [desc, easy]);
+  const canDraft = desc.trim().length >= 8;
 
   const generate = useMutation({
     mutationFn: async () => {
@@ -254,6 +263,15 @@ export default function CreateWidget({
               placeholder="Describe your song… e.g. rainy lo-fi study night"
             />
             {variant !== "wide" && <span className="char-count">{desc.length}/500</span>}
+            <button
+              type="button"
+              className="btn btn-ghost ai-assistant-btn"
+              disabled={!canDraft || draft.isPending}
+              title={canDraft ? "Write lyrics, style & title with AI" : "Describe your song first (8+ characters)"}
+              onClick={() => draft.mutate()}
+            >
+              {draft.isPending ? "✦ Writing…" : "✦ AI Assistant"}
+            </button>
             {variant === "wide" && (
               <button className="btn btn-primary btn-lg gen-wide" disabled={!!busy} onClick={() => generate.mutate()}>
                 {busy ? "✦ Generating…" : actionLabel} →

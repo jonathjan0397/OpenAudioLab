@@ -55,7 +55,7 @@ def admin_list_users(
     offset: int = Query(default=0, ge=0),
 ) -> JSONResponse:
     with request.app.state.db.session() as session:
-        stmt = select(User)
+        stmt = select(User).where(User.deleted_at.is_(None))
         if q:
             like = f"%{q.strip().lower()}%"
             stmt = stmt.where(or_(func.lower(User.email).like(like), func.lower(User.username).like(like)))
@@ -1160,3 +1160,158 @@ def admin_vast_instance_action(
                     rec.stopped_at = utcnow()
             session.commit()
     return JSONResponse({"ok": True, "action": payload.action})
+
+
+# --- M17: user delete, error logs, pricing -----------------------------------
+
+
+@router.delete("/admin/users/{user_id}", status_code=204)
+def admin_delete_user(user_id: str, request: Request) -> JSONResponse:
+    """Soft-delete a user (purged after 30 days by the autoscaler)."""
+    with request.app.state.db.session() as session:
+        user = session.get(User, user_id)
+        if user is None:
+            raise ApiError(404, "USER_NOT_FOUND", "User not found.")
+        user.deleted_at = utcnow()
+        user.state = "disabled"
+        session.commit()
+    return JSONResponse(status_code=204, content=None)
+
+
+class AdminErrorPatch(BaseModel):
+    resolved: bool
+
+
+@router.get("/admin/errors")
+def admin_errors(
+    request: Request,
+    limit: int = Query(default=10, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    component: str | None = Query(default=None, max_length=40),
+    resolved: bool | None = Query(default=None),
+) -> JSONResponse:
+    from ..models import ErrorLog
+
+    with request.app.state.db.session() as session:
+        stmt = select(ErrorLog)
+        if component:
+            stmt = stmt.where(ErrorLog.component == component)
+        if resolved is not None:
+            stmt = stmt.where(ErrorLog.resolved.is_(resolved))
+        total = session.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
+        rows = list(
+            session.execute(
+                select(ErrorLog).where(
+                    *( [ErrorLog.component == component] if component else [] ),
+                    *( [ErrorLog.resolved.is_(resolved)] if resolved is not None else [] ),
+                )
+                .order_by(ErrorLog.id.desc())
+                .limit(limit)
+                .offset(offset)
+            ).scalars()
+        )
+    return JSONResponse(
+        {
+            "items": [
+                {
+                    "id": e.id,
+                    "component": e.component,
+                    "route": e.route,
+                    "http_status": e.http_status,
+                    "error_code": e.error_code,
+                    "message": e.message[:300],
+                    "job_id": e.job_id,
+                    "worker_id": e.worker_id,
+                    "resolved": e.resolved,
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
+                }
+                for e in rows
+            ],
+            "total": total,
+        }
+    )
+
+
+@router.get("/admin/errors/{error_id}")
+def admin_error_detail(error_id: int, request: Request) -> JSONResponse:
+    from ..errorlog import agent_brief
+    from ..models import ErrorLog
+
+    with request.app.state.db.session() as session:
+        e = session.get(ErrorLog, error_id)
+        if e is None:
+            raise ApiError(404, "ERROR_NOT_FOUND", "Error log not found.")
+        return JSONResponse(
+            {
+                "id": e.id,
+                "component": e.component,
+                "route": e.route,
+                "http_status": e.http_status,
+                "error_code": e.error_code,
+                "message": e.message,
+                "traceback": e.traceback,
+                "context_json": e.context_json or {},
+                "job_id": e.job_id,
+                "worker_id": e.worker_id,
+                "user_id": e.user_id,
+                "fingerprint": e.fingerprint,
+                "resolved": e.resolved,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "agent_brief": agent_brief(e),
+            }
+        )
+
+
+@router.patch("/admin/errors/{error_id}")
+def admin_patch_error(error_id: int, payload: AdminErrorPatch, request: Request) -> JSONResponse:
+    from ..models import ErrorLog
+
+    with request.app.state.db.session() as session:
+        e = session.get(ErrorLog, error_id)
+        if e is None:
+            raise ApiError(404, "ERROR_NOT_FOUND", "Error log not found.")
+        e.resolved = payload.resolved
+        e.resolved_at = utcnow() if payload.resolved else None
+        session.commit()
+    return JSONResponse({"ok": True, "resolved": payload.resolved})
+
+
+class AdminPricingItem(BaseModel):
+    id: str = Field(min_length=1, max_length=40)
+    kind: str = Field(pattern=r"^(plan|pack)$")
+    name: str = Field(default="", max_length=120)
+    price_usd: int = Field(default=0, ge=0)
+    credits: int = Field(default=0, ge=0)
+    position: int = Field(default=0)
+
+
+class AdminPricingUpdate(BaseModel):
+    items: list[AdminPricingItem]
+
+
+@router.get("/admin/pricing")
+def admin_get_pricing(request: Request) -> JSONResponse:
+    from .billing import load_pricing
+
+    with request.app.state.db.session() as session:
+        return JSONResponse(load_pricing(session))
+
+
+@router.put("/admin/pricing")
+def admin_put_pricing(payload: AdminPricingUpdate, request: Request) -> JSONResponse:
+    from ..models import Pricing
+    from .billing import load_pricing
+
+    with request.app.state.db.session() as session:
+        for item in payload.items:
+            row = session.get(Pricing, item.id)
+            if row is None:
+                row = Pricing(id=item.id)
+                session.add(row)
+            row.kind = item.kind
+            row.name = item.name or row.name or item.id
+            row.price_usd = item.price_usd
+            row.credits = item.credits
+            row.position = item.position
+        session.commit()
+        return JSONResponse(load_pricing(session))

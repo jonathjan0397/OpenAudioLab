@@ -38,6 +38,17 @@ def _ask(request: Request, system: str, user: str, max_tokens: int) -> str:
     try:
         return _client(request).chat(system, user, max_tokens=max_tokens)
     except httpx.HTTPError as exc:
+        from ..errorlog import record_error
+
+        record_error(
+            request.app.state.db,
+            component="llm",
+            error_code="LLM_UNAVAILABLE",
+            message=str(exc)[:400],
+            exc=exc,
+            route="POST /llm",
+            http_status=502,
+        )
         raise ApiError(502, "LLM_UNAVAILABLE", "The lyrics assistant is unavailable.", {"detail": str(exc)[:200]})
 
 
@@ -64,20 +75,35 @@ def llm_style_prompt(payload: StylePromptRequest, request: Request, owner_id: st
 class DraftRequest(StrictModel):
     prompt: str = Field(min_length=3, max_length=2000)
     lora_tags: list[str] = Field(default_factory=list, max_length=20)
+    duration_seconds: int | None = Field(default=None, ge=10, le=600)
+    instrumental: bool = False
 
 
 @router.post("/llm/draft")
 def llm_draft(payload: DraftRequest, request: Request, owner_id: str = Depends(owner_from_request)) -> JSONResponse:
-    """Easy-mode draft: lyrics + style from a vibe, seeded with LoRA tag vocabulary."""
+    """Easy-mode draft: lyrics + style from a vibe, seeded with the engine tag vocabulary."""
     import json
 
-    from ..llm import DRAFT_SYSTEM
+    from sqlalchemy import select
 
-    vocab = ", ".join(payload.lora_tags[:20]) if payload.lora_tags else ""
+    from ..llm import DRAFT_SYSTEM
+    from ..models import Lora
+    from ..styles_data import ALL_CURATED_TAGS
+
+    with request.app.state.db.session() as session:
+        lora_tags = [
+            t
+            for l in session.execute(select(Lora).where(Lora.state == "active")).scalars()
+            for t in (l.tags_json or [])
+        ]
+    vocab = ", ".join(dict.fromkeys([*payload.lora_tags[:20], *lora_tags, *ALL_CURATED_TAGS]))
     user = f"Vibe or idea: {payload.prompt}"
-    if vocab:
-        user += f"\nPrefer style tags from this vocabulary when they fit: {vocab}."
-    text = _ask(request, DRAFT_SYSTEM, user, max_tokens=460)
+    if payload.duration_seconds:
+        user += f"\nTarget length: about {payload.duration_seconds} seconds."
+    if payload.instrumental:
+        user += " Instrumental (no lead vocals)."
+    user += f"\nAvailable style tags (prefer these): {vocab}."
+    text = _ask(request, DRAFT_SYSTEM, user, max_tokens=700)
     lyrics, style, title = text.strip(), "", ""
     try:
         start, end = text.index("{"), text.rindex("}") + 1
