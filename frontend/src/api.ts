@@ -36,5 +36,6 @@ export interface AuthUser {
   username: string;
   role: string;
   state: string;
+  plan: string;
   credits_balance: number;
 }

@@ -351,6 +351,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(300))
     role: Mapped[str] = mapped_column(String(20), default="user")
     state: Mapped[str] = mapped_column(String(20), default="active")
+    plan: Mapped[str] = mapped_column(String(20), default="free")
     credits_balance: Mapped[int] = mapped_column(Integer, default=1000)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

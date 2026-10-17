@@ -44,9 +44,11 @@ const MOODS = ["Hopeful", "Melancholic", "Energetic", "Calm", "Dreamy", "Dark"];
 export default function CreateWidget({
   variant = "card",
   showStyle = false,
+  mode = "create",
 }: {
   variant?: "card" | "wide" | "panel";
   showStyle?: boolean;
+  mode?: "create" | "remix" | "extend";
 }) {
   const player = usePlayer();
   const [desc, setDesc] = useState("A dreamy indie pop song about chasing a brighter tomorrow");
@@ -79,7 +81,8 @@ export default function CreateWidget({
           music_description: mood ? `${desc}, ${mood.toLowerCase()} mood` : desc,
           ...(lyrics ? { lyrics, lyrics_origin: "frontend_llm" } : {}),
           controls: mood ? { mood: mood.toLowerCase() } : {},
-          duration_seconds: duration,
+          duration_seconds: mode === "extend" ? Math.min(duration + 60, 600) : duration,
+          ...(mode === "remix" ? { seed: Math.floor(Math.random() * 1_000_000_000) } : {}),
           instrumental,
           ...(loraId ? { lora_id: loraId } : {}),
           outputs: ["mix_wav"],
@@ -123,6 +126,7 @@ export default function CreateWidget({
 
   const status = job.data?.status;
   const busy = generate.isPending || (status ? status !== "succeeded" && status !== "failed" : false);
+  const actionLabel = mode === "remix" ? "✦ Remix" : mode === "extend" ? "✦ Extend" : "✦ Generate";
   const result = (artifacts.data?.artifacts || []).filter((a) => a.mime.startsWith("audio/"))[0];
   const resultUrl = result ? urls.data?.[result.asset_id] : undefined;
 
@@ -140,7 +144,7 @@ export default function CreateWidget({
         {variant !== "wide" && <span className="char-count">{desc.length}/500</span>}
         {variant === "wide" && (
           <button className="btn btn-primary btn-lg gen-wide" disabled={!!busy} onClick={() => generate.mutate()}>
-            {busy ? "✦ Generating…" : "✦ Generate"} →
+            {busy ? "✦ Generating…" : actionLabel} →
           </button>
         )}
       </div>
@@ -201,7 +205,7 @@ export default function CreateWidget({
         </div>
         {variant !== "wide" && (
           <button className="btn btn-primary btn-lg" disabled={!!busy} onClick={() => generate.mutate()}>
-            {busy ? "✦ Generating…" : "✦ Generate"} →
+            {busy ? "✦ Generating…" : actionLabel} →
           </button>
         )}
       </div>

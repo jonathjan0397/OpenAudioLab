@@ -118,3 +118,41 @@ def test_spotlight_and_stats(client) -> None:
 
     stats = client.get("/api/v1/public/artists/nova-wells/stats").json()
     assert stats["tracks"] == 1 and stats["followers"] == 1 and stats["plays"] == 1
+
+
+def test_billing_plans_flow(client) -> None:
+    _seed_owner(client, "m13-bill@example.com", "m13bill")
+
+    plans = client.get("/api/v1/billing/plans")
+    assert plans.status_code == 200
+    body = plans.json()
+    assert [p["id"] for p in body["plans"]] == ["free", "pro", "premier"]
+    assert body["current"] == "free"
+    start = body["credits_balance"]
+
+    sub = client.post("/api/v1/billing/subscribe", json={"plan": "pro"})
+    assert sub.status_code == 200
+    assert sub.json()["plan"] == "pro"
+    assert sub.json()["credits_balance"] == start + 2500
+
+    top = client.post("/api/v1/billing/topup")
+    assert top.json()["credits_balance"] == start + 2500 + 500
+
+    unsub = client.post("/api/v1/billing/unsubscribe")
+    assert unsub.json()["plan"] == "free"
+
+    bad = client.post("/api/v1/billing/subscribe", json={"plan": "gold"})
+    assert bad.status_code == 422
+
+
+def test_admin_revenue_counts_plans(client) -> None:
+    from app.models import User
+
+    owner = _seed_owner(client, "m13-rev@example.com", "m13rev")
+    client.post("/api/v1/billing/subscribe", json={"plan": "premier"})
+    with client.app.state.db.session() as session:
+        session.get(User, owner[4:]).role = "admin"
+        session.commit()
+    billing = client.get("/api/v1/admin/billing").json()
+    assert billing["revenue"] >= 24
+    assert billing["subscribers"] >= 1

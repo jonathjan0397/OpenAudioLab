@@ -98,6 +98,7 @@ interface StorageInfo {
 interface Billing {
   revenue: number;
   revenue_delta_pct: number;
+  subscribers?: number;
   credits_used: number;
   credits_granted: number;
   credits_quota: number;
@@ -850,7 +851,7 @@ export default function AdminPage() {
                   ["Current Period Revenue", `$${billing.data.revenue.toLocaleString()}`],
                   ["Credits Used", `${billing.data.credits_used.toLocaleString()} / ${billing.data.credits_quota.toLocaleString()}`],
                   ["Credits Granted", billing.data.credits_granted.toLocaleString()],
-                  ["Plan", "Production"],
+                  ["Subscribers", String(billing.data.subscribers ?? 0)],
                 ].map(([k, v]) => (
                   <div key={k}>
                     <div className="label" style={{ color: "var(--muted)", fontSize: 12 }}>{k}</div>
@@ -863,7 +864,6 @@ export default function AdminPage() {
                   ["API usage (generation)", billing.data.api_usage_pct],
                   ["Custom training", billing.data.custom_training_pct],
                   ["Audio export", billing.data.export_pct ?? 0],
-                  ["Subscriptions", billing.data.subscriptions_pct],
                 ].map(([label, pct]) => (
                   <div key={label as string} style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}>
                     <span style={{ width: 170 }}>{label}</span>
@@ -873,7 +873,7 @@ export default function AdminPage() {
                 ))}
               </div>
               <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 14 }}>
-                Splits are derived from real job activity; subscriptions stay at 0 until paid plans land.
+                Revenue is the sum of active paid plans; job-activity splits come from real job counts.
               </p>
             </div>
             <div className="card" style={{ marginTop: 20 }}>

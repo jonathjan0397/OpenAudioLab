@@ -34,6 +34,12 @@ class TemplateSetting(BaseModel):
     value: str = Field(pattern=r"^[a-z-]+$")
 
 
+def _revenue(session) -> float:
+    from .billing import subscription_revenue
+
+    return subscription_revenue(session)
+
+
 @router.get("/admin/users")
 def admin_list_users(
     request: Request,
@@ -185,6 +191,7 @@ def admin_stats(request: Request) -> JSONResponse:
         credits_used = session.execute(
             select(sa_func.coalesce(sa_func.sum(-CreditEntry.delta), 0)).where(CreditEntry.delta < 0)
         ).scalar_one()
+        revenue = _revenue(session)
     gpu_utils = [
         w.gpu_util for w in workers
         if w.gpu_util is not None and w.last_heartbeat and (now - w.last_heartbeat).total_seconds() < 120
@@ -200,7 +207,7 @@ def admin_stats(request: Request) -> JSONResponse:
             "assets_total": assets_total,
             "storage_bytes": int(storage_bytes),
             "gpu_util_avg": round(sum(gpu_utils) / len(gpu_utils)) if gpu_utils else None,
-            "revenue": request.app.state.settings.admin_revenue,
+            "revenue": revenue,
             "credits_used": int(credits_used),
             "credits_quota": 1_000_000,
             "workers": [
@@ -494,9 +501,13 @@ def admin_billing(request: Request) -> JSONResponse:
             select(sa_func.coalesce(sa_func.sum(CreditEntry.delta), 0)).where(CreditEntry.delta > 0)
         ).scalar_one()
         users_total = session.execute(select(sa_func.count()).select_from(_User)).scalar_one()
+        subscribers = session.execute(
+            select(sa_func.count()).select_from(_User).where(_User.plan != "free")
+        ).scalar_one()
         op_rows = session.execute(
             select(_Job.operation, sa_func.count()).group_by(_Job.operation)
         ).all()
+        revenue = _revenue(session)
     op_counts = {op: int(n) for op, n in op_rows}
     ops_total = sum(op_counts.values())
     pct = lambda op: round(op_counts.get(op, 0) / ops_total * 100, 1) if ops_total else 0
@@ -506,8 +517,9 @@ def admin_billing(request: Request) -> JSONResponse:
     quota = 1_000_000
     return JSONResponse(
         {
-            "revenue": settings.admin_revenue,
+            "revenue": revenue,
             "revenue_delta_pct": 0,
+            "subscribers": int(subscribers),
             "credits_used": used,
             "credits_granted": granted_total,
             "credits_quota": quota,

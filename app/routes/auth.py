@@ -42,6 +42,7 @@ def user_payload(user: User) -> dict:
         "username": user.username,
         "role": user.role,
         "state": user.state,
+        "plan": user.plan,
         "credits_balance": user.credits_balance,
     }
 

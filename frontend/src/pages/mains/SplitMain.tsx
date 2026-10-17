@@ -78,12 +78,25 @@ export default function SplitMain() {
         <aside className="split-panel">
           <div className="panel-tabs">
             {["Create", "Remix", "Extend", "Tools"].map((t) => (
-              <button key={t} className={t === tab ? "active" : ""} disabled={t !== "Create"} onClick={() => setTab(t)}>
+              <button key={t} className={t === tab ? "active" : ""} onClick={() => setTab(t)}>
                 {t}
               </button>
             ))}
           </div>
-          <CreateWidget variant="panel" showStyle />
+          {tab === "Tools" ? (
+            <div className="card" style={{ padding: 16 }}>
+              <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12 }}>
+                Studio tools for your library, jobs, and account.
+              </p>
+              <div style={{ display: "grid", gap: 8 }}>
+                <a className="btn" href="/studio">♫ Studio — library & jobs →</a>
+                <a className="btn" href="/lab">⚗ Lab — engine & LLM playground →</a>
+                <a className="btn" href="/pricing">▥ Pricing & plans →</a>
+              </div>
+            </div>
+          ) : (
+            <CreateWidget variant="panel" showStyle mode={tab.toLowerCase() as "create" | "remix" | "extend"} />
+          )}
         </aside>
       </section>
 

@@ -26,6 +26,7 @@ from .routes import (
     seo_router,
     llm_router,
     features_router,
+    billing_router,
     uploads_router,
 )
 from .storage import build_storage
@@ -108,6 +109,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin_router, prefix=API_V1_PREFIX)
     app.include_router(llm_router, prefix=API_V1_PREFIX)
     app.include_router(features_router, prefix=API_V1_PREFIX)
+    app.include_router(billing_router, prefix=API_V1_PREFIX)
     app.include_router(seo_router)
     app.include_router(internal_router, prefix="/internal/v1")
     # /lab stopgap test harness (self-prefixed routes, HTTP Basic guarded).
