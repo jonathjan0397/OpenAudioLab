@@ -29,6 +29,8 @@ class EngineError(Exception):
 class HttpTransport(Protocol):
     def post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]: ...
 
+    def get_json(self, path: str) -> dict[str, Any] | None: ...
+
     def get_bytes(self, path_with_query: str) -> bytes: ...
 
 
@@ -43,6 +45,13 @@ class RequestsTransport:
 
     def post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         response = self.client.post(path, json=payload)
+        _raise_for_status(response.status_code, response)
+        return response.json()
+
+    def get_json(self, path: str) -> dict[str, Any] | None:
+        response = self.client.get(path)
+        if response.status_code == 404:
+            return None
         _raise_for_status(response.status_code, response)
         return response.json()
 
@@ -192,7 +201,10 @@ class AceStepAdapter:
     # -- trained adapter (milestone 5) -------------------------------------------
 
     def ensure_model(self) -> None:
-        """Initialize the DiT if the server lazy-loaded it away (needed before LoRA load)."""
+        """Initialize the DiT only when no model is loaded (re-init would OOM)."""
+        status = self.transport.get_json("/v1/lora/status")
+        if status is not None and status.get("code") == 200:
+            return
         response = self.transport.post_json("/v1/init", {})
         if response.get("code") != 200:
             raise EngineError("ENGINE_REJECTED", str(response.get("error", "model init failed")))

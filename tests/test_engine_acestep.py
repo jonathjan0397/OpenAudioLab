@@ -20,6 +20,14 @@ class FakeTransport:
             raise EngineError("ENGINE_REJECTED", f"HTTP {status}")
         return body
 
+    def get_json(self, path: str) -> dict | None:
+        self.got.append(path)
+        status, body = self.responses[0]
+        if status == 404:
+            self.responses.pop(0)
+            return None
+        return body if isinstance(body, dict) else None
+
     def get_bytes(self, path: str) -> bytes:
         self.got.append(path)
         status, body = self.responses.pop(0)
