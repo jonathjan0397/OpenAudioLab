@@ -71,16 +71,20 @@ export default function CreateWidget({
         const r = await api.post<{ text: string }>("/api/v1/llm/lyrics", { prompt: desc, mode: "write" });
         lyrics = r.text;
       }
-      return api.post<JobAccepted>("/api/v1/jobs", {
-        operation: "music.generate",
-        model_id: "ace-step-1.5",
-        music_description: mood ? `${desc}, ${mood.toLowerCase()} mood` : desc,
-        ...(lyrics ? { lyrics, lyrics_origin: "frontend_llm" } : {}),
-        duration_seconds: duration,
-        instrumental,
-        ...(loraId ? { lora_id: loraId } : {}),
-        outputs: ["mix_wav"],
-      });
+      return api.post<JobAccepted>(
+        "/api/v1/jobs",
+        {
+          operation: "music.generate",
+          model_id: "ace-step-1.5",
+          music_description: mood ? `${desc}, ${mood.toLowerCase()} mood` : desc,
+          ...(lyrics ? { lyrics, lyrics_origin: "frontend_llm" } : {}),
+          duration_seconds: duration,
+          instrumental,
+          ...(loraId ? { lora_id: loraId } : {}),
+          outputs: ["mix_wav"],
+        },
+        { "Idempotency-Key": crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}` }
+      );
     },
     onSuccess: (d) => {
       setError("");
