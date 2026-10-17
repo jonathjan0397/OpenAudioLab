@@ -145,3 +145,18 @@ def test_llm_routes_task_locked(client) -> None:
         assert response.json()["style_prompt"] == "[Verse]\nfake lyrics line"
     finally:
         del client.app.state.llm
+
+
+def test_public_track_detail(client) -> None:
+    owner = _seed_owner(client, "m12-trk@example.com", "m12track")
+    asset_id = _seed_asset(client, owner, "Shared Anthem")
+    response = client.get(f"/api/v1/public/tracks/{asset_id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["title"] == "Shared Anthem"
+    assert body["creator"] == "m12track"
+    assert body["url"].startswith(f"/api/v1/artifacts/{asset_id}/content?token=")
+
+    private = _seed_asset(client, owner, "Private Cut", shared=False)
+    assert client.get(f"/api/v1/public/tracks/{private}").status_code == 404
+    assert client.get("/api/v1/public/tracks/nope").status_code == 404

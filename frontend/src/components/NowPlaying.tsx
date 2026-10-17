@@ -2,6 +2,7 @@ import ArtworkTile from "./ArtworkTile";
 import Waveform from "./Waveform";
 import { usePlayer } from "./PlayerContext";
 import { exportArtifact } from "./social";
+import { toast } from "./Toast";
 import { PublicTrack, toPlayable } from "./tracks";
 import { fmtTime } from "./ui";
 
@@ -40,7 +41,18 @@ export default function NowPlaying({ tracks, big = false }: { tracks: PublicTrac
           </div>
           <div className="np-actions">
             <span className="np-like" title="Favorites">♥ {likeCount ?? 0}</span>
-            <button className="btn btn-ghost" disabled title="Coming soon">Share</button>
+            <button
+              className="btn btn-ghost"
+              onClick={() => {
+                const link = `${window.location.origin}/track/${track.asset_id}`;
+                navigator.clipboard
+                  ?.writeText(link)
+                  .then(() => toast("Link copied to clipboard"))
+                  .catch(() => toast(link));
+              }}
+            >
+              Share
+            </button>
           </div>
         </div>
         <div className="np-player">

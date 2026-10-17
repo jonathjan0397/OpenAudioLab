@@ -14,6 +14,7 @@ import ExplorePage from "./pages/Explore";
 import PricingPage from "./pages/Pricing";
 import SettingsPage from "./pages/Settings";
 import TrainingPage from "./pages/Training";
+import TrackPage from "./pages/Track";
 
 const TEMPLATES = ["open-canvas", "analog-soul", "neon-studio", "signal-lab"];
 
@@ -125,6 +126,7 @@ export default function App() {
         <Route path="/pricing" element={<PricingPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/training" element={<TrainingPage />} />
+        <Route path="/track/:assetId" element={<TrackPage />} />
       </Routes>
       <PlayerBar />
       <Toaster />

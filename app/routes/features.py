@@ -299,3 +299,42 @@ def revoke_api_key(key_id: str, request: Request, owner_id: str = Depends(owner_
             key.revoked_at = utcnow()
             session.commit()
         return JSONResponse(_key_dict(key))
+
+
+@router.get("/public/tracks/{asset_id}")
+def public_track(asset_id: str, request: Request) -> JSONResponse:
+    """Single shared track for the public /track page."""
+    from datetime import timedelta
+
+    from ..tokens import make_token
+
+    settings = request.app.state.settings
+    now = utcnow()
+    with request.app.state.db.session() as session:
+        asset = session.get(Asset, asset_id)
+        if (
+            asset is None
+            or asset.deleted_at is not None
+            or not asset.shared
+            or asset.role != "mix_wav"
+            or (asset.expires_at is not None and as_utc(asset.expires_at) <= now)
+        ):
+            raise ApiError(404, "NOT_FOUND", "Track not found.")
+        from .jobs import _creator_names, _like_counts
+
+        creator = _creator_names(session, {asset.owner_id}).get(asset.owner_id, "community")
+        likes = _like_counts(session, [asset.id]).get(asset.id, 0)
+        token = make_token(settings.secret_key, asset.id, now + timedelta(hours=24))
+        owner_job = session.get(Job, asset.job_id)
+    return JSONResponse(
+        {
+            "asset_id": asset.id,
+            "title": asset.title or "Untitled",
+            "duration_seconds": asset.duration_seconds,
+            "created_at": asset.created_at.isoformat() if asset.created_at else None,
+            "like_count": likes,
+            "creator": creator,
+            "operation": owner_job.operation if owner_job else None,
+            "url": f"/api/v1/artifacts/{asset.id}/content?token={token}",
+        }
+    )

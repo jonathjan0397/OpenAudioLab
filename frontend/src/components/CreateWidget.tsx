@@ -4,6 +4,7 @@ import { api } from "../api";
 import ArtworkTile from "./ArtworkTile";
 import Waveform from "./Waveform";
 import { usePlayer } from "./PlayerContext";
+import { exportArtifact } from "./social";
 import { fmtTime } from "./ui";
 
 interface JobAccepted {
@@ -38,6 +39,8 @@ const DURATIONS = [
   { value: 240, label: "~4 minutes" },
 ];
 
+const MOODS = ["Hopeful", "Melancholic", "Energetic", "Calm", "Dreamy", "Dark"];
+
 export default function CreateWidget({
   variant = "card",
   showStyle = false,
@@ -49,6 +52,7 @@ export default function CreateWidget({
   const [desc, setDesc] = useState("A dreamy indie pop song about chasing a brighter tomorrow");
   const [duration, setDuration] = useState(60);
   const [instrumental, setInstrumental] = useState(false);
+  const [mood, setMood] = useState("Hopeful");
   const [loraId, setLoraId] = useState("");
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -65,7 +69,7 @@ export default function CreateWidget({
       api.post<JobAccepted>("/api/v1/jobs", {
         operation: "music.generate",
         model_id: "ace-step-1.5",
-        music_description: desc,
+        music_description: mood ? `${desc}, ${mood.toLowerCase()} mood` : desc,
         duration_seconds: duration,
         instrumental,
         ...(loraId ? { lora_id: loraId } : {}),
@@ -148,9 +152,11 @@ export default function CreateWidget({
         <div className="field ctrl">
           <span className="ctrl-icon" aria-hidden>☺</span>
           <div className="field">
-            <label title="Mood presets coming soon">Mood</label>
-            <select disabled title="Coming soon">
-              <option>Hopeful</option>
+            <label>Mood</label>
+            <select value={mood} onChange={(e) => setMood(e.target.value)}>
+              {MOODS.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
             </select>
           </div>
         </div>
@@ -238,8 +244,8 @@ export default function CreateWidget({
           </div>
           <div className="actions">
             <a className="btn" href={resultUrl} download>↓ WAV</a>
-            <button className="btn" disabled title="Coming soon">MP3</button>
-            <button className="btn" disabled title="Coming soon">Stems</button>
+            <button className="btn" onClick={() => exportArtifact(result.asset_id, "mp3")}>♫ MP3</button>
+            <button className="btn" onClick={() => exportArtifact(result.asset_id, "stems")}>≋ Stems</button>
           </div>
         </div>
       )}
