@@ -177,8 +177,11 @@ async def billing_webhook(request: Request) -> JSONResponse:
         )
     except Exception as exc:
         raise ApiError(400, "WEBHOOK_SIGNATURE", f"Signature verification failed: {exc}")
-    event_type = event["type"]
-    obj = event["data"]["object"]
+    import json
+
+    raw = json.loads(body)
+    event_type = raw["type"]
+    obj = raw["data"]["object"]
     from ..models import User as _User
 
     if event_type == "checkout.session.completed":
