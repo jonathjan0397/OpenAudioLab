@@ -487,8 +487,15 @@ export default function AdminPage() {
                     <span className="spacer" />
                     <a className="link" href="/admin/workers">Manage →</a>
                   </div>
-                  {(workers.data?.workers || []).map(workerRow)}
-                  {(workers.data?.workers || []).length === 0 && <p style={{ color: "var(--muted)" }}>No workers registered.</p>}
+                  {(workers.data?.workers || []).filter((w) => w.status !== "stale").map(workerRow)}
+                  {(workers.data?.workers || []).filter((w) => w.status !== "stale").length === 0 && (
+                    <p style={{ color: "var(--muted)" }}>No live workers registered.</p>
+                  )}
+                  {(workers.data?.workers || []).filter((w) => w.status === "stale").length > 0 && (
+                    <p style={{ color: "var(--muted)", fontSize: 12 }}>
+                      {(workers.data?.workers || []).filter((w) => w.status === "stale").length} stale historical worker(s).
+                    </p>
+                  )}
                 </div>
               </aside>
             </div>

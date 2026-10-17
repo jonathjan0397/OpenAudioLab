@@ -171,7 +171,10 @@ def admin_stats(request: Request) -> JSONResponse:
         credits_used = session.execute(
             select(sa_func.coalesce(sa_func.sum(-CreditEntry.delta), 0)).where(CreditEntry.delta < 0)
         ).scalar_one()
-    gpu_utils = [w.gpu_util for w in workers if w.gpu_util is not None]
+    gpu_utils = [
+        w.gpu_util for w in workers
+        if w.gpu_util is not None and w.last_heartbeat and (now - w.last_heartbeat).total_seconds() < 120
+    ]
     return JSONResponse(
         {
             "users_total": users_total,
