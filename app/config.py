@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     ffmpeg_bin: str = "ffmpeg"
     ffprobe_bin: str = "ffprobe"
     demucs_python: str = ""
-    demucs_model: str = "htdemucs"
+    demucs_model: str = "htdemucs_6s"
     demucs_device: str = "cpu"
     separator_timeout_seconds: float = 900.0
 

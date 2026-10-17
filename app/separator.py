@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Protocol
 
 STEM_CATEGORIES = ("drums", "bass", "other", "vocals")
+# htdemucs_6s adds guitar/piano on top of the core four.
+EXTENDED_STEM_CATEGORIES = STEM_CATEGORIES + ("guitar", "piano")
 
 
 class SeparatorUnavailable(Exception):
@@ -69,11 +71,13 @@ class DemucsSeparator:
                 raise RuntimeError(f"demucs failed: {detail[-1] if detail else 'no output'}")
             track_dir = outdir / self.model / "source"
             stems: dict[str, bytes] = {}
-            for category in STEM_CATEGORIES:
+            for category in EXTENDED_STEM_CATEGORIES:
                 path = track_dir / f"{category}.wav"
-                if not path.is_file():
-                    raise RuntimeError(f"demucs produced no {category} stem.")
-                stems[category] = path.read_bytes()
+                if path.is_file():
+                    stems[category] = path.read_bytes()
+            missing = [c for c in STEM_CATEGORIES if c not in stems]
+            if missing:
+                raise RuntimeError(f"demucs produced no {'/'.join(missing)} stem(s).")
             return stems
 
 
