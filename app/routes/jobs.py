@@ -163,6 +163,33 @@ def _idempotency_key(request: Request, max_length: int) -> str:
     return key
 
 
+def _auto_lora_match(session: Session, payload: GenerateJobRequest) -> dict | None:
+    """M14c hybrid auto-apply: tag-overlap match against active auto-apply LoRAs."""
+    import re
+
+    from ..models import Lora
+
+    controls = dict(payload.controls or {})
+    text = f"{controls.get('mood') or ''} {payload.music_description or ''}"
+    words = {re.sub(r"[^a-z0-9&-]", "", w.lower()) for w in re.split(r"[,\s]+", text)}
+    words.discard("")
+    if not words:
+        return None
+    best, best_score, best_tags = None, 0, []
+    for lora in session.execute(
+        select(Lora).where(Lora.state == "active", Lora.auto_apply.is_(True))
+    ).scalars():
+        tags = {str(t).lower().strip() for t in (lora.tags_json or [])}
+        matched = sorted(words & tags)
+        if len(matched) > best_score or (
+            matched and best is not None and len(matched) == best_score and lora.priority > best.priority
+        ):
+            best, best_score, best_tags = lora, len(matched), matched
+    if best is None:
+        return None
+    return {"lora_id": best.id, "lora_match": {"mode": "auto", "name": best.name, "tags": best_tags}}
+
+
 @router.post("/jobs", status_code=202, response_model=JobAcceptedResponse)
 def create_job(
     payload: GenerateJobRequest,
@@ -246,6 +273,10 @@ def create_job(
                 client_reference=payload.client_reference,
                 idempotency_key=key,
             )
+            if payload.lora_id is None and payload.operation == "music.generate":
+                auto = _auto_lora_match(session, payload)
+                if auto is not None:
+                    job.request_json = {**job.request_json, **auto}
             record = IdempotencyRecord(
                 owner_id=owner_id,
                 route=CREATE_ROUTE,
@@ -262,7 +293,7 @@ def create_job(
                 user = session.get(User, owner_id[4:])
                 if user is None:
                     raise ApiError(401, "USER_NOT_FOUND", "Account not found for session owner.")
-                cost = settings.credit_cost_per_generation
+                cost = settings.credit_cost_per_generation * max(1, min(4, int((payload.controls or {}).get("variations") or 1)))
                 if user.credits_balance < cost:
                     raise ApiError(
                         402,

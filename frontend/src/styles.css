@@ -548,3 +548,20 @@ img.avatar { padding: 0; }
   .np-export { width: 100%; }
   .admin-strip { flex-wrap: wrap; }
 }
+
+/* ---------- M14c: create widget easy mode + chips ---------- */
+.create-mode-row { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+.create-draft-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.create-review { display: grid; gap: 12px; margin-top: 14px; }
+.style-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+.chip {
+  border: 1px dashed var(--border); background: transparent; border-radius: 999px;
+  padding: 4px 12px; font-size: 12px; color: var(--muted); cursor: pointer;
+}
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+.chip-lora { border-style: solid; border-color: var(--accent); color: var(--accent); }
+.chip-shuffle { border-style: solid; }
+.chip-link { border-style: solid; text-decoration: none; }
+.create-advanced { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.cheat-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+.cheat-tags .btn { font-size: 12px; padding: 5px 12px; }

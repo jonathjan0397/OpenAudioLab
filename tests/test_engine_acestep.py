@@ -75,7 +75,7 @@ def test_submit_and_poll_lifecycle() -> None:
     assert state == "pending"
     state, result = adapter.poll("t-1")
     assert state == "succeeded"
-    assert result["file"] == "/v1/audio?path=%2Ftmp%2Fa.wav"
+    assert result[0]["file"] == "/v1/audio?path=%2Ftmp%2Fa.wav"
     state, _ = adapter.poll("t-1")
     assert state == "failed"
 

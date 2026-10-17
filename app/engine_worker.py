@@ -276,6 +276,7 @@ class EngineWorker:
             instrumental=bool(request.get("instrumental")),
             seed=request.get("seed"),
             duration_seconds=request.get("duration_seconds"),
+            controls=request.get("controls"),
         )
 
     def _draining(self) -> bool:
@@ -420,19 +421,23 @@ class EngineWorker:
                 return True
             time.sleep(poll_interval)
 
-        file_url = (result or {}).get("file")
-        if not file_url:
+        results = result or []
+        file_urls = [r.get("file") for r in results if r.get("file")]
+        if not file_urls:
             fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token, "ENGINE_NO_AUDIO", "Upstream returned no audio file.")
             return True
         try:
-            body = self.adapter.download(file_url)
-            rate, channels, duration = validate_wav(body, self.settings.max_artifact_bytes)
+            artifacts: list[tuple[str, bytes, tuple | None]] = []
+            for file_url in file_urls:
+                body = self.adapter.download(file_url)
+                rate, channels, duration = validate_wav(body, self.settings.max_artifact_bytes)
+                artifacts.append(("mix_wav", body, (rate, channels, duration)))
         except (EngineError, InvalidArtifact) as exc:
             code = getattr(exc, "code", "ARTIFACT_INVALID")
             fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token, code, str(exc))
             return True
 
-        engine_version = f"ace-step-1.5/{(result or {}).get('dit_model', self.adapter.model)}"
+        engine_version = f"ace-step-1.5/{(results[0] or {}).get('dit_model', self.adapter.model)}"
         complete_attempt(
             self.db,
             self.storage,
@@ -440,8 +445,7 @@ class EngineWorker:
             claimed_job,
             attempt_id,
             lease_token,
-            ("mix_wav", body),
-            audio_meta=(rate, channels, duration),
+            artifacts,
             synthetic=False,
             engine_version=engine_version,
         )

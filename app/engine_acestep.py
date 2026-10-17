@@ -115,7 +115,9 @@ class AceStepAdapter:
         instrumental: bool,
         seed: int | None,
         duration_seconds: int | None,
+        controls: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        controls = controls or {}
         payload: dict[str, Any] = {
             "prompt": music_description,
             "lyrics": "" if instrumental or lyrics is None else lyrics,
@@ -126,6 +128,21 @@ class AceStepAdapter:
             "use_format": False,
             "model": self.model,
         }
+        # M14c advanced controls (HTTP names per release_task_models).
+        if controls.get("bpm"):
+            payload["bpm"] = int(controls["bpm"])
+        if controls.get("key_scale"):
+            payload["key_scale"] = str(controls["key_scale"])
+        if controls.get("vocal_language"):
+            payload["vocal_language"] = str(controls["vocal_language"])
+        if controls.get("inference_steps"):
+            payload["inference_steps"] = int(controls["inference_steps"])
+        if controls.get("guidance_scale"):
+            payload["guidance_scale"] = float(controls["guidance_scale"])
+        if controls.get("shift"):
+            payload["shift"] = float(controls["shift"])
+        if controls.get("variations"):
+            payload["batch_size"] = max(1, min(4, int(controls["variations"])))
         if seed is not None:
             payload["use_random_seed"] = False
             payload["seed"] = seed
@@ -151,8 +168,8 @@ class AceStepAdapter:
             raise EngineError("ENGINE_ERROR", "Upstream submit returned no task_id.")
         return SubmitResult(task_id=task_id)
 
-    def poll(self, task_id: str) -> tuple[str, dict[str, Any] | None]:
-        """Return (pending|succeeded|failed, parsed result or None)."""
+    def poll(self, task_id: str) -> tuple[str, list[dict[str, Any]] | None]:
+        """Return (pending|succeeded|failed, parsed result entries or None)."""
         response = self.transport.post_json("/query_result", {"task_id_list": [task_id]})
         entries = response.get("data") or []
         if not entries:
@@ -162,8 +179,8 @@ class AceStepAdapter:
         if status == 1:
             raw = entry.get("result")
             parsed = json.loads(raw) if isinstance(raw, str) else raw
-            first = parsed[0] if isinstance(parsed, list) and parsed else parsed
-            return "succeeded", first
+            items = parsed if isinstance(parsed, list) else [parsed]
+            return "succeeded", [i for i in items if isinstance(i, dict)]
         if status == 2:
             return "failed", None
         return "pending", None

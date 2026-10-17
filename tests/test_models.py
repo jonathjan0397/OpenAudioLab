@@ -15,7 +15,7 @@ def test_model_detail_has_revision_and_controls(client) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["revision"]
-    assert body["supported_controls"] == ["mood"]
+    assert "mood" in body["supported_controls"] and "variations" in body["supported_controls"]
     assert set(body["output_options"]) == {"mix_wav", "mix_mp3", "stems_wav", "stems_zip"}
 
 

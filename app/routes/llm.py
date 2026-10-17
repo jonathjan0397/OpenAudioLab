@@ -59,3 +59,31 @@ def llm_lyrics(payload: LyricsRequest, request: Request, owner_id: str = Depends
 def llm_style_prompt(payload: StylePromptRequest, request: Request, owner_id: str = Depends(owner_from_request)) -> JSONResponse:
     text = _ask(request, STYLE_SYSTEM, payload.description, max_tokens=60)
     return JSONResponse({"style_prompt": text})
+
+
+class DraftRequest(StrictModel):
+    prompt: str = Field(min_length=3, max_length=2000)
+    lora_tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+@router.post("/llm/draft")
+def llm_draft(payload: DraftRequest, request: Request, owner_id: str = Depends(owner_from_request)) -> JSONResponse:
+    """Easy-mode draft: lyrics + style from a vibe, seeded with LoRA tag vocabulary."""
+    import json
+
+    from ..llm import DRAFT_SYSTEM
+
+    vocab = ", ".join(payload.lora_tags[:20]) if payload.lora_tags else ""
+    user = f"Vibe or idea: {payload.prompt}"
+    if vocab:
+        user += f"\nPrefer style tags from this vocabulary when they fit: {vocab}."
+    text = _ask(request, DRAFT_SYSTEM, user, max_tokens=460)
+    lyrics, style = text.strip(), ""
+    try:
+        start, end = text.index("{"), text.rindex("}") + 1
+        parsed = json.loads(text[start:end])
+        lyrics = str(parsed.get("lyrics", "")).strip() or text.strip()
+        style = str(parsed.get("style", "")).strip()
+    except (ValueError, json.JSONDecodeError):
+        pass
+    return JSONResponse({"lyrics": lyrics, "style": style})

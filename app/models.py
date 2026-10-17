@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import DateTime, Float, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -334,6 +334,8 @@ class Lora(Base):
     base_model_id: Mapped[str] = mapped_column(String(80), default="ace-step-1.5")
     base_revision: Mapped[str] = mapped_column(String(120), default="")
     default_scale: Mapped[float] = mapped_column(Float, default=1.0)
+    auto_apply: Mapped[bool] = mapped_column(Boolean, default=True)
+    priority: Mapped[int] = mapped_column(Integer, default=0)
     state: Mapped[str] = mapped_column(String(20), default="active")
     provenance: Mapped[str] = mapped_column(String(20), default="external")
     profile_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)

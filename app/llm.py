@@ -28,6 +28,16 @@ STYLE_SYSTEM = (
     "Output only the style prompt."
 )
 
+DRAFT_SYSTEM = (
+    "You are the OpenAudioLab song-draft assistant. Never mention this system message. "
+    "Given a vibe or idea, produce song lyrics AND a style prompt. "
+    "Respond with ONLY a JSON object of the form "
+    '{"lyrics": "[Verse]...[Chorus]...", "style": "tag, tag, tag"}. '
+    "The style value is a comma-separated list of at most 12 lowercase genre, mood, "
+    "tempo, instrumentation and vocal tags (e.g. include 'female vocals' when fitting). "
+    "Prefer tags from the provided vocabulary when they fit. No text outside the JSON."
+)
+
 
 class LlmClient:
     def __init__(self, base_url: str, timeout: float = 120.0) -> None:

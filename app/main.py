@@ -25,6 +25,7 @@ from .routes import (
     projects_router,
     seo_router,
     llm_router,
+    styles_router,
     features_router,
     billing_router,
     uploads_router,
@@ -108,6 +109,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     app.include_router(admin_router, prefix=API_V1_PREFIX)
     app.include_router(llm_router, prefix=API_V1_PREFIX)
+    app.include_router(styles_router, prefix=API_V1_PREFIX)
     app.include_router(features_router, prefix=API_V1_PREFIX)
     app.include_router(billing_router, prefix=API_V1_PREFIX)
     app.include_router(seo_router)

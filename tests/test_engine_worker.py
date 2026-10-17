@@ -47,7 +47,7 @@ def _status(db, job_id: str) -> str:
 
 
 def test_engine_worker_happy_path(client, orch) -> None:
-    adapter = FakeAdapter([SubmitResult(task_id="fake-task"), ("succeeded", {"file": "/v1/audio?path=x", "dit_model": "acestep-v15-turbo"})])
+    adapter = FakeAdapter([SubmitResult(task_id="fake-task"), ("succeeded", [{"file": "/v1/audio?path=x", "dit_model": "acestep-v15-turbo"}])])
     worker = _worker(orch, adapter)
     response = submit(client, key="eng-1")
     job_id = response.json()["job_id"]

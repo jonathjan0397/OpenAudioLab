@@ -15,6 +15,7 @@ import PricingPage from "./pages/Pricing";
 import SettingsPage from "./pages/Settings";
 import TrainingPage from "./pages/Training";
 import TrackPage from "./pages/Track";
+import StylesPage from "./pages/Styles";
 
 const TEMPLATES = ["open-canvas", "analog-soul", "neon-studio", "signal-lab"];
 
@@ -58,6 +59,7 @@ export default function App() {
           <NavLink to="/artists">Artists</NavLink>
           <NavLink to="/studio">Studio</NavLink>
           <NavLink to="/pricing">Pricing</NavLink>
+          <NavLink to="/styles">Styles</NavLink>
           <NavLink to="/admin">Admin</NavLink>
         </nav>
         <span className="spacer" />
@@ -124,6 +126,7 @@ export default function App() {
         <Route path="/artists/:slug" element={<ArtistPage />} />
         <Route path="/explore" element={<ExplorePage />} />
         <Route path="/pricing" element={<PricingPage />} />
+        <Route path="/styles" element={<StylesPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/training" element={<TrainingPage />} />
         <Route path="/track/:assetId" element={<TrackPage />} />

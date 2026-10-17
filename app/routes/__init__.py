@@ -11,6 +11,7 @@ from .auth import router as auth_router
 from .admin import router as admin_router
 from .seo import router as seo_router
 from .llm import router as llm_router
+from .styles import router as styles_router
 from .features import router as features_router
 from .billing import router as billing_router
 
@@ -28,6 +29,7 @@ __all__ = [
     "admin_router",
     "seo_router",
     "llm_router",
+    "styles_router",
     "features_router",
     "billing_router",
 ]

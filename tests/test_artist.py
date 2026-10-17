@@ -74,7 +74,7 @@ class FakeGenAdapter:
         return SimpleNamespace(task_id=f"t{self.submitted}")
 
     def poll(self, task_id):
-        return "succeeded", {"file": "/v1/audio?path=x"}
+        return "succeeded", [{"file": "/v1/audio?path=x"}]
 
     def download(self, file_url):
         return generate_fixture_wav(str(self.submitted), 1, 1)

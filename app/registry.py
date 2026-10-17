@@ -38,7 +38,10 @@ MODEL_RELEASES: dict[str, ModelRelease] = {
         enabled=True,
         commercial_policy="unrestricted",
         license_status="verified",
-        supported_controls=("mood",),
+        supported_controls=(
+            "mood", "gender", "bpm", "key_scale", "vocal_language",
+            "inference_steps", "guidance_scale", "shift", "variations",
+        ),
         min_duration_seconds=10,
         max_duration_seconds=600,
         capabilities={

@@ -392,7 +392,7 @@ class TrainingWorker:
             if time.monotonic() > deadline:
                 raise EngineError("ENGINE_TIMEOUT", "Evaluation generation timed out.")
             time.sleep(self.settings.engine_poll_seconds)
-        file_url = (result or {}).get("file")
+        file_url = (result or [{}])[0].get("file")
         if not file_url:
             raise EngineError("ENGINE_NO_AUDIO", "Evaluation generation returned no audio.")
         body = self.gen_adapter.download(file_url)

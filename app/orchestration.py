@@ -264,7 +264,7 @@ def complete_attempt(
     Returns ``succeeded``, ``discarded`` (cancellation won) or ``stale``
     (lease already lost; the result may not publish).
     """
-    role, body = artifact
+    artifacts = artifact if isinstance(artifact, list) else [(*artifact, audio_meta)]
     with db.session() as session:
         if not _finish_attempt(session, attempt_id, lease_token, "succeeded"):
             append_event(session, job_id, "discarded", "stale-lease", message="Lease lost before completion.", attempt_id=attempt_id)
@@ -298,34 +298,39 @@ def complete_attempt(
             return "discarded"
         job = get_job_by_id(session, job_id)
         expires_at = utcnow() + timedelta(days=settings.asset_retention_days)
-        role_name, data = role, body
-        key = f"owners/{job.owner_id}/jobs/{job.id}/{attempt_id}/{role_name}.wav"
-        checksum = storage.put(key, data)
-        try:
-            from .peaks import peaks_json
+        controls = dict(job.request_json.get("controls") or {})
+        mood = controls.get("mood")
+        gender = {"male": "male vocals", "female": "female vocals"}.get(controls.get("gender"))
+        tags = [t for t in [mood, gender] if t]
+        for index, (role_name, data, meta) in enumerate(artifacts):
+            suffix = "" if index == 0 else f"-{index + 1}"
+            key = f"owners/{job.owner_id}/jobs/{job.id}/{attempt_id}/{role_name}{suffix}.wav"
+            checksum = storage.put(key, data)
+            try:
+                from .peaks import peaks_json
 
-            storage.put(key[: -len(".wav")] + ".json", peaks_json(data))
-        except Exception:  # waveform peaks are best-effort decoration
-            pass
-        mood = dict(job.request_json.get("controls") or {}).get("mood")
-        asset = Asset(
-            job_id=job.id,
-            owner_id=job.owner_id,
-            attempt_id=attempt_id,
-            storage_key=key,
-            role=role_name,
-            mime="audio/wav",
-            bytes=len(data),
-            sha256=checksum,
-            synthetic=synthetic,
-            tags_json=[mood] if mood else [],
-            finalized_at=utcnow(),
-            expires_at=expires_at,
-            sample_rate=audio_meta[0] if audio_meta else None,
-            channels=audio_meta[1] if audio_meta else None,
-            duration_seconds=round(audio_meta[2], 3) if audio_meta else None,
-        )
-        session.add(asset)
+                storage.put(key[: -len(".wav")] + ".json", peaks_json(data))
+            except Exception:  # waveform peaks are best-effort decoration
+                pass
+            asset = Asset(
+                job_id=job.id,
+                owner_id=job.owner_id,
+                attempt_id=attempt_id,
+                storage_key=key,
+                role=role_name,
+                mime="audio/wav",
+                bytes=len(data),
+                sha256=checksum,
+                synthetic=synthetic,
+                tags_json=list(tags),
+                title=f"Take {index + 1}" if len(artifacts) > 1 else None,
+                finalized_at=utcnow(),
+                expires_at=expires_at,
+                sample_rate=meta[0] if meta else None,
+                channels=meta[1] if meta else None,
+                duration_seconds=round(meta[2], 3) if meta else None,
+            )
+            session.add(asset)
         job.assets_expired_at = expires_at
         append_event(session, job.id, "succeeded", "succeeded", stage="done", progress=1.0, attempt_id=attempt_id)
         session.commit()
