@@ -14,10 +14,14 @@ export default function StylesPage() {
   });
 
   const copy = (tag: string) => {
-    navigator.clipboard?.writeText(tag).then(
-      () => toast(`Copied "${tag}" — paste into the Style field`),
-      () => toast(tag)
-    );
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(tag).then(
+        () => toast(`Copied "${tag}" — paste into the Style field`),
+        () => toast(tag)
+      );
+    } else {
+      toast(tag);
+    }
   };
 
   return (
