@@ -118,8 +118,6 @@ def export_artifact(
     owner_id: str = Depends(owner_from_request),
 ) -> JSONResponse:
     settings = request.app.state.settings
-    if payload.format == "stems":
-        raise ApiError(501, "COMING_SOON", "Stem separation is coming soon.")
     with request.app.state.db.session() as session:
         asset = session.get(Asset, asset_id)
         if asset is None or asset.deleted_at is not None:
@@ -136,9 +134,10 @@ def export_artifact(
         )
         session.add(version)
         session.flush()
+        outputs = ["mix_mp3"] if payload.format == "mp3" else ["stems_wav"]
         request_json = {
             "source_version_id": version.id,
-            "outputs": ["mix_mp3"],
+            "outputs": outputs,
             "mp3": {"bitrate_kbps": 320},
             "stem_set": "available",
         }
@@ -150,7 +149,7 @@ def export_artifact(
             model_revision="mp3-1",
             status="queued",
             request_json=request_json,
-            request_hash=f"asset-export:{asset.id}:mp3",
+            request_hash=f"asset-export:{asset.id}:{payload.format}",
             idempotency_key=new_uuid(),
         )
         session.add(job)
@@ -418,3 +417,40 @@ def public_artist_stats(slug: str, request: Request) -> JSONResponse:
     with request.app.state.db.session() as session:
         profile = _profile_by_slug(session, slug)
         return JSONResponse(_artist_stats(session, profile))
+
+
+@router.get("/artifacts/{asset_id}/stems")
+def artifact_stems(asset_id: str, request: Request, owner_id: str = Depends(owner_from_request)) -> JSONResponse:
+    """List separated stem assets derived from a source asset."""
+    from datetime import timedelta
+
+    from ..tokens import make_token
+
+    settings = request.app.state.settings
+    now = utcnow()
+    with request.app.state.db.session() as session:
+        source = session.get(Asset, asset_id)
+        if source is None or source.deleted_at is not None:
+            raise ApiError(404, "NOT_FOUND", "Asset not found.")
+        if source.owner_id != owner_id:
+            raise ApiError(403, "FORBIDDEN", "Not your asset.")
+        stems = list(
+            session.execute(
+                select(Asset)
+                .where(Asset.stem_source == asset_id, Asset.deleted_at.is_(None))
+                .order_by(Asset.stem_category)
+            ).scalars()
+        )
+        items = []
+        for stem in stems:
+            token = make_token(settings.secret_key, stem.id, now + timedelta(hours=24))
+            items.append(
+                {
+                    "category": stem.stem_category,
+                    "asset_id": stem.id,
+                    "bytes": stem.bytes,
+                    "created_at": stem.created_at.isoformat() if stem.created_at else None,
+                    "url": f"/api/v1/artifacts/{stem.id}/content?token={token}",
+                }
+            )
+    return JSONResponse({"asset_id": asset_id, "stems": items})

@@ -156,3 +156,12 @@ def test_admin_revenue_counts_plans(client) -> None:
     billing = client.get("/api/v1/admin/billing").json()
     assert billing["revenue"] >= 24
     assert billing["subscribers"] >= 1
+
+
+def test_stems_listing(client) -> None:
+    owner = _seed_owner(client, "m13-stems@example.com", "m13stems")
+    asset_id = _seed_asset(client, owner, "Stem Source")
+    response = client.get(f"/api/v1/artifacts/{asset_id}/stems")
+    assert response.status_code == 200
+    assert response.json()["stems"] == []
+    assert client.get("/api/v1/artifacts/nonexistent/stems").status_code == 404

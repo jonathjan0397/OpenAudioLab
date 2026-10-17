@@ -64,7 +64,7 @@ export async function exportArtifact(assetId: string | null, format: "mp3" | "st
   });
   const body = await res.json();
   if (res.status === 401) toast("Sign in to export");
-  else if (res.status === 501) toast("Stem separation is coming soon");
-  else if (res.ok) toast(`${format === "mp3" ? "MP3" : "Stems"} export queued — check Studio › Recent`);
+  else if (res.ok)
+    toast(format === "mp3" ? "MP3 export queued — check Studio › Recent" : "Stem separation queued (~1 min) — check back in ≋ Stems");
   else toast(body?.error?.message || "Export failed");
 }

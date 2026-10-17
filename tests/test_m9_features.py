@@ -75,8 +75,8 @@ def test_export_artifact(client) -> None:
     asset_id = _seed_asset(client, owner, "Exportable")
 
     response = client.post(f"/api/v1/artifacts/{asset_id}/export", json={"format": "stems"})
-    assert response.status_code == 501
-    assert response.json()["error"]["code"] == "COMING_SOON"
+    assert response.status_code == 202  # M13: stems now queue a real export job
+    assert response.json()["format"] == "stems"
 
     response = client.post(f"/api/v1/artifacts/{asset_id}/export", json={"format": "mp3"})
     assert response.status_code == 202

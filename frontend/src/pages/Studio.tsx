@@ -68,6 +68,12 @@ export default function StudioPage() {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [filter, setFilter] = useState("all");
+  const [stemsFor, setStemsFor] = useState<string | null>(null);
+  const stemsQuery = useQuery<{ asset_id: string; stems: { category: string | null; asset_id: string; url: string }[] }>({
+    queryKey: ["stems", stemsFor],
+    queryFn: () => api.get(`/api/v1/artifacts/${stemsFor}/stems`),
+    enabled: !!stemsFor,
+  });
 
   const toggle = useMutation({
     mutationFn: (id: string) => api.post(`/api/v1/artifacts/${id}/favorite`),
@@ -176,6 +182,7 @@ export default function StudioPage() {
               </div>
               {shown.length === 0 && <p style={{ color: "var(--muted)" }}>No tracks yet — generate one above.</p>}
               {shown.map((t) => (
+                <>
                 <div className="track-row" key={t.asset_id}>
                   <ArtworkTile
                     seed={t.asset_id}
@@ -238,9 +245,39 @@ export default function StudioPage() {
                     </button>
                     <a className="btn" href={t.url} download>WAV</a>
                     <button className="btn" onClick={() => exportArtifact(t.asset_id, "mp3")}>MP3</button>
-                    <button className="btn" onClick={() => exportArtifact(t.asset_id, "stems")}>Stems</button>
+                    <button
+                      className="btn"
+                      style={stemsFor === t.asset_id ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
+                      onClick={() => {
+                        setStemsFor(stemsFor === t.asset_id ? null : t.asset_id);
+                        qc.invalidateQueries({ queryKey: ["stems", t.asset_id] });
+                      }}
+                    >
+                      ≋ Stems
+                    </button>
                   </div>
                 </div>
+                {stemsFor === t.asset_id && (
+                  <div className="card" style={{ padding: "10px 14px", margin: "-6px 0 10px", background: "color-mix(in srgb, var(--surface) 70%, transparent)" }}>
+                    {(stemsQuery.isLoading || stemsQuery.isFetching) && <span style={{ color: "var(--muted)", fontSize: 12 }}>Loading stems…</span>}
+                    {stemsQuery.data && stemsQuery.data.stems.length === 0 && (
+                      <span style={{ display: "inline-flex", gap: 10, alignItems: "center", fontSize: 12, color: "var(--muted)" }}>
+                        No stems yet.
+                        <button className="btn" onClick={() => exportArtifact(t.asset_id, "stems")}>Separate now (Demucs)</button>
+                      </span>
+                    )}
+                    {stemsQuery.data && stemsQuery.data.stems.length > 0 && (
+                      <span style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12 }}>
+                        {stemsQuery.data.stems.map((s) => (
+                          <a key={s.asset_id} className="btn" href={s.url} download style={{ fontSize: 12 }}>
+                            ↓ {s.category}
+                          </a>
+                        ))}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </>
               ))}
             </div>
           </div>
