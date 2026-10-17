@@ -22,6 +22,10 @@ GENRE_ALIASES = {
     "r&b": "r&b", "rnb": "r&b", "latin": "latin", "ambient": "ambient",
     "house": "house", "techno": "techno", "trap": "trap", "indie": "indie",
     "acoustic": "acoustic", "dance": "dance", "edm": "edm",
+    "opera": "opera", "indian": "indian", "world": "world", "japanese": "japanese",
+    "arabic": "arabic", "irish": "irish", "bossa nova": "bossa nova", "samba": "samba",
+    "flamenco": "flamenco", "ska": "ska", "disco": "disco", "trance": "trance",
+    "new age": "new age", "gospel": "gospel", "dub": "dub", "celtic": "celtic",
 }
 
 
