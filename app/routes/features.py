@@ -437,7 +437,7 @@ def artifact_stems(asset_id: str, request: Request, owner_id: str = Depends(owne
         stems = list(
             session.execute(
                 select(Asset)
-                .where(Asset.stem_source == asset_id, Asset.deleted_at.is_(None))
+                .where(Asset.source_asset_id == asset_id, Asset.stem_category.isnot(None), Asset.deleted_at.is_(None))
                 .order_by(Asset.stem_category)
             ).scalars()
         )

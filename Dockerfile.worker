@@ -31,6 +31,9 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # from ACE-Step's uv venv; weights cache under /root/.cache (mounted volume).
 RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cu128 demucs
 
+# demucs imports numpy at runtime but pip left it out of the resolved set
+RUN pip install --no-cache-dir numpy
+
 # --- WireGuard client + NFS mount tooling (late layer, heavy layers cached) ---
 # Lets a self-contained node bring its own tunnel up (entrypoint wg-quick) when
 # run with NET_ADMIN, and mount the hub's NFS storage dir (entrypoint mount).
