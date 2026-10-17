@@ -470,6 +470,7 @@ def job_artifacts(
             {
                 "asset_id": asset.id,
                 "role": asset.role,
+                "title": asset.title,
                 "kind": asset.kind,
                 "source_asset_id": asset.source_asset_id,
                 "stem_source": asset.stem_source,
