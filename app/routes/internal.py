@@ -12,8 +12,11 @@ import io
 import tarfile
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import Response
+
+from ..errors import ApiError
+from ..models import Asset
 
 router = APIRouter()
 
@@ -46,3 +49,18 @@ def worker_bundle(request: Request) -> Response:
             "Content-Disposition": 'attachment; filename="oal-worker-bundle.tar.gz"',
         },
     )
+
+
+@router.get("/assets/{asset_id}/content")
+def internal_asset_content(asset_id: str, request: Request, x_oal_secret: str = Query(...)) -> Response:
+    """Fetch an asset's bytes by id (workers on nodes without NFS access)."""
+    settings = request.app.state.settings
+    if x_oal_secret != settings.secret_key:
+        raise ApiError(401, "INVALID_SECRET", "Shared secret does not match.")
+    with request.app.state.db.session() as session:
+        asset = session.get(Asset, asset_id)
+        if asset is None:
+            raise ApiError(404, "ASSET_NOT_FOUND", "Asset not found.")
+        key, mime = asset.storage_key, asset.mime or "application/octet-stream"
+    stored = request.app.state.storage.get(key)
+    return Response(content=stored.body, media_type=mime)

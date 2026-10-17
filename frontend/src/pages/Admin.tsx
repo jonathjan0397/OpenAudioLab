@@ -73,6 +73,7 @@ interface Training {
   eta_seconds: number | null;
   created_at: string | null;
   hardware: string | null;
+  error: string | null;
 }
 interface AdminJob {
   job_id: string;
@@ -150,12 +151,24 @@ interface WorkerRow {
   last_heartbeat: string | null;
 }
 
+interface VastInstanceRow {
+  id: string;
+  vast_instance_id: string;
+  role: string;
+  gpu_model: string | null;
+  state: string;
+  live_status: string | null;
+  last_used_at: string | null;
+  stopped_at: string | null;
+}
+
 const SIDEBAR = [
   { to: "/admin", label: "Overview", icon: "⌂" },
   { to: "/admin/users", label: "Users", icon: "☺" },
   { to: "/admin/jobs", label: "Generation Jobs", icon: "⇍" },
   { to: "/admin/services", label: "Model Services", icon: "▣" },
   { to: "/admin/workers", label: "GPU Workers", icon: "▦" },
+  { to: "/admin/vast", label: "Vast Cloud", icon: "☁" },
   { to: "/admin/training", label: "Artist Training", icon: "◈" },
   { to: "/admin/loras", label: "Style Models", icon: "♪" },
   { to: "/admin/storage", label: "Storage", icon: "▤" },
@@ -275,6 +288,12 @@ export default function AdminPage() {
     queryKey: ["admin-workers"],
     queryFn: () => api.get<{ workers: WorkerRow[] }>("/api/v1/admin/workers"),
     enabled,
+    refetchInterval: 15000,
+  });
+  const vast = useQuery({
+    queryKey: ["admin-vast"],
+    queryFn: () => api.get<{ instances: VastInstanceRow[]; live_available: boolean }>("/api/v1/admin/vast/instances"),
+    enabled: enabled && section === "vast",
     refetchInterval: 15000,
   });
   const [loraName, setLoraName] = useState("");
@@ -446,6 +465,11 @@ export default function AdminPage() {
   const purge = useMutation({
     mutationFn: () => api.del<{ purged: number }>("/api/v1/admin/workers/stale"),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-workers"] }),
+  });
+  const vastAction = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: string }) =>
+      api.post<{ ok: boolean }>(`/api/v1/admin/vast/instances/${id}/action`, { action }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-vast"] }),
   });
   const cancelTraining = useMutation({
     mutationFn: (id: string) => api.post<{ status: string }>(`/api/v1/admin/trainings/${id}/cancel`),
@@ -906,6 +930,23 @@ export default function AdminPage() {
               </button>
               {error && <span className="pill err">{error}</span>}
             </div>
+            {(() => {
+              const t = (trainings.data || [])[0];
+              if (!t) return null;
+              const published = (loras.data?.loras || []).some((l) => l.profile_version_id === t.profile_version_id);
+              const cls = t.status === "succeeded" ? "ok" : t.status === "failed" ? "err" : t.status === "running" ? "info" : "warn";
+              const label = t.status === "running" ? `${t.stage || "training"} ${Math.round((t.progress || 0) * 100)}%` : t.status;
+              return (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, fontSize: 13, flexWrap: "wrap" }}>
+                  <span className="sub">Training status:</span>
+                  <strong>{t.profile}</strong>
+                  <span className={`pill ${cls}`}>{label}</span>
+                  {t.status === "running" && t.eta_seconds != null && <span className="sub">~{Math.ceil(t.eta_seconds / 60)} min left</span>}
+                  {t.status === "succeeded" && <span className="sub">{published ? "published as style model" : "done — ready to publish"}</span>}
+                  {t.status === "failed" && t.error && <span className="sub" title={t.error}>{t.error}</span>}
+                </div>
+              );
+            })()}
             {(trainings.data || []).some((t) => t.status === "queued" || t.status === "running") && (
               <div style={{ marginBottom: 14, display: "flex", flexDirection: "column", gap: 8 }}>
                 {(trainings.data || [])
@@ -1014,6 +1055,46 @@ export default function AdminPage() {
             {(workers.data?.workers || []).map(workerRow)}
             {(workers.data?.workers || []).length === 0 && <p style={{ color: "var(--muted)" }}>No workers registered.</p>}
             {purge.data != null && <p style={{ color: "var(--muted)", fontSize: 12 }}>Last purge removed {purge.data.purged} worker(s).</p>}
+          </div>
+        )}
+
+        {section === "vast" && (
+          <div className="card">
+            <div className="card-header">
+              <h2>Vast Cloud</h2>
+              <span className="spacer" />
+              <span className="sub" style={{ fontSize: 12 }}>Recently used nodes are stopped (not destroyed) and restarted for the next job</span>
+            </div>
+            <table className="table">
+              <thead><tr><th>Instance</th><th>Role</th><th>GPU</th><th>State</th><th>Vast status</th><th>Last used</th><th /></tr></thead>
+              <tbody>
+                {(vast.data?.instances || []).map((v) => (
+                  <tr key={v.id}>
+                    <td className="mono">{v.vast_instance_id}</td>
+                    <td>{v.role}</td>
+                    <td>{v.gpu_model || "—"}</td>
+                    <td>
+                      <span className={`pill ${v.state === "running" ? "ok" : v.state === "stopped" ? "warn" : ""}`}>{v.state}</span>
+                    </td>
+                    <td>{v.live_status ?? (vast.data?.live_available ? "—" : "not linked")}</td>
+                    <td>{v.last_used_at ? new Date(v.last_used_at).toLocaleString() : "—"}</td>
+                    <td style={{ display: "flex", gap: 6 }}>
+                      {v.state === "stopped" && (
+                        <button className="btn btn-sm" disabled={vastAction.isPending} onClick={() => vastAction.mutate({ id: v.vast_instance_id, action: "start" })}>Start</button>
+                      )}
+                      {v.state === "running" && (
+                        <button className="btn btn-sm" disabled={vastAction.isPending} onClick={() => vastAction.mutate({ id: v.vast_instance_id, action: "stop" })}>Stop</button>
+                      )}
+                      <button className="btn btn-sm" disabled={vastAction.isPending} onClick={() => vastAction.mutate({ id: v.vast_instance_id, action: "destroy" })}>Destroy</button>
+                    </td>
+                  </tr>
+                ))}
+                {(vast.data?.instances || []).length === 0 && (
+                  <tr><td colSpan={7} style={{ color: "var(--muted)" }}>No Vast instances tracked yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+            {vastAction.error != null && <p className="form-error">{String((vastAction.error as Error).message)}</p>}
           </div>
         )}
 

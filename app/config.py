@@ -108,6 +108,13 @@ class Settings(BaseSettings):
     train_workdir: str = "./training-data"
     train_recipe_revision: str = "acestep-lora@ca1e85f"
 
+    # M16: auto-tagging + training placement
+    audio_analysis_enabled: bool = True
+    train_cuda_device: str = ""
+    train_min_free_mb: int = 12000
+    vast_api_key: str = ""
+    vast_api_url: str = "https://cloud.vast.ai/api/v0"
+
     # Remote workers / object storage (durable across hosts)
     storage_backend: str = "local"
     s3_endpoint_url: str = ""
@@ -118,6 +125,7 @@ class Settings(BaseSettings):
     s3_prefix: str = ""
     adapter_cache_dir: str = "/opt/acestep/adapter-cache"
     build_revision: str = "dev"
+    backend_url: str = ""
 
     @field_validator("cors_origins", mode="before")
     @classmethod

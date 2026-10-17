@@ -23,8 +23,10 @@ from .config import Settings, get_settings
 from .db import Db
 from .engine_acestep import AceStepAdapter, EngineError
 from .models import (
+    ArtistProfile,
     ArtistProfileVersion,
     Asset,
+    Dataset,
     DatasetTrack,
     DatasetVersion,
     Evaluation,
@@ -74,6 +76,41 @@ class TrainingWorker:
             RedisQueue.queue_name(settings.evaluate_queue_model_id),
         ]
         self._stop = False
+        if settings.train_cuda_device and "CUDA_VISIBLE_DEVICES" not in os.environ:
+            os.environ["CUDA_VISIBLE_DEVICES"] = settings.train_cuda_device
+
+    def _gpu_available(self) -> bool:
+        """Gate claiming on free VRAM on the pinned training GPU."""
+        if self.settings.train_min_free_mb <= 0:
+            return True
+        import subprocess
+
+        idx = self.settings.train_cuda_device or "0"
+        try:
+            out = subprocess.run(
+                ["nvidia-smi", f"--id={idx}", "--query-gpu=memory.free",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=10,
+            )
+            free = int(out.stdout.strip().splitlines()[0])
+        except Exception:
+            return True
+        return free >= self.settings.train_min_free_mb
+
+    def _asset_bytes(self, asset) -> bytes:
+        try:
+            return self.storage.get(asset.storage_key).body
+        except FileNotFoundError:
+            if not self.settings.backend_url:
+                raise
+            import urllib.request
+
+            url = (
+                f"{self.settings.backend_url.rstrip('/')}/internal/v1/assets/{asset.id}/content"
+                f"?x_oal_secret={self.settings.secret_key}"
+            )
+            with urllib.request.urlopen(url, timeout=self.settings.train_http_timeout_seconds) as resp:
+                return resp.read()
 
     def register(self) -> None:
         with self.db.session() as session:
@@ -106,6 +143,10 @@ class TrainingWorker:
         if self._draining():
             self.register()
             time.sleep(2)
+            return False
+        if not self._gpu_available():
+            log.info("training GPU below free-VRAM gate; deferring to remote capacity")
+            time.sleep(5)
             return False
         received = self.queue.receive(self.queues, self.settings.worker_brpop_timeout_seconds)
         if received is None:
@@ -154,6 +195,29 @@ class TrainingWorker:
                 log.info("engine not ready for training (%s); waiting", exc)
                 time.sleep(5)
 
+    def _analyze_dataset(self, paths: list[Path]) -> dict:
+        if not self.settings.audio_analysis_enabled or not paths:
+            return {}
+        try:
+            from .audio_analysis import analyze_paths
+
+            return analyze_paths([str(p) for p in paths])
+        except Exception:
+            log.exception("audio analysis failed; continuing without suggested tags")
+            return {}
+
+    def _store_analysis(self, dataset_id: str, analysis: dict) -> None:
+        with self.db.session() as session:
+            dataset = session.get(Dataset, dataset_id)
+            profile = session.get(ArtistProfile, dataset.profile_id) if dataset is not None else None
+            if profile is None:
+                return
+            style = dict(profile.style_json or {})
+            style["suggested_tags"] = analysis.get("tags", [])
+            style["analysis"] = {k: v for k, v in analysis.items() if k != "tags"}
+            profile.style_json = style
+            session.commit()
+
     def _train(self, job_id: str, attempt_id: str, lease_token: str) -> None:
         with self.db.session() as session:
             job = get_job_by_id(session, job_id)
@@ -184,15 +248,29 @@ class TrainingWorker:
         dataset_dir = workdir / "dataset"
         dataset_dir.mkdir(parents=True, exist_ok=True)
         all_instrumental = True
+        captions: list[str] = []
+        track_paths: list[Path] = []
         for index, track in enumerate(sorted(track_rows, key=lambda t: t.created_at)):
             asset = assets[track.asset_id]
-            body = self.storage.get(asset.storage_key).body
-            (dataset_dir / f"track{index}.wav").write_bytes(body)
+            body = self._asset_bytes(asset)
+            path = dataset_dir / f"track{index}.wav"
+            path.write_bytes(body)
+            track_paths.append(path)
             if track.lyrics and track.lyrics.strip():
                 all_instrumental = False
                 (dataset_dir / f"track{index}.lyrics.txt").write_text(track.lyrics, encoding="utf-8")
-            caption = (track.labels_json or {}).get("caption", "custom artist track")
-            (dataset_dir / f"track{index}.json").write_text(json.dumps({"caption": caption}), encoding="utf-8")
+            captions.append((track.labels_json or {}).get("caption", "custom artist track"))
+
+        analysis = self._analyze_dataset(track_paths)
+        suggested = analysis.get("tags", [])
+        if suggested:
+            self._store_analysis(dataset_version.dataset_id, analysis)
+        for index, caption in enumerate(captions):
+            merged = caption
+            for tag in reversed(suggested):
+                if tag not in merged:
+                    merged = f"{tag}, {merged}"
+            (dataset_dir / f"track{index}.json").write_text(json.dumps({"caption": merged}), encoding="utf-8")
 
         with self.db.session() as session:
             run_row = session.get(TrainingRun, run_id)

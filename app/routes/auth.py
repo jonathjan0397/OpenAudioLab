@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -18,7 +18,7 @@ from ..auth import (
     verify_password,
 )
 from ..errors import ApiError
-from ..models import User, UserSession, utcnow
+from ..models import User, UserSession, new_uuid, utcnow
 from ..orchestration import as_utc
 
 router = APIRouter(tags=["auth"])
@@ -45,6 +45,8 @@ def user_payload(user: User) -> dict:
         "plan": user.plan,
         "credits_balance": user.credits_balance,
         "stripe_customer_id": user.stripe_customer_id,
+        "avatar_key": user.avatar_key,
+        "bio": user.bio,
     }
 
 
@@ -153,3 +155,101 @@ def auth_logout(request: Request) -> JSONResponse:
 @router.get("/auth/me")
 def auth_me(request: Request, user: User = Depends(current_user)) -> JSONResponse:
     return JSONResponse(content={"user": user_payload(user)})
+
+
+class ProfileUpdateRequest(BaseModel):
+    username: str | None = Field(default=None, min_length=2, max_length=80, pattern=r"^[a-zA-Z0-9_.-]+$")
+    email: str | None = Field(default=None, min_length=3, max_length=320)
+    bio: str | None = Field(default=None, max_length=500)
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=200)
+    new_password: str = Field(min_length=8, max_length=200)
+
+
+@router.patch("/auth/me")
+def auth_update_me(
+    payload: ProfileUpdateRequest, request: Request, user: User = Depends(current_user)
+) -> JSONResponse:
+    email = payload.email.strip().lower() if payload.email else None
+    with request.app.state.db.session() as session:
+        if email and session.execute(
+            select(User).where(User.email == email, User.id != user.id)
+        ).scalar_one_or_none():
+            raise ApiError(409, "EMAIL_TAKEN", "Email already registered.")
+        if payload.username and session.execute(
+            select(User).where(User.username == payload.username, User.id != user.id)
+        ).scalar_one_or_none():
+            raise ApiError(409, "USERNAME_TAKEN", "Username already taken.")
+        record = session.get(User, user.id)
+        if payload.username:
+            record.username = payload.username
+        if email:
+            record.email = email
+        if payload.bio is not None:
+            record.bio = payload.bio
+        session.commit()
+        session.refresh(record)
+        session.expunge(record)
+    return JSONResponse(content={"user": user_payload(record)})
+
+
+@router.post("/auth/password")
+def auth_change_password(
+    payload: PasswordChangeRequest, request: Request, user: User = Depends(current_user)
+) -> JSONResponse:
+    with request.app.state.db.session() as session:
+        record = session.get(User, user.id)
+        if not verify_password(payload.current_password, record.password_hash):
+            raise ApiError(401, "INVALID_CREDENTIALS", "Current password is incorrect.")
+        record.password_hash = hash_password(payload.new_password)
+        session.commit()
+    return JSONResponse(content={"ok": True})
+
+
+AVATAR_MAX_BYTES = 2 * 1024 * 1024
+AVATAR_MEDIA = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif"}
+
+
+@router.post("/auth/avatar")
+async def auth_upload_avatar(
+    request: Request,
+    user: User = Depends(current_user),
+    file: UploadFile = File(...),
+) -> JSONResponse:
+    content_type = (file.content_type or "").lower()
+    if not content_type.startswith("image/"):
+        raise ApiError(422, "INVALID_FILE", "Avatar must be an image.")
+    body = await file.read()
+    if not body:
+        raise ApiError(422, "EMPTY_FILE", "Avatar file is empty.")
+    if len(body) > AVATAR_MAX_BYTES:
+        raise ApiError(413, "FILE_TOO_LARGE", "Avatar must be 2 MB or smaller.")
+    suffix = ""
+    for ext in AVATAR_MEDIA:
+        if (file.filename or "").lower().endswith(ext):
+            suffix = ext
+            break
+    if not suffix:
+        suffix = ".png" if content_type == "image/png" else ".jpg"
+    key = f"owners/usr_{user.id}/avatar-{new_uuid()}{suffix}"
+    request.app.state.storage.put(key, body)
+    with request.app.state.db.session() as session:
+        record = session.get(User, user.id)
+        record.avatar_key = key
+        session.commit()
+        session.refresh(record)
+        session.expunge(record)
+    return JSONResponse(content={"user": user_payload(record)})
+
+
+@router.get("/auth/avatar/{user_id}")
+def auth_get_avatar(user_id: str, request: Request) -> Response:
+    with request.app.state.db.session() as session:
+        record = session.get(User, user_id)
+    if record is None or not record.avatar_key:
+        raise ApiError(404, "AVATAR_NOT_FOUND", "User has no avatar.")
+    stored = request.app.state.storage.get(record.avatar_key)
+    media = AVATAR_MEDIA.get(record.avatar_key[record.avatar_key.rfind(".") :].lower(), "application/octet-stream")
+    return Response(content=stored.body, media_type=media, headers={"Cache-Control": "public, max-age=300"})

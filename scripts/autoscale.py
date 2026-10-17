@@ -79,10 +79,100 @@ MIN_COMPUTE_CAP = float(os.environ.get("OAL_VAST_MIN_COMPUTE_CAP", "7.5"))
 # Approx worker image size (GB), used only to estimate cold-start pull time when
 # ranking offers by cost-per-download-Mbps (cheapest AND fastest to pull).
 IMAGE_GB = float(os.environ.get("OAL_WORKER_IMAGE_GB", "13"))
+# Instance reuse (M16): scale-down STOPS nodes instead of destroying them and
+# scale-up restarts a recently stopped node before creating a fresh one.
+REUSE = os.environ.get("OAL_VAST_REUSE", "1") != "0"
+KEEP_STOPPED = int(os.environ.get("OAL_VAST_KEEP_STOPPED", "2"))
+RECONCILE_SECONDS = float(os.environ.get("OAL_VAST_RECONCILE_SECONDS", "120"))
+# Training tier: pending artist.train jobs get a dedicated Vast training node
+# after OAL_TRAIN_VAST_AFTER_SECONDS (giving the gated local worker first
+# claim); idle nodes are stopped after OAL_TRAIN_DOWN_SECONDS.
+TRAIN_QUEUE = os.environ.get("OAL_TRAIN_QUEUE_KEY", "oal:queue:training")
+TRAIN_WAIT_LOCAL = float(os.environ.get("OAL_TRAIN_VAST_AFTER_SECONDS", "120"))
+TRAIN_DOWN_SECONDS = float(os.environ.get("OAL_TRAIN_DOWN_SECONDS", "240"))
 
 
 def log(msg):
     print(time.strftime("%Y-%m-%d %H:%M:%S"), msg, flush=True)
+
+
+# --- Vast instance registry (best-effort DB mirror for the Admin UI) ---------
+_DB = None
+_DB_FAILED = False
+
+
+def _engine():
+    global _DB, _DB_FAILED
+    if _DB_FAILED:
+        return None
+    if _DB is None:
+        url = os.environ.get("OAL_DATABASE_URL", "")
+        if not url:
+            _DB_FAILED = True
+            return None
+        try:
+            import sqlalchemy
+
+            _DB = sqlalchemy.create_engine(url, pool_pre_ping=True, pool_recycle=300)
+        except Exception as e:
+            log(f"registry db unavailable: {e}")
+            _DB_FAILED = True
+            return None
+    return _DB
+
+
+def registry_upsert(cid, role, state, gpu=None):
+    d = _engine()
+    if d is None:
+        return
+    try:
+        from sqlalchemy import text
+
+        with d.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO vast_instances (id, vast_instance_id, role, gpu_model, state, created_at, last_used_at) "
+                    "VALUES (gen_random_uuid()::text, :cid, :role, :gpu, :state, now(), now()) "
+                    "ON CONFLICT (vast_instance_id) DO UPDATE SET state = EXCLUDED.state, role = EXCLUDED.role, "
+                    "gpu_model = COALESCE(EXCLUDED.gpu_model, vast_instances.gpu_model), last_used_at = now()"
+                ),
+                {"cid": str(cid), "role": role, "gpu": gpu, "state": state},
+            )
+    except Exception as e:
+        log(f"registry upsert failed: {e}")
+
+
+def registry_set(cid, state):
+    d = _engine()
+    if d is None:
+        return
+    try:
+        from sqlalchemy import text
+
+        with d.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE vast_instances SET state = :state, "
+                    "stopped_at = CASE WHEN :state = 'stopped' THEN now() ELSE stopped_at END, "
+                    "last_used_at = now() WHERE vast_instance_id = :cid"
+                ),
+                {"state": state, "cid": str(cid)},
+            )
+    except Exception as e:
+        log(f"registry set failed: {e}")
+
+
+def registry_remove(cid):
+    d = _engine()
+    if d is None:
+        return
+    try:
+        from sqlalchemy import text
+
+        with d.begin() as conn:
+            conn.execute(text("DELETE FROM vast_instances WHERE vast_instance_id = :cid"), {"cid": str(cid)})
+    except Exception as e:
+        log(f"registry remove failed: {e}")
 
 
 def sh(args, stdin=None):
@@ -90,7 +180,7 @@ def sh(args, stdin=None):
     return p.returncode, p.stdout, p.stderr
 
 
-def worker_env(transport="wg", slot=None):
+def worker_env(transport="wg", slot=None, role="engine_worker"):
     pw = os.environ["OAL_POSTGRES_PASSWORD"]
     secret = os.environ["OAL_SECRET_KEY"]
     base = HUB_TS if transport == "ts" else (HUB_TUNNEL if transport == "wg" else HUB)
@@ -102,15 +192,23 @@ def worker_env(transport="wg", slot=None):
         "-e OAL_STORAGE_BACKEND=local",
         "-e OAL_STORAGE_DIR=/data/oal",
         f"-e OAL_SECRET_KEY={secret}",
-        "-e OAL_WORKER_ROLE=engine_worker",
+        f"-e OAL_WORKER_ROLE={role}",
         "-e OAL_ACESTEP_BASE_URL=http://127.0.0.1:8001",
+    ]
+    if role == "training_worker":
+        # Training node: engine runs in external mode (entrypoint starts and
+        # health-checks it) so the training worker can rely on it without an
+        # engine_worker process also claiming generation jobs.
+        env += ["-e OAL_ENGINE_AUTOSTART=0"]
+    else:
         # Burst tier: Vast nodes drain only the overflow queue, so the always-on
         # baseline worker keeps first claim on the main queue.
-        "-e OAL_WORKER_TIER=burst",
-        # Vast burst nodes stay hot (keep the model loaded for their short life);
-        # the autoscaler tears them down, so no idle-stop is needed.
-        "-e OAL_ENGINE_IDLE_STOP_SECONDS=0",
-    ]
+        env += [
+            "-e OAL_WORKER_TIER=burst",
+            # Vast burst nodes stay hot (keep the model loaded for their short
+            # life); the autoscaler tears them down, so no idle-stop is needed.
+            "-e OAL_ENGINE_IDLE_STOP_SECONDS=0",
+        ]
     if transport in ("ts", "public"):
         # Vast containers cannot mount NFS (no CAP_SYS_ADMIN): write to local
         # disk and rsync-push to the hub over ssh instead.
@@ -203,7 +301,7 @@ def pick_offer():
     return o.get("id")
 
 
-def create_instance(slot=None, dry_run=False, transport="wg"):
+def create_instance(slot=None, dry_run=False, transport="wg", role="engine_worker"):
     offer = pick_offer()
     if not offer:
         log("no eligible North-American offer; will retry")
@@ -211,7 +309,7 @@ def create_instance(slot=None, dry_run=False, transport="wg"):
     if dry_run:
         log(f"[dry-run] would create instance on offer {offer}")
         return -1
-    env = ("--privileged " if transport == "wg" else "") + worker_env(transport, slot)
+    env = ("--privileged " if transport == "wg" else "") + worker_env(transport, slot, role)
     _, out, _ = sh([VASTAI, "create", "instance", str(offer), "--image", IMAGE,
                     "--disk", DISK, "--env", env, "--args", "run"])
     ok = "'success': True" in out
@@ -223,7 +321,28 @@ def create_instance(slot=None, dry_run=False, transport="wg"):
     cid = int(m.group(1)) if m else None
     if cid and slot and transport == "wg":
         wg_add_peer(slot["pubkey"], slot["ip"])
+    if cid:
+        registry_upsert(cid, "training" if role == "training_worker" else "engine", "running")
     return cid
+
+
+def stop_instance(cid, dry_run=False):
+    if dry_run:
+        log(f"[dry-run] would stop instance {cid}")
+        return True
+    _, out, _ = sh([VASTAI, "stop", "instance", str(cid)])
+    log(f"stop {cid}: {out.strip()[-80:]}")
+    return True
+
+
+def start_instance(cid, dry_run=False):
+    if dry_run:
+        log(f"[dry-run] would start instance {cid}")
+        return True
+    _, out, _ = sh([VASTAI, "start", "instance", str(cid)])
+    ok = "'success': True" in out
+    log(f"start {cid}: ok={ok} {out.strip()[-80:]}")
+    return ok
 
 
 def destroy_instance(cid, dry_run=False):
@@ -232,6 +351,44 @@ def destroy_instance(cid, dry_run=False):
         return
     _, out, _ = sh([VASTAI, "destroy", "instance", str(cid)], stdin="y\n")
     log(f"destroy {cid}: {out.strip()[-80:]}")
+
+
+def live_statuses():
+    """Map of vast instance id -> actual_status, or None if the CLI failed."""
+    _, out, _ = sh([VASTAI, "show", "instances", "--raw"])
+    try:
+        rows = json.loads(out)
+    except Exception:
+        return None
+    return {str(r.get("id")): str(r.get("actual_status", "")) for r in rows}
+
+
+def reconcile(st):
+    """Drop state entries Vast no longer knows about (evicted stopped nodes)."""
+    statuses = live_statuses()
+    if statuses is None:
+        return
+    alive = {"running", "starting", "creating", "restarting", "warming", "processing", "rebooting"}
+    for key in ("nodes", "train_nodes"):
+        kept = []
+        for n in st.get(key, []):
+            cid = str(n["contract"])
+            if cid in statuses and statuses[cid] in alive:
+                kept.append(n)
+            else:
+                log(f"reconcile: {key} node {cid} gone from Vast ({statuses.get(cid, 'missing')})")
+                registry_remove(cid)
+        st[key] = kept
+    for key in ("stopped", "train_stopped"):
+        kept = []
+        for n in st.get(key, []):
+            cid = str(n["contract"])
+            if cid in statuses:
+                kept.append(n)
+            else:
+                log(f"reconcile: {key} node {cid} evicted from Vast")
+                registry_remove(cid)
+        st[key] = kept
 
 
 def load_state():
@@ -283,26 +440,38 @@ def tick(r, st, dry_run=False):
     want = desired_nodes(depth, st.get("low_since"), now, len(nodes))
 
     if len(nodes) < want:
-        transport = VAST_TRANSPORT
-        if transport == "ts":
-            slot = gen_ts_slot()
-        elif transport == "wg":
-            slot = gen_wg_slot(nodes)
-            if slot is None:
-                log("WireGuard pool exhausted; creating without tunnel")
-        else:
-            slot = None
-        new = create_instance(slot, dry_run, transport)
-        if new:
-            node = {"contract": new, "created_at": now, "transport": transport}
-            if transport == "ts" and slot:
-                node["ts_hostname"] = slot["hostname"]
-            elif transport == "wg" and slot:
-                node.update({"wg_ip": slot["ip"], "wg_pubkey": slot["pubkey"],
-                             "wg_privkey": slot["privkey"]})
-            nodes.append(node)
-            st["nodes"] = nodes
-            log(f"depth={depth} want={want} -> +1 node {new} via {transport} (now {len(nodes)})")
+        restarted = False
+        if REUSE and st.get("stopped"):
+            node = st["stopped"].pop(0)
+            if start_instance(node["contract"], dry_run):
+                node["created_at"] = now
+                nodes.append(node)
+                registry_set(node["contract"], "running")
+                restarted = True
+                log(f"depth={depth} want={want} -> restarted stopped node {node['contract']} (now {len(nodes)})")
+            else:
+                registry_remove(node["contract"])
+        if not restarted:
+            transport = VAST_TRANSPORT
+            if transport == "ts":
+                slot = gen_ts_slot()
+            elif transport == "wg":
+                slot = gen_wg_slot(nodes)
+                if slot is None:
+                    log("WireGuard pool exhausted; creating without tunnel")
+            else:
+                slot = None
+            new = create_instance(slot, dry_run, transport)
+            if new:
+                node = {"contract": new, "created_at": now, "transport": transport}
+                if transport == "ts" and slot:
+                    node["ts_hostname"] = slot["hostname"]
+                elif transport == "wg" and slot:
+                    node.update({"wg_ip": slot["ip"], "wg_pubkey": slot["pubkey"],
+                                 "wg_privkey": slot["privkey"]})
+                nodes.append(node)
+                log(f"depth={depth} want={want} -> +1 node {new} via {transport} (now {len(nodes)})")
+        st["nodes"] = nodes
     elif len(nodes) > want:
         removable = [n for n in nodes if now - n["created_at"] >= MIN_UPTIME]
         burst_depth = r.llen(BURST_KEY)
@@ -315,13 +484,72 @@ def tick(r, st, dry_run=False):
             log(f"depth={depth} want={want} nodes={len(nodes)} {hold_reason}; hold")
         else:
             victim = max(removable, key=lambda n: n["created_at"])  # newest first
-            destroy_instance(victim["contract"], dry_run)
-            if victim.get("wg_pubkey") and not dry_run:
-                wg_remove_peer(victim["wg_pubkey"])
+            if REUSE:
+                stop_instance(victim["contract"], dry_run)
+                registry_set(victim["contract"], "stopped")
+                st.setdefault("stopped", []).insert(0, victim)
+                while len(st["stopped"]) > KEEP_STOPPED:
+                    old = st["stopped"].pop()
+                    destroy_instance(old["contract"], dry_run)
+                    if old.get("wg_pubkey") and not dry_run:
+                        wg_remove_peer(old["wg_pubkey"])
+                    registry_remove(old["contract"])
+                log(f"depth={depth} want={want} -> stopped node {victim['contract']} (now {len(nodes) - 1} hot)")
+            else:
+                destroy_instance(victim["contract"], dry_run)
+                if victim.get("wg_pubkey") and not dry_run:
+                    wg_remove_peer(victim["wg_pubkey"])
+                registry_remove(victim["contract"])
             nodes.remove(victim)
             st["nodes"] = nodes
             log(f"depth={depth} want={want} -> -1 node {victim['contract']} (now {len(nodes)})")
+
+    training_tick(r, st, now, dry_run)
     return depth
+
+
+def training_tick(r, st, now, dry_run=False):
+    """Keep one Vast training node while artist.train jobs are pending."""
+    train_depth = r.llen(TRAIN_QUEUE)
+    tnodes = st.get("train_nodes", [])
+    tstopped = st.get("train_stopped", [])
+    if train_depth > 0:
+        st["train_idle_since"] = None
+        since = st.get("train_pending_since") or now
+        st["train_pending_since"] = since
+        if not tnodes and now - since >= TRAIN_WAIT_LOCAL:
+            if REUSE and tstopped:
+                node = tstopped.pop(0)
+                if start_instance(node["contract"], dry_run):
+                    node["created_at"] = now
+                    tnodes.append(node)
+                    registry_set(node["contract"], "running")
+                    log(f"training pending={train_depth} -> restarted stopped training node {node['contract']}")
+                else:
+                    registry_remove(node["contract"])
+            if not tnodes:
+                cid = create_instance(None, dry_run, VAST_TRANSPORT, role="training_worker")
+                if cid:
+                    tnodes.append({"contract": cid, "created_at": now, "transport": VAST_TRANSPORT})
+                    log(f"training pending={train_depth} -> +1 training node {cid}")
+            st["train_nodes"] = tnodes
+    else:
+        st["train_pending_since"] = None
+        if tnodes:
+            idle = st.get("train_idle_since") or now
+            st["train_idle_since"] = idle
+            if now - idle >= TRAIN_DOWN_SECONDS:
+                for n in tnodes:
+                    stop_instance(n["contract"], dry_run)
+                    registry_set(n["contract"], "stopped")
+                    tstopped.insert(0, n)
+                st["train_nodes"] = []
+                while len(tstopped) > KEEP_STOPPED:
+                    old = tstopped.pop()
+                    destroy_instance(old["contract"], dry_run)
+                    registry_remove(old["contract"])
+                st["train_stopped"] = tstopped
+                log("training idle -> stopped training node(s)")
 
 
 def main():
@@ -340,9 +568,13 @@ def main():
     log(f"start hub={HUB} queue={QUEUE_KEY} up>={SCALE_UP} jobs/node={JOBS_PER_NODE} "
         f"max={MAX_NODES} baseline={BASELINE} to_one>{int(TO_ONE_SECONDS)}s "
         f"down>{int(SCALE_DOWN_SECONDS)}s min_uptime={int(MIN_UPTIME)}s state={st}")
+    last_reconcile = 0.0
     while True:
         try:
             depth = tick(r, st, args.dry_run)
+            if time.time() - last_reconcile >= RECONCILE_SECONDS:
+                reconcile(st)
+                last_reconcile = time.time()
             save_state(st)
         except Exception as e:
             log(f"tick error: {e}")

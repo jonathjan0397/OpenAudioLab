@@ -367,7 +367,7 @@ def admin_trainings(request: Request, limit: int = Query(default=5, ge=1, le=50)
             session.execute(
                 select(
                     TrainingRun, Job.status, Job.progress, Job.stage, Job.created_at, Job.started_at,
-                    Job.finished_at, ArtistProfile.name, User.username,
+                    Job.finished_at, Job.error_code, Job.error_message, ArtistProfile.name, User.username,
                 )
                 .join(Job, Job.id == TrainingRun.job_id)
                 .outerjoin(ArtistProfileVersion, ArtistProfileVersion.id == TrainingRun.profile_version_id)
@@ -378,7 +378,7 @@ def admin_trainings(request: Request, limit: int = Query(default=5, ge=1, le=50)
             ).all()
         )
     out = []
-    for run, status, progress, stage, created, started, finished, name, username in rows:
+    for run, status, progress, stage, created, started, finished, err_code, err_msg, name, username in rows:
         eta = None
         if status == "running" and progress and started:
             elapsed = (utcnow() - started).total_seconds()
@@ -395,6 +395,7 @@ def admin_trainings(request: Request, limit: int = Query(default=5, ge=1, le=50)
                 "eta_seconds": eta,
                 "created_at": created.isoformat() if created else None,
                 "hardware": run.hardware,
+                "error": f"{err_code}: {err_msg}"[:200] if err_code or err_msg else None,
             }
         )
     return JSONResponse(out)
@@ -1075,3 +1076,83 @@ def admin_lora_delete(lora_id: str, request: Request) -> JSONResponse:
         session.delete(lora)
         session.commit()
     return JSONResponse(status_code=204, content=None)
+
+
+class VastActionRequest(BaseModel):
+    action: str = Field(pattern=r"^(start|stop|destroy)$")
+
+
+def _vast_request(request: Request, method: str, path: str, json_body: dict | None = None):
+    import httpx
+
+    settings = request.app.state.settings
+    if not settings.vast_api_key:
+        raise ApiError(503, "VAST_NOT_CONFIGURED", "OAL_VAST_API_KEY is not set.")
+    resp = httpx.request(
+        method,
+        f"{settings.vast_api_url.rstrip('/')}{path}",
+        headers={"Authorization": f"Bearer {settings.vast_api_key}"},
+        json=json_body,
+        timeout=15.0,
+    )
+    if resp.status_code >= 400:
+        raise ApiError(502, "VAST_API_ERROR", f"Vast API error {resp.status_code}: {resp.text[:200]}")
+    return resp.json()
+
+
+@router.get("/admin/vast/instances")
+def admin_vast_instances(request: Request) -> JSONResponse:
+    """Recently used Vast nodes (registry) merged with live Vast status."""
+    from ..models import VastInstance
+
+    live: dict[str, str] = {}
+    try:
+        rows = _vast_request(request, "GET", "/instances/")
+        for row in rows if isinstance(rows, list) else []:
+            live[str(row.get("id"))] = str(row.get("actual_status", ""))
+    except ApiError:
+        pass
+    with request.app.state.db.session() as session:
+        records = list(session.execute(select(VastInstance)).scalars())
+    out = []
+    for rec in records:
+        out.append(
+            {
+                "id": rec.id,
+                "vast_instance_id": rec.vast_instance_id,
+                "role": rec.role,
+                "gpu_model": rec.gpu_model,
+                "state": rec.state,
+                "live_status": live.get(rec.vast_instance_id),
+                "last_used_at": rec.last_used_at.isoformat() if rec.last_used_at else None,
+                "stopped_at": rec.stopped_at.isoformat() if rec.stopped_at else None,
+            }
+        )
+    return JSONResponse({"instances": out, "live_available": bool(live)})
+
+
+@router.post("/admin/vast/instances/{vast_instance_id}/action")
+def admin_vast_instance_action(
+    vast_instance_id: str,
+    payload: VastActionRequest,
+    request: Request,
+) -> JSONResponse:
+    from ..models import VastInstance
+
+    _vast_request(
+        request, "POST", f"/instances/{vast_instance_id}/action/",
+        {"action_type": payload.action},
+    )
+    with request.app.state.db.session() as session:
+        rec = session.execute(
+            select(VastInstance).where(VastInstance.vast_instance_id == vast_instance_id)
+        ).scalar_one_or_none()
+        if rec is not None:
+            if payload.action == "destroy":
+                session.delete(rec)
+            else:
+                rec.state = "running" if payload.action == "start" else "stopped"
+                if payload.action == "stop":
+                    rec.stopped_at = utcnow()
+            session.commit()
+    return JSONResponse({"ok": True, "action": payload.action})

@@ -55,6 +55,7 @@ class BodyLimitMiddleware(BaseHTTPMiddleware):
         if self.max_upload_bytes and (
             request.url.path.endswith("/data")
             or request.url.path.endswith("/upload")
+            or request.url.path.endswith("/avatar")
             or request.url.path == "/lab/api/upload"
         ):
             limit = self.max_upload_bytes

@@ -38,4 +38,6 @@ export interface AuthUser {
   state: string;
   plan: string;
   credits_balance: number;
+  avatar_key?: string | null;
+  bio?: string | null;
 }

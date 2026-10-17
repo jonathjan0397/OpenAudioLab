@@ -198,3 +198,78 @@ def test_artifact_title_and_favorite(client) -> None:
 
     other = client.patch(f"/api/v1/artifacts/{asset_id}", json={"title": "Nope"})
     assert other.status_code == 200
+
+
+def test_patch_me_roundtrip(client) -> None:
+    user = _register(client)
+    response = client.patch(
+        "/api/v1/auth/me",
+        json={"username": "jona2", "email": "jona2@example.com", "bio": "I make music"},
+    )
+    assert response.status_code == 200
+    updated = response.json()["user"]
+    assert updated["username"] == "jona2"
+    assert updated["email"] == "jona2@example.com"
+    assert updated["bio"] == "I make music"
+    assert updated["id"] == user["id"]
+
+    dup = client.patch("/api/v1/auth/me", json={"username": "jona2"})
+    assert dup.status_code == 200
+    client.post("/api/v1/auth/logout")
+    _register(client, email="other@example.com", username="other")
+    clash = client.patch("/api/v1/auth/me", json={"username": "jona2"})
+    assert clash.status_code == 409
+    assert clash.json()["error"]["code"] == "USERNAME_TAKEN"
+
+
+def test_patch_me_requires_cookie(client) -> None:
+    _register(client)
+    client.post("/api/v1/auth/logout")
+    assert client.patch("/api/v1/auth/me", json={"bio": "x"}).status_code == 401
+
+
+def test_password_change(client) -> None:
+    _register(client)
+    wrong = client.post(
+        "/api/v1/auth/password",
+        json={"current_password": "nope-nope-nope", "new_password": "brand-new-1"},
+    )
+    assert wrong.status_code == 401
+    ok = client.post(
+        "/api/v1/auth/password",
+        json={"current_password": "super-secret-1", "new_password": "brand-new-1"},
+    )
+    assert ok.status_code == 200
+    client.post("/api/v1/auth/logout")
+    assert client.post(
+        "/api/v1/auth/login", json={"email": "jona@example.com", "password": "super-secret-1"}
+    ).status_code == 401
+    assert client.post(
+        "/api/v1/auth/login", json={"email": "jona@example.com", "password": "brand-new-1"}
+    ).status_code == 200
+
+
+def test_avatar_roundtrip(client) -> None:
+    user = _register(client)
+    missing = client.get(f"/api/v1/auth/avatar/{user['id']}")
+    assert missing.status_code == 404
+
+    png = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082")
+    upload = client.post(
+        "/api/v1/auth/avatar",
+        files={"file": ("me.png", png, "image/png")},
+    )
+    assert upload.status_code == 200
+    avatar_key = upload.json()["user"]["avatar_key"]
+    assert avatar_key and avatar_key.endswith(".png")
+
+    fetched = client.get(f"/api/v1/auth/avatar/{user['id']}")
+    assert fetched.status_code == 200
+    assert fetched.headers["content-type"] == "image/png"
+    assert fetched.content == png
+
+    bad = client.post(
+        "/api/v1/auth/avatar",
+        files={"file": ("me.txt", b"not an image", "text/plain")},
+    )
+    assert bad.status_code == 422

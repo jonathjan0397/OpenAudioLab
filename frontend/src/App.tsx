@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { api, SiteInfo } from "./api";
+import { api, AuthUser, SiteInfo } from "./api";
 import AuthMenu from "./components/AuthMenu";
 import { PlayerBar, PlayerProvider } from "./components/PlayerContext";
 import Toaster from "./components/Toast";
@@ -17,17 +17,17 @@ import TrainingPage from "./pages/Training";
 import TrackPage from "./pages/Track";
 import StylesPage from "./pages/Styles";
 
-const TEMPLATES = ["open-canvas", "analog-soul", "neon-studio", "signal-lab"];
-
 export default function App() {
   const site = useQuery({
     queryKey: ["site"],
     queryFn: () => api.get<SiteInfo>("/api/v1/site"),
   });
-  const [preview, setPreview] = useState<string | null>(
-    () => window.localStorage.getItem("oal-theme-preview")
-  );
-  const theme = preview || site.data?.template || "open-canvas";
+  const me = useQuery({
+    queryKey: ["me"],
+    queryFn: () => api.get<{ user: AuthUser }>("/api/v1/auth/me"),
+    retry: false,
+  });
+  const theme = site.data?.template || "open-canvas";
   const navigate = useNavigate();
   const searchRef = useRef<HTMLInputElement>(null);
   const [bellOpen, setBellOpen] = useState(false);
@@ -49,18 +49,16 @@ export default function App() {
     <ThemeCtx.Provider value={theme}>
     <PlayerProvider>
       <header className="site-header">
-        <span className="logo">
+        <NavLink to="/" className="logo">
           OpenAudioLab<span className="tld">.io</span>
-        </span>
-        <span className="brand-tag">{theme.replace(/-/g, " ")}</span>
+        </NavLink>
         <nav>
           <NavLink to="/" end>Create</NavLink>
           <NavLink to="/explore">Explore</NavLink>
           <NavLink to="/artists">Artists</NavLink>
           <NavLink to="/studio">Studio</NavLink>
           <NavLink to="/pricing">Pricing</NavLink>
-          <NavLink to="/styles">Styles</NavLink>
-          <NavLink to="/admin">Admin</NavLink>
+          {me.data?.user?.role === "admin" && <NavLink to="/admin">Admin</NavLink>}
         </nav>
         <span className="spacer" />
         <span className="header-search">
@@ -101,22 +99,6 @@ export default function App() {
           )}
         </span>
         <AuthMenu />
-        <NavLink to="/studio" className="btn btn-primary btn-sm open-studio">Open Studio →</NavLink>
-        <select
-          className="theme-select"
-          style={{ width: 130 }}
-          value={theme}
-          onChange={(e) => {
-            window.localStorage.setItem("oal-theme-preview", e.target.value);
-            setPreview(e.target.value);
-          }}
-        >
-          {TEMPLATES.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
       </header>
       <Routes>
         <Route path="/" element={<MainPage />} />

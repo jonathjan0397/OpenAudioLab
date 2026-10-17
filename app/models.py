@@ -357,6 +357,8 @@ class User(Base):
     stripe_customer_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     credits_balance: Mapped[int] = mapped_column(Integer, default=1000)
+    avatar_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    bio: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -377,6 +379,22 @@ class SiteSetting(Base):
     key: Mapped[str] = mapped_column(String(80), primary_key=True)
     value: Mapped[str] = mapped_column(String(500), default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class VastInstance(Base):
+    """Recently used Vast.ai nodes kept for fast restart instead of fresh create."""
+
+    __tablename__ = "vast_instances"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    vast_instance_id: Mapped[str] = mapped_column(String(60), unique=True)
+    hostname: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    role: Mapped[str] = mapped_column(String(40), default="engine")
+    gpu_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    state: Mapped[str] = mapped_column(String(20), default="running")
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Favorite(Base):
