@@ -37,7 +37,7 @@ def test_llm_draft(client) -> None:
     class FakeLlm:
         def chat(self, system, user, max_tokens=400, temperature=0.8):
             self.last_user = user
-            return '{"lyrics": "[Verse]\\nfake line", "style": "lofi, chill, female vocals"}'
+            return '{"lyrics": "[Verse]\\nfake line", "style": "lofi, chill", "title": "Rainy Page"}'
 
     client.app.state.llm = FakeLlm()
     response = client.post(
@@ -47,7 +47,8 @@ def test_llm_draft(client) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["lyrics"].startswith("[Verse]")
-    assert body["style"] == "lofi, chill, female vocals"
+    assert body["style"] == "lofi, chill"
+    assert body["title"] == "Rainy Page"
     assert "rainy study session" in client.app.state.llm.last_user
     assert "lofi, rainy" in client.app.state.llm.last_user  # vocabulary seeded
     client.app.state.llm = None
@@ -222,3 +223,35 @@ def test_upload_path_body_limit_exempt(client) -> None:
         files=[("files", ("song.wav", b"wav-bytes", "audio/wav"))],
     )
     assert response.status_code != 413
+
+
+def test_title_asset_naming(client, orch) -> None:
+    """A submitted title names the resulting assets; takes get numbered suffixes."""
+    from app.models import Asset
+
+    _seed_owner(client, "m14-title@example.com", "m14title")
+    response = client.post(
+        "/api/v1/jobs",
+        json={
+            "operation": "music.generate",
+            "model_id": "ace-step-1.5",
+            "music_description": "indie pop",
+            "lyrics": "[Verse]\ntest",
+            "lyrics_origin": "frontend_llm",
+            "instrumental": False,
+            "outputs": ["mix_wav"],
+            "title": "Moonlit Road",
+        },
+        headers={"Idempotency-Key": "m14-title-1"},
+    )
+    assert response.status_code == 202
+    orch.dispatcher.publish_once()
+    orch.worker.run_once()
+    with client.app.state.db.session() as session:
+        titles = [
+            a.title
+            for a in session.execute(
+                select(Asset).where(Asset.job_id == response.json()["job_id"])
+            ).scalars()
+        ]
+    assert titles == ["Moonlit Road"]

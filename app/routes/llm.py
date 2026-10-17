@@ -78,12 +78,13 @@ def llm_draft(payload: DraftRequest, request: Request, owner_id: str = Depends(o
     if vocab:
         user += f"\nPrefer style tags from this vocabulary when they fit: {vocab}."
     text = _ask(request, DRAFT_SYSTEM, user, max_tokens=460)
-    lyrics, style = text.strip(), ""
+    lyrics, style, title = text.strip(), "", ""
     try:
         start, end = text.index("{"), text.rindex("}") + 1
         parsed = json.loads(text[start:end])
         lyrics = str(parsed.get("lyrics", "")).strip() or text.strip()
         style = str(parsed.get("style", "")).strip()
+        title = str(parsed.get("title", "")).strip()[:200]
     except (ValueError, json.JSONDecodeError):
         pass
-    return JSONResponse({"lyrics": lyrics, "style": style})
+    return JSONResponse({"lyrics": lyrics, "style": style, "title": title})

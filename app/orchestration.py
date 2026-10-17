@@ -302,6 +302,7 @@ def complete_attempt(
         mood = controls.get("mood")
         gender = {"male": "male vocals", "female": "female vocals"}.get(controls.get("gender"))
         tags = [t for t in [mood, gender] if t]
+        req_title = (job.request_json.get("title") or "").strip() or None
         for index, (role_name, data, meta) in enumerate(artifacts):
             suffix = "" if index == 0 else f"-{index + 1}"
             key = f"owners/{job.owner_id}/jobs/{job.id}/{attempt_id}/{role_name}{suffix}.wav"
@@ -323,7 +324,11 @@ def complete_attempt(
                 sha256=checksum,
                 synthetic=synthetic,
                 tags_json=list(tags),
-                title=f"Take {index + 1}" if len(artifacts) > 1 else None,
+                title=(
+                    (req_title if len(artifacts) == 1 else f"{req_title} (Take {index + 1})")
+                    if req_title
+                    else (f"Take {index + 1}" if len(artifacts) > 1 else None)
+                ),
                 finalized_at=utcnow(),
                 expires_at=expires_at,
                 sample_rate=meta[0] if meta else None,

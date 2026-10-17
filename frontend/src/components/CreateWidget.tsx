@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import ArtworkTile from "./ArtworkTile";
@@ -80,6 +79,11 @@ export default function CreateWidget({
 }) {
   const player = usePlayer();
   const [easy, setEasy] = useState(() => localStorage.getItem("oal-create-mode") !== "advanced");
+  const [title, setTitle] = useState("");
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftOpen, setDraftOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [desc, setDesc] = useState("A dreamy indie pop song about chasing a brighter tomorrow");
   const [style, setStyle] = useState("");
   const [lyrics, setLyrics] = useState("");
@@ -113,18 +117,30 @@ export default function CreateWidget({
 
   const draft = useMutation({
     mutationFn: () =>
-      api.post<{ lyrics: string; style: string }>("/api/v1/llm/draft", {
+      api.post<{ lyrics: string; style: string; title?: string }>("/api/v1/llm/draft", {
         prompt: desc,
         lora_tags: (loras.data?.loras || []).flatMap((l) => [l.name.toLowerCase()]),
       }),
     onSuccess: (d) => {
       setLyrics(d.lyrics);
       setStyle(d.style);
+      setDraftTitle(d.title || "");
       setDrafted(true);
+      setDraftOpen(true);
       setError("");
     },
     onError: (e: Error) => setError(e.message),
   });
+
+  const draftedDesc = useRef("");
+  useEffect(() => {
+    if (!easy || desc.trim().length < 8 || desc === draftedDesc.current) return;
+    const t = setTimeout(() => {
+      draftedDesc.current = desc;
+      draft.mutate();
+    }, 900);
+    return () => clearTimeout(t);
+  }, [desc, easy]);
 
   const generate = useMutation({
     mutationFn: async () => {
@@ -148,6 +164,7 @@ export default function CreateWidget({
           operation: "music.generate",
           model_id: "ace-step-1.5",
           music_description: parts.join(", "),
+          ...((title.trim() || draftTitle) ? { title: (title.trim() || draftTitle).slice(0, 200) } : {}),
           ...(finalLyrics && !instrumental ? { lyrics: finalLyrics, lyrics_origin: "frontend_llm" } : {}),
           controls,
           duration_seconds: mode === "extend" ? Math.min(duration + 60, 600) : duration,
@@ -199,68 +216,297 @@ export default function CreateWidget({
   const results = (artifacts.data?.artifacts || []).filter((a) => a.mime.startsWith("audio/"));
 
   const addChip = (tag: string) => {
-    setStyle((s) => {
-      const clean = s.replace(/\s*,?\s*$/, "");
+    const append = (v: string) => {
+      const clean = v.replace(/\s*,?\s*$/, "");
       return clean ? `${clean}, ${tag}` : tag;
-    });
+    };
+    if (easy) setStyle((v) => append(v));
+    else setDesc((v) => (v.includes(tag) ? v : append(v)));
   };
 
   const toggleMode = () => {
     const next = !easy;
     setEasy(next);
-    localStorage.setItem("oal-create-mode", next ? "easy" : "advanced");
+    localStorage.setItem("oal-create-mode", next ? "simple" : "advanced");
   };
 
   return (
     <div className={`card create-panel create-${variant}`}>
       <div className="create-mode-row">
         <div className="segmented">
-          <button type="button" className={easy ? "active" : ""} onClick={() => { setEasy(true); localStorage.setItem("oal-create-mode", "easy"); }}>Easy</button>
+          <button type="button" className={easy ? "active" : ""} onClick={() => { setEasy(true); localStorage.setItem("oal-create-mode", "simple"); }}>Simple</button>
           <button type="button" className={!easy ? "active" : ""} onClick={toggleMode}>Advanced</button>
         </div>
         <span className="sub" style={{ fontSize: 12, color: "var(--muted)" }}>
-          {easy ? "Describe a vibe — AI drafts lyrics & style for review" : "Full control over every generation parameter"}
+          {easy ? "Describe your song — AI writes lyrics, style & title" : "Full control: title, lyrics, styles, vocals"}
         </span>
       </div>
-      <div className="create-input-row">
-        <span className="input-spark" aria-hidden>✦</span>
-        <textarea
-          rows={variant === "wide" ? 1 : variant === "panel" ? 4 : 3}
-          maxLength={500}
-          value={desc}
-          onChange={(e) => setDesc(e.target.value)}
-          placeholder={easy ? "Enter a vibe or idea… e.g. rainy lo-fi study night" : "Describe the music you want…"}
-        />
-        {variant !== "wide" && <span className="char-count">{desc.length}/500</span>}
-        {variant === "wide" && (
-          <button className="btn btn-primary btn-lg gen-wide" disabled={!!busy} onClick={() => generate.mutate()}>
-            {busy ? "✦ Generating…" : actionLabel} →
-          </button>
-        )}
-      </div>
-      {easy && (
-        <div className="create-draft-row">
-          <button className="btn" disabled={draft.isPending || !desc.trim()} onClick={() => draft.mutate()}>
-            {draft.isPending ? "✦ Writing…" : drafted ? "✦ Rewrite with AI" : "✦ Write with AI"}
-          </button>
-          {drafted && <span className="pill" style={{ fontSize: 11 }}>Review before generating</span>}
-        </div>
-      )}
-      {easy && drafted && (
-        <div className="create-review">
-          <div className="field">
-            <label>Style tags</label>
-            <input value={style} onChange={(e) => setStyle(e.target.value)} placeholder="lofi, chill, female vocals" />
+
+      {easy ? (
+        <>
+          <div className="create-input-row">
+            <span className="input-spark" aria-hidden>✦</span>
+            <textarea
+              rows={variant === "wide" ? 1 : 2}
+              maxLength={500}
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              placeholder="Describe your song… e.g. rainy lo-fi study night"
+            />
+            {variant !== "wide" && <span className="char-count">{desc.length}/500</span>}
+            {variant === "wide" && (
+              <button className="btn btn-primary btn-lg gen-wide" disabled={!!busy} onClick={() => generate.mutate()}>
+                {busy ? "✦ Generating…" : actionLabel} →
+              </button>
+            )}
+          </div>
+          <div className="create-simple-row">
+            <input className="create-title" placeholder="Song title (optional)" maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
+            {drafted && (
+              <button type="button" className="draft-summary" onClick={() => setDraftOpen((o) => !o)}>
+                ✦ AI draft {draftOpen ? "▴" : "▾"}
+                {style && <span className="sub" style={{ fontSize: 11 }}> {style.slice(0, 44)}{style.length > 44 ? "…" : ""}</span>}
+              </button>
+            )}
+            {draft.isPending && <span className="sub" style={{ fontSize: 12 }}>✦ writing…</span>}
+          </div>
+          {drafted && draftOpen && (
+            <div className="create-review">
+              <div className="field">
+                <label>Style tags</label>
+                <div className="style-inline">
+                  <input value={style} onChange={(e) => setStyle(e.target.value)} placeholder="lofi, chill, female vocals" />
+                  <button type="button" className="btn btn-ghost" title="Style cheat sheet" onClick={() => setSheetOpen(true)}>♬</button>
+                  <button type="button" className="btn btn-ghost" title="Rewrite with AI" disabled={draft.isPending} onClick={() => draft.mutate()}>♻</button>
+                </div>
+              </div>
+              {!instrumental && (
+                <div className="field">
+                  <label>Lyrics</label>
+                  <textarea rows={4} value={lyrics} onChange={(e) => setLyrics(e.target.value)} placeholder="[Verse]…" />
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <div className="create-adv-grid">
+            <div className="field">
+              <label>Song title</label>
+              <input placeholder="Untitled" maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
+            </div>
+            {!instrumental && (
+              <div className="field">
+                <label>Lead singer</label>
+                <div className="segmented">
+                  <button type="button" className={gender === "" ? "active" : ""} onClick={() => setGender("")}>Any</button>
+                  <button type="button" className={gender === "male" ? "active" : ""} onClick={() => setGender("male")}>Male</button>
+                  <button type="button" className={gender === "female" ? "active" : ""} onClick={() => setGender("female")}>Female</button>
+                </div>
+              </div>
+            )}
+            <div className="field">
+              <label>Vocals</label>
+              <div className="segmented">
+                <button type="button" className={!instrumental ? "active" : ""} onClick={() => setInstrumental(false)}>Vocal</button>
+                <button type="button" className={instrumental ? "active" : ""} onClick={() => setInstrumental(true)}>Instr.</button>
+              </div>
+            </div>
           </div>
           {!instrumental && (
-            <div className="field">
+            <div className="field create-gap">
               <label>Lyrics</label>
-              <textarea rows={5} value={lyrics} onChange={(e) => setLyrics(e.target.value)} placeholder="[Verse]…" />
+              <textarea rows={4} value={lyrics} onChange={(e) => setLyrics(e.target.value)} placeholder="[Verse]…[Chorus]… — leave empty and AI will write them" />
             </div>
+          )}
+          <div className="field create-gap">
+            <label>Styles of music</label>
+            <div className="style-inline">
+              <textarea
+                rows={2}
+                maxLength={500}
+                value={desc}
+                onChange={(e) => setDesc(e.target.value)}
+                placeholder="e.g. dreamy indie pop, warm female vocals, 110 bpm"
+              />
+              <button type="button" className="btn btn-ghost" title="Style cheat sheet" onClick={() => setSheetOpen(true)}>♬ cheat sheet</button>
+            </div>
+            <div className="style-chips">
+              {(chips.data?.tags || []).map((c) => (
+                <button
+                  key={c.tag}
+                  type="button"
+                  className={`chip${c.source === "lora" ? " chip-lora" : ""}`}
+                  title={c.source === "lora" ? "Trained style model" : c.source === "trending" ? "Trending tag" : "Suggested tag"}
+                  onClick={() => addChip(c.tag)}
+                >
+                  + {c.tag}
+                </button>
+              ))}
+              <button type="button" className="chip chip-shuffle" title="Shuffle tags" onClick={() => setChipSeed(Math.floor(Math.random() * 1e9))}>♻</button>
+            </div>
+          </div>
+          <div className="create-bottom-row">
+            <button type="button" className="more-toggle" onClick={() => setMoreOpen((o) => !o)}>More controls {moreOpen ? "▴" : "▾"}</button>
+            <span className="spacer" />
+            <button className="btn btn-primary" disabled={!!busy} onClick={() => generate.mutate()}>
+              {busy ? "✦ Generating…" : actionLabel} →
+            </button>
+          </div>
+          {moreOpen && (
+            <div className="create-advanced">
+              <div className="field ctrl">
+                <div className="field">
+                  <label>BPM</label>
+                  <input type="number" min={30} max={300} value={bpm} onChange={(e) => setBpm(e.target.value)} placeholder="Auto" />
+                </div>
+              </div>
+              <div className="field ctrl">
+                <div className="field">
+                  <label>Key</label>
+                  <select value={keyScale} onChange={(e) => setKeyScale(e.target.value)}>
+                    <option value="">Auto</option>
+                    {KEYS.map((k) => <option key={k} value={k}>{k}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="field ctrl">
+                <div className="field">
+                  <label>Language</label>
+                  <select value={language} onChange={(e) => setLanguage(e.target.value)}>
+                    <option value="">Auto</option>
+                    {LANGUAGES.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="field ctrl">
+                <div className="field">
+                  <label>Weirdness {shift.toFixed(2)}</label>
+                  <input type="range" min={0.5} max={2} step={0.05} value={shift} onChange={(e) => setShift(Number(e.target.value))} />
+                </div>
+              </div>
+              <div className="field ctrl">
+                <div className="field">
+                  <label>Quality</label>
+                  <select value={quality} onChange={(e) => setQuality(Number(e.target.value))}>
+                    {QUALITY.map((q) => <option key={q.value} value={q.value}>{q.label}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="field ctrl">
+                <div className="field">
+                  <label>Variations (2× credits)</label>
+                  <div className="segmented">
+                    <button type="button" className={variations === 1 ? "active" : ""} onClick={() => setVariations(1)}>1</button>
+                    <button type="button" className={variations === 2 ? "active" : ""} onClick={() => setVariations(2)}>2</button>
+                  </div>
+                </div>
+              </div>
+              <div className="field ctrl">
+                <div className="field">
+                  <label>Mood</label>
+                  <select value={mood} onChange={(e) => setMood(e.target.value)}>
+                    {MOODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="field ctrl">
+                <div className="field">
+                  <label>Duration</label>
+                  <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
+                    {DURATIONS.map((d) => (
+                      <option key={d.value} value={d.value}>{d.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              {showStyle && (
+                <div className="field ctrl">
+                  <div className="field">
+                    <label>Style model</label>
+                    <select value={loraId} onChange={(e) => setLoraId(e.target.value)}>
+                      <option value="">Auto (match tags)</option>
+                      {(loras.data?.loras || []).map((l) => (
+                        <option key={l.id} value={l.id}>{l.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {easy && (
+        <div className="create-controls">
+          <div className="field ctrl">
+            <div className="field">
+              <label>Mood</label>
+              <select value={mood} onChange={(e) => setMood(e.target.value)}>
+                {MOODS.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="field ctrl">
+            <div className="field">
+              <label>Vocals</label>
+              <div className="segmented">
+                <button type="button" className={!instrumental ? "active" : ""} onClick={() => setInstrumental(false)}>Vocal</button>
+                <button type="button" className={instrumental ? "active" : ""} onClick={() => setInstrumental(true)}>Instrumental</button>
+              </div>
+            </div>
+          </div>
+          {!instrumental && (
+            <div className="field ctrl">
+              <div className="field">
+                <label>Lead singer</label>
+                <div className="segmented">
+                  <button type="button" className={gender === "" ? "active" : ""} onClick={() => setGender("")}>Any</button>
+                  <button type="button" className={gender === "male" ? "active" : ""} onClick={() => setGender("male")}>Male</button>
+                  <button type="button" className={gender === "female" ? "active" : ""} onClick={() => setGender("female")}>Female</button>
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="field ctrl">
+            <div className="field">
+              <label>Duration</label>
+              <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
+                {DURATIONS.map((d) => (
+                  <option key={d.value} value={d.value}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {showStyle && (
+            <div className="field ctrl">
+              <div className="field">
+                <label>Style model</label>
+                <select value={loraId} onChange={(e) => setLoraId(e.target.value)}>
+                  <option value="">Auto (match tags)</option>
+                  {(loras.data?.loras || []).map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+          {variant !== "wide" && (
+            <button className="btn btn-primary btn-lg" disabled={!!busy} onClick={() => generate.mutate()}>
+              {busy ? "✦ Generating…" : actionLabel} →
+            </button>
           )}
         </div>
       )}
-      <div className="style-chips">
+      {easy && <div className="style-chips" style={{ marginTop: 4 }}>
         {(chips.data?.tags || []).map((c) => (
           <button
             key={c.tag}
@@ -273,133 +519,9 @@ export default function CreateWidget({
           </button>
         ))}
         <button type="button" className="chip chip-shuffle" title="Shuffle tags" onClick={() => setChipSeed(Math.floor(Math.random() * 1e9))}>♻</button>
-        <Link to="/styles" className="chip chip-link">cheat sheet ↗</Link>
-      </div>
-      <div className="create-controls">
-        {showStyle && (
-          <div className="field ctrl">
-            <span className="ctrl-icon" aria-hidden>♪</span>
-            <div className="field">
-              <label>Style model</label>
-              <select value={loraId} onChange={(e) => setLoraId(e.target.value)}>
-                <option value="">Auto (match tags)</option>
-                {(loras.data?.loras || []).map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        )}
-        <div className="field ctrl">
-          <span className="ctrl-icon" aria-hidden>☺</span>
-          <div className="field">
-            <label>Mood</label>
-            <select value={mood} onChange={(e) => setMood(e.target.value)}>
-              {MOODS.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="field ctrl">
-          <span className="ctrl-icon" aria-hidden>⇍</span>
-          <div className="field">
-            <label>Instrumental / Vocal</label>
-            <div className="segmented">
-              <button type="button" className={!instrumental ? "active" : ""} onClick={() => setInstrumental(false)}>
-                Vocal
-              </button>
-              <button type="button" className={instrumental ? "active" : ""} onClick={() => setInstrumental(true)}>
-                Instrumental
-              </button>
-            </div>
-          </div>
-        </div>
-        {!instrumental && (
-          <div className="field ctrl">
-            <span className="ctrl-icon" aria-hidden>🎤</span>
-            <div className="field">
-              <label>Lead singer</label>
-              <div className="segmented">
-                <button type="button" className={gender === "" ? "active" : ""} onClick={() => setGender("")}>Any</button>
-                <button type="button" className={gender === "male" ? "active" : ""} onClick={() => setGender("male")}>Male</button>
-                <button type="button" className={gender === "female" ? "active" : ""} onClick={() => setGender("female")}>Female</button>
-              </div>
-            </div>
-          </div>
-        )}
-        <div className="field ctrl">
-          <span className="ctrl-icon" aria-hidden>◷</span>
-          <div className="field">
-            <label>Duration</label>
-            <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-              {DURATIONS.map((d) => (
-                <option key={d.value} value={d.value}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        {variant !== "wide" && (
-          <button className="btn btn-primary btn-lg" disabled={!!busy} onClick={() => generate.mutate()}>
-            {busy ? "✦ Generating…" : actionLabel} →
-          </button>
-        )}
-      </div>
-      {!easy && (
-        <div className="create-advanced">
-          <div className="field ctrl">
-            <div className="field">
-              <label>BPM</label>
-              <input type="number" min={30} max={300} value={bpm} onChange={(e) => setBpm(e.target.value)} placeholder="Auto" />
-            </div>
-          </div>
-          <div className="field ctrl">
-            <div className="field">
-              <label>Key</label>
-              <select value={keyScale} onChange={(e) => setKeyScale(e.target.value)}>
-                <option value="">Auto</option>
-                {KEYS.map((k) => <option key={k} value={k}>{k}</option>)}
-              </select>
-            </div>
-          </div>
-          <div className="field ctrl">
-            <div className="field">
-              <label>Vocal language</label>
-              <select value={language} onChange={(e) => setLanguage(e.target.value)}>
-                <option value="">Auto</option>
-                {LANGUAGES.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
-              </select>
-            </div>
-          </div>
-          <div className="field ctrl">
-            <div className="field">
-              <label>Weirdness {shift.toFixed(2)}</label>
-              <input type="range" min={0.5} max={2} step={0.05} value={shift} onChange={(e) => setShift(Number(e.target.value))} />
-            </div>
-          </div>
-          <div className="field ctrl">
-            <div className="field">
-              <label>Quality</label>
-              <select value={quality} onChange={(e) => setQuality(Number(e.target.value))}>
-                {QUALITY.map((q) => <option key={q.value} value={q.value}>{q.label}</option>)}
-              </select>
-            </div>
-          </div>
-          <div className="field ctrl">
-            <div className="field">
-              <label>Variations (2× credits)</label>
-              <div className="segmented">
-                <button type="button" className={variations === 1 ? "active" : ""} onClick={() => setVariations(1)}>1</button>
-                <button type="button" className={variations === 2 ? "active" : ""} onClick={() => setVariations(2)}>2</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+        <button type="button" className="chip chip-link" onClick={() => setSheetOpen(true)}>♬ cheat sheet</button>
+      </div>}
+
       {error && <p className="pill err" style={{ marginTop: 12 }}>{error}</p>}
       {status === "failed" && (
         <p className="pill err" style={{ marginTop: 12 }}>
@@ -460,6 +582,69 @@ export default function CreateWidget({
           </div>
         );
       })}
+      {sheetOpen && <StyleSheetModal onPick={addChip} onClose={() => setSheetOpen(false)} />}
+    </div>
+  );
+}
+
+interface CheatSheet {
+  categories: { name: string; tags: string[] }[];
+  lora_tags: string[];
+}
+
+function StyleSheetModal({ onPick, onClose }: { onPick: (tag: string) => void; onClose: () => void }) {
+  const [picked, setPicked] = useState<string[]>([]);
+  const sheet = useQuery({
+    queryKey: ["style-cheatsheet"],
+    queryFn: () => api.get<CheatSheet>("/api/v1/styles/cheatsheet"),
+    staleTime: 600000,
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const pick = (tag: string) => {
+    onPick(tag);
+    setPicked((p) => (p.includes(tag) ? p : [...p, tag]));
+  };
+  return (
+    <div className="drawer-overlay" onClick={onClose}>
+      <div className="sheet-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-head">
+          <h3>Style cheat sheet</h3>
+          <span className="spacer" />
+          {picked.length > 0 && <span className="sub" style={{ fontSize: 12 }}>+{picked.length} added</span>}
+          <button type="button" className="btn btn-ghost" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="sheet-body">
+          {(sheet.data?.lora_tags || []).length > 0 && (
+            <div className="sheet-cat">
+              <label>♪ Your style models</label>
+              <div className="sheet-tags">
+                {(sheet.data?.lora_tags || []).map((t) => (
+                  <button key={t} type="button" className={`chip${picked.includes(t) ? " chip-picked" : ""}`} onClick={() => pick(t)}>+ {t}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          {(sheet.data?.categories || []).map((c) => (
+            <div className="sheet-cat" key={c.name}>
+              <label>{c.name}</label>
+              <div className="sheet-tags">
+                {c.tags.map((t) => (
+                  <button key={t} type="button" className={`chip${picked.includes(t) ? " chip-picked" : ""}`} onClick={() => pick(t)}>+ {t}</button>
+                ))}
+              </div>
+            </div>
+          ))}
+          {!sheet.data && <p className="sub">Loading…</p>}
+        </div>
+        <div className="sheet-foot">
+          <span className="spacer" />
+          <button type="button" className="btn btn-primary" onClick={onClose}>Done</button>
+        </div>
+      </div>
     </div>
   );
 }
