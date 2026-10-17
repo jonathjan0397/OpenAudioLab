@@ -325,7 +325,8 @@ def public_track(asset_id: str, request: Request) -> JSONResponse:
         creator = _creator_names(session, {asset.owner_id}).get(asset.owner_id, "community")
         likes = _like_counts(session, [asset.id]).get(asset.id, 0)
         token = make_token(settings.secret_key, asset.id, now + timedelta(hours=24))
-        owner_job = session.get(Job, asset.job_id)
+        owner_job = session.execute(select(Job).where(Job.id == asset.job_id)).scalar_one_or_none()
+        operation = owner_job.operation if owner_job else None
     return JSONResponse(
         {
             "asset_id": asset.id,
@@ -334,7 +335,7 @@ def public_track(asset_id: str, request: Request) -> JSONResponse:
             "created_at": asset.created_at.isoformat() if asset.created_at else None,
             "like_count": likes,
             "creator": creator,
-            "operation": owner_job.operation if owner_job else None,
+            "operation": operation,
             "url": f"/api/v1/artifacts/{asset.id}/content?token={token}",
         }
     )
