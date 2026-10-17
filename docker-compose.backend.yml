@@ -24,6 +24,7 @@ x-app-env: &app-env
   OAL_S3_SECRET_KEY: ${OAL_S3_SECRET_KEY}
   OAL_S3_PREFIX: ${OAL_S3_PREFIX:-}
   OAL_BUILD_REVISION: ${OAL_BUILD_REVISION:-dev}
+  OAL_LLM_BASE_URL: ${OAL_LLM_BASE_URL:-}
 
 services:
   postgres:
