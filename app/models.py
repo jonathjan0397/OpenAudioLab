@@ -407,6 +407,15 @@ class ApiKey(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class PlayEvent(Base):
+    __tablename__ = "play_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    asset_id: Mapped[str] = mapped_column(String(36), index=True)
+    viewer_id: Mapped[str] = mapped_column(String(80), default="anon")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class CreditEntry(Base):
     __tablename__ = "credit_entries"
 

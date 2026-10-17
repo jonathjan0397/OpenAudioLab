@@ -310,6 +310,13 @@ def public_track(asset_id: str, request: Request) -> JSONResponse:
 
     settings = request.app.state.settings
     now = utcnow()
+    from ..deps import owner_from_request
+    from ..models import Favorite
+
+    try:
+        viewer = owner_from_request(request)
+    except ApiError:
+        viewer = None
     with request.app.state.db.session() as session:
         asset = session.get(Asset, asset_id)
         if (
@@ -327,6 +334,12 @@ def public_track(asset_id: str, request: Request) -> JSONResponse:
         token = make_token(settings.secret_key, asset.id, now + timedelta(hours=24))
         owner_job = session.execute(select(Job).where(Job.id == asset.job_id)).scalar_one_or_none()
         operation = owner_job.operation if owner_job else None
+        favorite = bool(
+            viewer
+            and session.execute(
+                select(Favorite).where(Favorite.owner_id == viewer, Favorite.asset_id == asset.id)
+            ).scalar_one_or_none()
+        )
     return JSONResponse(
         {
             "asset_id": asset.id,
@@ -334,8 +347,74 @@ def public_track(asset_id: str, request: Request) -> JSONResponse:
             "duration_seconds": asset.duration_seconds,
             "created_at": asset.created_at.isoformat() if asset.created_at else None,
             "like_count": likes,
+            "favorite": favorite,
             "creator": creator,
             "operation": operation,
             "url": f"/api/v1/artifacts/{asset.id}/content?token={token}",
         }
     )
+
+
+def _artist_stats(session, profile) -> dict:
+    from sqlalchemy import func as sa_func
+
+    from ..models import Asset, ArtistFollow, PlayEvent
+
+    followers = session.execute(
+        select(sa_func.count()).select_from(ArtistFollow).where(ArtistFollow.profile_id == profile.id)
+    ).scalar_one()
+    asset_ids = list(
+        session.execute(
+            select(Asset.id).where(
+                Asset.owner_id == profile.owner_id,
+                Asset.shared.is_(True),
+                Asset.role == "mix_wav",
+                Asset.deleted_at.is_(None),
+            )
+        ).scalars()
+    )
+    plays = 0
+    if asset_ids:
+        plays = int(
+            session.execute(
+                select(sa_func.count()).select_from(PlayEvent).where(PlayEvent.asset_id.in_(asset_ids))
+            ).scalar_one()
+        )
+    return {
+        "name": profile.name,
+        "slug": profile.slug,
+        "tracks": len(asset_ids),
+        "followers": int(followers),
+        "plays": plays,
+    }
+
+
+@router.get("/public/spotlight")
+def public_spotlight(request: Request) -> JSONResponse:
+    """Most-followed public artist, for the home spotlight card."""
+    from sqlalchemy import func as sa_func
+
+    from ..models import ArtistFollow
+
+    with request.app.state.db.session() as session:
+        row = session.execute(
+            select(ArtistProfile)
+            .outerjoin(ArtistFollow, ArtistFollow.profile_id == ArtistProfile.id)
+            .where(ArtistProfile.sharing_policy == "public")
+            .order_by(
+                sa_func.count(ArtistFollow.id).desc(),
+                ArtistProfile.name,
+            )
+            .group_by(ArtistProfile.id)
+            .limit(1)
+        ).first()
+        if row is None:
+            return JSONResponse({"artist": None})
+        return JSONResponse({"artist": _artist_stats(session, row[0])})
+
+
+@router.get("/public/artists/{slug}/stats")
+def public_artist_stats(slug: str, request: Request) -> JSONResponse:
+    with request.app.state.db.session() as session:
+        profile = _profile_by_slug(session, slug)
+        return JSONResponse(_artist_stats(session, profile))

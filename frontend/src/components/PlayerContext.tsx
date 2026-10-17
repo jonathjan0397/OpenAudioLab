@@ -68,6 +68,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     audio.src = track.url;
     setPosition(0);
     setDuration(track.duration || 0);
+    void fetch(`/api/v1/artifacts/${track.asset_id}/play`, { method: "POST", credentials: "include" }).catch(() => {});
     if (autoplay) void audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
   }, []);
 

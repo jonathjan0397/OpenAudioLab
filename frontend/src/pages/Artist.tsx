@@ -1,6 +1,8 @@
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
+import { FollowButton } from "../components/social";
+import { fmtCount, useArtistStats } from "../components/tracks";
 
 interface PublicArtist {
   profile_id: string;
@@ -23,6 +25,7 @@ export default function ArtistPage() {
     queryFn: () => api.get<ArtistDetail>(`/api/v1/public/artists/${slug}`),
     enabled: !!slug,
   });
+  const stats = useArtistStats(slug);
 
   if (slug) {
     if (artist.isLoading) return <main className="page"><p>Loading...</p></main>;
@@ -30,14 +33,27 @@ export default function ArtistPage() {
       return <main className="page"><h1>Artist not found</h1></main>;
     return (
       <main className="page">
-        <h1>{artist.data.name}</h1>
+        <div className="hero-strip">
+          <div>
+            <h1>{artist.data.name}</h1>
+            <div className="sub">
+              {fmtCount(stats.data?.tracks)} tracks · {fmtCount(stats.data?.followers)} followers · {fmtCount(stats.data?.plays)} plays
+            </div>
+          </div>
+          <div className="strip-controls">
+            <FollowButton slug={artist.data.slug} />
+          </div>
+        </div>
+        <div style={{ marginTop: 18 }}>
         {artist.data.tracks.length === 0 && <p style={{ color: "var(--muted)" }}>No shared tracks yet.</p>}
         {artist.data.tracks.map((t) => (
           <div className="card" key={t.asset_id} style={{ marginBottom: 10 }}>
-            <strong>{t.title || "Untitled"}</strong>
+            <strong>{t.title || "Untitled"}</strong>{" "}
+            <Link className="link" to={`/track/${t.asset_id}`}>open →</Link>
             <audio controls src={t.url} style={{ width: "100%", marginTop: 8 }} />
           </div>
         ))}
+        </div>
       </main>
     );
   }

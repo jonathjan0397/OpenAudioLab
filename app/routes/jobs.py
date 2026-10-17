@@ -666,7 +666,7 @@ def artifact_favorite(
 
     with request.app.state.db.session() as session:
         asset = session.execute(select(Asset).where(Asset.id == asset_id)).scalar_one_or_none()
-        if asset is None or asset.owner_id != owner_id:
+        if asset is None or (asset.owner_id != owner_id and not asset.shared):
             raise ApiError(404, "ASSET_NOT_FOUND", "Asset not found.")
         existing = session.execute(
             select(Favorite).where(Favorite.owner_id == owner_id, Favorite.asset_id == asset_id)
@@ -678,6 +678,26 @@ def artifact_favorite(
         session.add(Favorite(owner_id=owner_id, asset_id=asset_id))
         session.commit()
         return JSONResponse({"asset_id": asset_id, "favorite": True})
+
+
+@router.post("/artifacts/{asset_id}/play", status_code=202)
+def artifact_play(asset_id: str, request: Request) -> JSONResponse:
+    """Record a play; anonymous visitors are allowed."""
+    from ..deps import owner_from_request
+    from ..errors import ApiError as _ApiError
+    from ..models import PlayEvent
+
+    try:
+        viewer = owner_from_request(request)
+    except _ApiError:
+        viewer = "anon"
+    with request.app.state.db.session() as session:
+        asset = session.execute(select(Asset).where(Asset.id == asset_id)).scalar_one_or_none()
+        if asset is None or asset.deleted_at is not None:
+            raise ApiError(404, "ASSET_NOT_FOUND", "Asset not found.")
+        session.add(PlayEvent(asset_id=asset_id, viewer_id=viewer))
+        session.commit()
+    return JSONResponse({"asset_id": asset_id, "recorded": True}, status_code=202)
 
 
 @router.get("/credits")
@@ -764,25 +784,56 @@ def list_loras(request: Request) -> JSONResponse:
 def public_tracks(
     request: Request,
     limit: int = Query(default=12, ge=1, le=50),
+    tag: str | None = Query(default=None, max_length=40),
 ) -> JSONResponse:
     settings = request.app.state.settings
     now = utcnow()
+    from sqlalchemy import String as SAString
+    from sqlalchemy import cast
+
+    from ..deps import owner_from_request
+    from ..errors import ApiError as _ApiError
+    from ..models import PlayEvent
+
+    try:
+        viewer = owner_from_request(request)
+    except _ApiError:
+        viewer = None
     with request.app.state.db.session() as session:
+        stmt = select(Asset).where(
+            Asset.shared.is_(True),
+            Asset.deleted_at.is_(None),
+            Asset.mime.like("audio/%"),
+            Asset.role == "mix_wav",
+        )
+        if tag:
+            stmt = stmt.where(cast(Asset.tags_json, SAString).like(f'%"{tag.lower()}"%'))
         rows = list(
-            session.execute(
-                select(Asset)
-                .where(
-                    Asset.shared.is_(True),
-                    Asset.deleted_at.is_(None),
-                    Asset.mime.like("audio/%"),
-                    Asset.role == "mix_wav",
-                )
-                .order_by(Asset.created_at.desc())
-                .limit(limit)
-            ).scalars()
+            session.execute(stmt.order_by(Asset.created_at.desc()).limit(limit)).scalars()
         )
         likes = _like_counts(session, [a.id for a in rows])
         creators = _creator_names(session, {a.owner_id for a in rows})
+        asset_ids = [a.id for a in rows]
+        plays: dict[str, int] = {}
+        favorites: set[str] = set()
+        if asset_ids:
+            from sqlalchemy import func as sa_func
+
+            from ..models import Favorite
+
+            for aid, n in session.execute(
+                select(PlayEvent.asset_id, sa_func.count())
+                .where(PlayEvent.asset_id.in_(asset_ids))
+                .group_by(PlayEvent.asset_id)
+            ).all():
+                plays[aid] = int(n)
+            if viewer:
+                favorites = {
+                    f.asset_id
+                    for f in session.execute(
+                        select(Favorite).where(Favorite.owner_id == viewer, Favorite.asset_id.in_(asset_ids))
+                    ).scalars()
+                }
     items = []
     for asset in rows:
         if asset.expires_at is not None and as_utc(asset.expires_at) <= now:
@@ -796,6 +847,9 @@ def public_tracks(
                 "duration_seconds": asset.duration_seconds,
                 "created_at": asset.created_at.isoformat() if asset.created_at else None,
                 "like_count": likes.get(asset.id, 0),
+                "plays": plays.get(asset.id, 0),
+                "favorite": asset.id in favorites,
+                "tags": list(asset.tags_json or []),
                 "creator": creators.get(asset.owner_id, "community"),
                 "url": f"/api/v1/artifacts/{asset.id}/content?token={token}",
             }

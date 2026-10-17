@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import ArtworkTile from "../components/ArtworkTile";
 import { usePlayer } from "../components/PlayerContext";
-import { toPlayable, usePublicTracks } from "../components/tracks";
+import { toast } from "../components/Toast";
+import { PublicTrack, fmtCount, toPlayable, usePublicTracks } from "../components/tracks";
 import { useTheme } from "../theme";
 
 interface SearchResults {
@@ -21,30 +22,41 @@ interface SearchResults {
   artists: { name: string; slug: string | null }[];
 }
 
-const GENRES = ["All", "Vocals", "Instrumental", "Hip Hop", "R&B", "Indie", "Electronic", "Cinematic"];
+const MOODS = ["All", "Hopeful", "Melancholic", "Energetic", "Calm", "Dreamy", "Dark"];
 
 export default function ExplorePage() {
   const [params, setParams] = useSearchParams();
   const q = params.get("q") || "";
   const [input, setInput] = useState(q);
-  const [genre, setGenre] = useState("All");
+  const [mood, setMood] = useState("All");
   const theme = useTheme();
   const player = usePlayer();
-  const tracks = usePublicTracks(12);
+  const qc = useQueryClient();
+  const tracks = usePublicTracks(12, mood === "All" ? undefined : mood.toLowerCase());
   const results = useQuery({
     queryKey: ["search", q],
     queryFn: () => api.get<SearchResults>(`/api/v1/search?q=${encodeURIComponent(q)}`),
     enabled: q.length >= 2,
   });
-  const list =
-    results.data && q.length >= 2
-      ? results.data.tracks.map((t) => ({
-          ...t,
-          created_at: t.created_at ?? null,
-          like_count: t.like_count ?? 0,
-          creator: t.creator ?? "community",
-        }))
-      : tracks.data?.tracks || [];
+  const searching = q.length >= 2 && !!results.data;
+  const list: PublicTrack[] = searching
+    ? (results.data?.tracks.map((t) => ({
+        asset_id: t.asset_id,
+        title: t.title,
+        duration_seconds: t.duration_seconds,
+        url: t.url,
+        created_at: t.created_at ?? null,
+        like_count: t.like_count ?? 0,
+        creator: t.creator ?? "community",
+      })) || [])
+    : tracks.data?.tracks || [];
+
+  const toggleFavorite = async (t: PublicTrack) => {
+    const res = await fetch(`/api/v1/artifacts/${t.asset_id}/favorite`, { method: "POST", credentials: "include" });
+    if (res.status === 401) toast("Sign in to favorite tracks");
+    else if (!res.ok) toast("Could not favorite");
+    qc.invalidateQueries({ queryKey: ["public-tracks"] });
+  };
 
   return (
     <main className="page">
@@ -71,21 +83,21 @@ export default function ExplorePage() {
         </button>
       </form>
       <div className="chips" style={{ marginBottom: 20 }}>
-        {GENRES.map((g) => (
+        {MOODS.map((g) => (
           <button
             key={g}
-            className={`chip${g === genre ? " active" : ""}`}
-            style={g === genre ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
-            onClick={() => setGenre(g)}
+            className={`chip${g === mood ? " active" : ""}`}
+            style={g === mood ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
+            onClick={() => setMood(g)}
           >
             {g}
           </button>
         ))}
       </div>
 
-      {results.data && q.length >= 2 && results.data.artists.length > 0 && (
+      {searching && results.data!.artists.length > 0 && (
         <div className="chips" style={{ marginBottom: 16 }}>
-          {results.data.artists.map((a) => (
+          {results.data!.artists.map((a) => (
             <a key={a.slug} className="chip" href={`/artists/${a.slug}`} style={{ color: "var(--accent)" }}>
               ♪ {a.name}
             </a>
@@ -103,12 +115,27 @@ export default function ExplorePage() {
               onPlay={() => player.playQueue(list.map((x) => toPlayable(x)), i)}
             />
             <div className="name">{t.title || "Untitled"}</div>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 12, color: "var(--muted)" }}>
+              <button
+                className="chip"
+                style={{
+                  padding: "2px 8px",
+                  color: t.favorite ? "var(--accent)" : undefined,
+                  borderColor: t.favorite ? "var(--accent)" : undefined,
+                }}
+                onClick={() => toggleFavorite(t)}
+              >
+                ♥ {fmtCount(t.like_count)}
+              </button>
+              {t.plays != null && <span className="mono">▶ {fmtCount(t.plays)}</span>}
+              {t.tags && t.tags.length > 0 && <span>{t.tags[0]}</span>}
+            </div>
           </div>
         ))}
         {list.length === 0 && <p style={{ color: "var(--muted)" }}>Nothing found.</p>}
       </div>
       <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 18 }}>
-        Genre filters are coming soon — every genre chip is wired to the search API.
+        Mood chips filter the community feed by the mood chosen at creation time.
       </p>
       <span hidden>{theme}</span>
     </main>

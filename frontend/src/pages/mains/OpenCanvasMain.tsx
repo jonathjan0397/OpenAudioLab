@@ -5,12 +5,14 @@ import { usePlayer } from "../../components/PlayerContext";
 import { usePublicTracks, toPlayable } from "../../components/tracks";
 import { themeAvatar, themeArt, useTheme } from "../../theme";
 import { FollowButton, usePublicArtists } from "../../components/social";
+import { fmtCount, useSpotlight } from "../../components/tracks";
 
 export default function OpenCanvasMain() {
   const theme = useTheme();
   const player = usePlayer();
   const tracks = usePublicTracks(5);
   const artists = usePublicArtists();
+  const spot = useSpotlight();
   const list = tracks.data?.tracks || [];
 
   return (
@@ -74,10 +76,10 @@ export default function OpenCanvasMain() {
           <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
             <img className="avatar round" style={{ width: 52, height: 52 }} src={themeAvatar(theme)} alt="" />
             <div style={{ flex: 1 }}>
-              <strong>Luna Waverly</strong>
+              <strong>{spot.data?.artist?.name || "Luna Waverly"}</strong>
               <div style={{ fontSize: 12, color: "var(--muted)" }}>Producer · Songwriter · Explorer</div>
             </div>
-            <FollowButton slug={artists.data?.artists?.[0]?.slug} />
+            <FollowButton slug={spot.data?.artist?.slug ?? artists.data?.artists?.[0]?.slug} />
           </div>
           <div className="spot-thumbs">
             {list.slice(0, 6).map((t) => (
@@ -86,7 +88,7 @@ export default function OpenCanvasMain() {
             {list.length === 0 && [0, 1, 2, 3, 4, 5].map((i) => <img key={i} src={themeArt(theme, `x${i}`)} alt="" />)}
           </div>
           <div style={{ display: "flex", gap: 18, marginTop: 12 }}>
-            {[["12", "Tracks"], ["8.4K", "Followers"], ["1.2M", "Plays"]].map(([v, l]) => (
+            {[[fmtCount(spot.data?.artist?.tracks), "Tracks"], [fmtCount(spot.data?.artist?.followers), "Followers"], [fmtCount(spot.data?.artist?.plays), "Plays"]].map(([v, l]) => (
               <div key={l}>
                 <div style={{ fontWeight: 800, fontSize: 17 }}>{v}</div>
                 <div style={{ fontSize: 11, color: "var(--muted)" }}>{l}</div>

@@ -78,6 +78,7 @@ export default function CreateWidget({
           model_id: "ace-step-1.5",
           music_description: mood ? `${desc}, ${mood.toLowerCase()} mood` : desc,
           ...(lyrics ? { lyrics, lyrics_origin: "frontend_llm" } : {}),
+          controls: mood ? { mood: mood.toLowerCase() } : {},
           duration_seconds: duration,
           instrumental,
           ...(loraId ? { lora_id: loraId } : {}),

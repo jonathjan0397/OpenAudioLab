@@ -307,6 +307,7 @@ def complete_attempt(
             storage.put(key[: -len(".wav")] + ".json", peaks_json(data))
         except Exception:  # waveform peaks are best-effort decoration
             pass
+        mood = dict(job.request_json.get("controls") or {}).get("mood")
         asset = Asset(
             job_id=job.id,
             owner_id=job.owner_id,
@@ -317,6 +318,7 @@ def complete_attempt(
             bytes=len(data),
             sha256=checksum,
             synthetic=synthetic,
+            tags_json=[mood] if mood else [],
             finalized_at=utcnow(),
             expires_at=expires_at,
             sample_rate=audio_meta[0] if audio_meta else None,

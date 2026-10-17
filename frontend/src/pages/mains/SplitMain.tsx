@@ -3,7 +3,7 @@ import CreateWidget from "../../components/CreateWidget";
 import ArtworkTile from "../../components/ArtworkTile";
 import Waveform from "../../components/Waveform";
 import { usePlayer } from "../../components/PlayerContext";
-import { usePublicTracks, toPlayable } from "../../components/tracks";
+import { fmtCount, usePublicTracks, useSpotlight, toPlayable } from "../../components/tracks";
 import { themeAvatar, themeBanner, useTheme } from "../../theme";
 import { FollowButton, usePublicArtists } from "../../components/social";
 import { fmtTime } from "../../components/ui";
@@ -49,6 +49,7 @@ export default function SplitMain() {
   const hero = HEROES[theme] || HEROES["neon-studio"];
   const tracks = usePublicTracks(4);
   const artists = usePublicArtists();
+  const spot = useSpotlight();
   const list = tracks.data?.tracks || [];
   const [tab, setTab] = useState("Create");
 
@@ -137,7 +138,7 @@ export default function SplitMain() {
             <div className="pc-banner-name">
               <img className="avatar round" style={{ width: 40, height: 40 }} src={themeAvatar(theme)} alt="" />
               <div>
-                <strong>Luna Waverly</strong>
+                <strong>{spot.data?.artist?.name || "Luna Waverly"}</strong>
                 <div style={{ fontSize: 11, color: "var(--muted)" }}>Electronic Producer</div>
               </div>
             </div>
@@ -146,9 +147,9 @@ export default function SplitMain() {
             <p style={{ fontSize: 13, color: "var(--muted)" }}>
               Blending organic textures with electronic energy. Exploring a brighter future through sound.
             </p>
-            <FollowButton slug={artists.data?.artists?.[0]?.slug} />
+            <FollowButton slug={spot.data?.artist?.slug ?? artists.data?.artists?.[0]?.slug} />
             <div style={{ display: "flex", gap: 18, marginTop: 14 }}>
-              {[["24", "Tracks"], ["128K", "Followers"], ["4.2M", "Plays"]].map(([v, l]) => (
+              {[[fmtCount(spot.data?.artist?.tracks), "Tracks"], [fmtCount(spot.data?.artist?.followers), "Followers"], [fmtCount(spot.data?.artist?.plays), "Plays"]].map(([v, l]) => (
                 <div key={l}>
                   <div style={{ fontWeight: 800 }}>{v}</div>
                   <div style={{ fontSize: 11, color: "var(--muted)" }}>{l}</div>

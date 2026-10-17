@@ -1,5 +1,5 @@
 import { Link, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import ArtworkTile from "../components/ArtworkTile";
 import { Playable, usePlayer } from "../components/PlayerContext";
@@ -15,6 +15,7 @@ interface TrackInfo {
   like_count: number;
   creator: string;
   url: string;
+  favorite?: boolean;
 }
 
 async function copyLink(url: string) {
@@ -35,6 +36,7 @@ async function copyLink(url: string) {
 export default function TrackPage() {
   const { assetId } = useParams();
   const player = usePlayer();
+  const qc = useQueryClient();
   const track = useQuery({
     queryKey: ["public-track", assetId],
     queryFn: () => api.get<TrackInfo>(`/api/v1/public/tracks/${assetId}`),
@@ -75,7 +77,22 @@ export default function TrackPage() {
         <div>
           <h1>{t.title}</h1>
           <div className="sub">
-            <Avatar name={t.creator} sm /> {t.creator} · ♥ {t.like_count}
+            <Avatar name={t.creator} sm /> {t.creator} ·{" "}
+            <button
+              className="chip"
+              style={{
+                padding: "2px 8px",
+                color: t.favorite ? "var(--accent)" : undefined,
+                borderColor: t.favorite ? "var(--accent)" : undefined,
+              }}
+              onClick={async () => {
+                const res = await fetch(`/api/v1/artifacts/${t.asset_id}/favorite`, { method: "POST", credentials: "include" });
+                if (res.status === 401) toast("Sign in to favorite tracks");
+                qc.invalidateQueries({ queryKey: ["public-track", assetId] });
+              }}
+            >
+              ♥ {t.like_count}
+            </button>
             {t.created_at ? ` · ${t.created_at.slice(0, 10)}` : ""}
           </div>
         </div>
