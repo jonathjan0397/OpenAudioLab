@@ -35,7 +35,9 @@ RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/wh
 RUN pip install --no-cache-dir numpy
 
 # --- Audio auto-tagging (M16): librosa DSP + MusicNN genre model (CPU TF) ----
-RUN pip install --no-cache-dir tensorflow-cpu librosa \
+# musicnn predates Keras 3; tf-keras + TF_USE_LEGACY_KERAS pins tf.keras to 2.x.
+ENV TF_USE_LEGACY_KERAS=1
+RUN pip install --no-cache-dir tensorflow-cpu tf-keras librosa \
     && pip install --no-cache-dir --no-deps musicnn
 
 # --- WireGuard client + NFS mount tooling (late layer, heavy layers cached) ---
