@@ -1,3 +1,5 @@
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../../api";
 import CreateWidget from "../../components/CreateWidget";
 import NowPlaying from "../../components/NowPlaying";
 import ArtworkTile from "../../components/ArtworkTile";
@@ -12,6 +14,14 @@ export default function OpenCanvasMain() {
   const player = usePlayer();
   const tracks = usePublicTracks(5);
   const artists = usePublicArtists();
+  const featuredArtists = useQuery({
+    queryKey: ["featured-artists"],
+    queryFn: () =>
+      api.get<{ profile_id: string; name: string; slug: string; bio?: string | null; avatar_url?: string | null }[]>(
+        "/api/v1/public/artists?limit=10"
+      ),
+    staleTime: 120000,
+  });
   const spot = useSpotlight();
   const list = tracks.data?.tracks || [];
 
@@ -64,6 +74,26 @@ export default function OpenCanvasMain() {
               </div>
             ))}
             {list.length === 0 && <p style={{ color: "var(--muted)" }}>Nothing shared yet.</p>}
+          </div>
+
+          <div className="section-head" style={{ marginTop: 26 }}>
+            <h2>Featured Artists</h2>
+            <span className="sub">Latest public profiles</span>
+            <span className="spacer" />
+            <a className="link" href="/artists">All artists →</a>
+          </div>
+          <div className="artist-strip">
+            {(featuredArtists.data || []).slice(0, 10).map((a) => (
+              <a className="artist-tile card" key={a.profile_id} href={`/artists/${a.slug}`}>
+                {a.avatar_url ? (
+                  <img src={a.avatar_url} alt="" className="avatar round" style={{ width: 44, height: 44 }} />
+                ) : (
+                  <span className="avatar round" style={{ width: 44, height: 44, background: "var(--surface-2, #333)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>☺</span>
+                )}
+                <span style={{ fontSize: 13, fontWeight: 600 }}>{a.name}</span>
+              </a>
+            ))}
+            {(featuredArtists.data || []).length === 0 && <p style={{ color: "var(--muted)" }}>No public artists yet.</p>}
           </div>
         </section>
 
