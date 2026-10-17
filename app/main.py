@@ -24,6 +24,8 @@ from .routes import (
     models_router,
     projects_router,
     seo_router,
+    llm_router,
+    features_router,
     uploads_router,
 )
 from .storage import build_storage
@@ -78,6 +80,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.db = Db(settings.database_url)
     app.state.storage = build_storage(settings)
+    if settings.llm_base_url:
+        from .llm import LlmClient
+
+        app.state.llm = LlmClient(settings.llm_base_url, settings.llm_timeout_seconds)
 
     app.add_middleware(BodyLimitMiddleware, max_body_bytes=settings.max_body_bytes, max_upload_bytes=settings.max_upload_bytes)
     app.add_middleware(RequestIdMiddleware)
@@ -100,6 +106,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(artist_router, prefix=API_V1_PREFIX)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     app.include_router(admin_router, prefix=API_V1_PREFIX)
+    app.include_router(llm_router, prefix=API_V1_PREFIX)
+    app.include_router(features_router, prefix=API_V1_PREFIX)
     app.include_router(seo_router)
     app.include_router(internal_router, prefix="/internal/v1")
     # /lab stopgap test harness (self-prefixed routes, HTTP Basic guarded).

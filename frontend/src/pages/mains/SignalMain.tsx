@@ -4,6 +4,7 @@ import ArtworkTile from "../../components/ArtworkTile";
 import { usePlayer } from "../../components/PlayerContext";
 import { usePublicTracks, toPlayable } from "../../components/tracks";
 import { themeAvatar, useTheme } from "../../theme";
+import { exportArtifact } from "../../components/social";
 
 const FADERS = [
   ["Master", "0.0 dB", "var(--accent)"],
@@ -121,11 +122,11 @@ export default function SignalMain() {
               <span className="ec-icon">⇊</span>
               <span><strong>WAV</strong><div className="ec-sub">High quality 44.1 kHz</div></span>
             </button>
-            <button className="export-card" disabled title="Coming soon">
+            <button className="export-card" onClick={() => exportArtifact(list[0]?.asset_id ?? null, "mp3")}>
               <span className="ec-icon">♫</span>
               <span><strong>MP3</strong><div className="ec-sub">320 kbps</div></span>
             </button>
-            <button className="export-card" disabled title="Coming soon">
+            <button className="export-card" onClick={() => exportArtifact(list[0]?.asset_id ?? null, "stems")}>
               <span className="ec-icon">≋</span>
               <span><strong>WAV Stems</strong><div className="ec-sub">Individual tracks</div></span>
             </button>

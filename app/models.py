@@ -384,6 +384,16 @@ class Favorite(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class ArtistFollow(Base):
+    __tablename__ = "artist_follows"
+    __table_args__ = (UniqueConstraint("owner_id", "profile_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    owner_id: Mapped[str] = mapped_column(String(80), index=True)
+    profile_id: Mapped[str] = mapped_column(String(36), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class CreditEntry(Base):
     __tablename__ = "credit_entries"
 

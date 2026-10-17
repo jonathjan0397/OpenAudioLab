@@ -4,11 +4,13 @@ import ArtworkTile from "../../components/ArtworkTile";
 import { usePlayer } from "../../components/PlayerContext";
 import { usePublicTracks, toPlayable } from "../../components/tracks";
 import { themeAvatar, themeArt, useTheme } from "../../theme";
+import { FollowButton, usePublicArtists } from "../../components/social";
 
 export default function OpenCanvasMain() {
   const theme = useTheme();
   const player = usePlayer();
   const tracks = usePublicTracks(5);
+  const artists = usePublicArtists();
   const list = tracks.data?.tracks || [];
 
   return (
@@ -75,7 +77,7 @@ export default function OpenCanvasMain() {
               <strong>Luna Waverly</strong>
               <div style={{ fontSize: 12, color: "var(--muted)" }}>Producer · Songwriter · Explorer</div>
             </div>
-            <button className="btn" disabled title="Coming soon">Follow</button>
+            <FollowButton slug={artists.data?.artists?.[0]?.slug} />
           </div>
           <div className="spot-thumbs">
             {list.slice(0, 6).map((t) => (

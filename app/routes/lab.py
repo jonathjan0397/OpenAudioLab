@@ -157,6 +157,30 @@ def lab_generate(
     return create_job(gen, shim, owner)
 
 
+@router.post("/lab/api/llm")
+def lab_llm(
+    payload: dict[str, Any],
+    request: Request,
+    _: HTTPBasicCredentials = Depends(require_lab),
+) -> JSONResponse:
+    from ..llm import LYRICS_SYSTEM, STYLE_SYSTEM
+
+    client = getattr(request.app.state, "llm", None)
+    if client is None:
+        raise ApiError(503, "LLM_DISABLED", "The lyrics assistant is not configured.")
+    task = payload.get("task", "lyrics")
+    text_in = str(payload.get("input", ""))[:2000]
+    if task == "style":
+        system, user, max_tokens = STYLE_SYSTEM, text_in, 60
+    else:
+        system, user, max_tokens = LYRICS_SYSTEM, f"Write song lyrics for: {text_in}", 420
+    try:
+        text = client.chat(system, user, max_tokens=max_tokens)
+    except Exception as exc:
+        raise ApiError(502, "LLM_UNAVAILABLE", str(exc)[:200])
+    return JSONResponse({"text": text})
+
+
 @router.get("/lab/api/profiles")
 def lab_profiles(
     request: Request,
@@ -404,6 +428,15 @@ _PAGE_HTML = """<!doctype html>
   </section>
 
   <section class="card">
+    <h2>LLM assistant <span style="font-weight:400;font-size:12px;color:#888">(lyrics + style prompts only)</span></h2>
+    <select id="llm-task"><option value="lyrics">Write lyrics</option><option value="style">Style prompt</option></select>
+    <input id="llm-input" placeholder="e.g. a rainy night drive" style="width:55%">
+    <button id="llm-go">Ask</button>
+    <div class="status" id="llm-status"></div>
+    <pre id="llm-out" style="white-space:pre-wrap;margin-top:8px"></pre>
+  </section>
+
+  <section class="card">
     <h2>Artifacts <button class="ghost" id="refresh" style="float:right;padding:4px 12px">Refresh</button></h2>
     <ul class="artifacts" id="list"><li class="empty">Loading...</li></ul>
   </section>
@@ -585,11 +618,30 @@ function uploadFile() {
   x.send(fd);
 }
 
+function askLlm() {
+  var task = $("llm-task").value;
+  var input = $("llm-input").value.trim();
+  if (!input) { $("llm-status").textContent = "Type something first."; return; }
+  $("llm-go").disabled = true;
+  $("llm-status").textContent = "Thinking...";
+  $("llm-out").textContent = "";
+  xhr("POST", "/lab/api/llm", JSON.stringify({ task: task, input: input }), function (x) {
+    $("llm-go").disabled = false;
+    if (!x) { $("llm-status").textContent = ""; return; }
+    var data = null;
+    try { data = JSON.parse(x.responseText); } catch (e) {}
+    if (!x.status || x.status >= 400) { $("llm-status").textContent = "Error: " + ((data && data.error && data.error.code) || x.status); return; }
+    $("llm-status").textContent = "";
+    $("llm-out").textContent = data.text || "(empty)";
+  });
+}
+
 $("go").addEventListener("click", generate);
 $("refresh").addEventListener("click", loadArtifacts);
 $("profrefresh").addEventListener("click", loadProfiles);
 $("lorarefresh").addEventListener("click", loadLoras);
 $("upload").addEventListener("click", uploadFile);
+$("llm-go").addEventListener("click", askLlm);
 $("lora").addEventListener("change", function () { if (this.value) $("profile").value = ""; });
 $("profile").addEventListener("change", function () { if (this.value) $("lora").value = ""; });
 loadArtifacts();

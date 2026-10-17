@@ -5,6 +5,7 @@ import Waveform from "../../components/Waveform";
 import { usePlayer } from "../../components/PlayerContext";
 import { usePublicTracks, toPlayable } from "../../components/tracks";
 import { themeAvatar, themeBanner, useTheme } from "../../theme";
+import { FollowButton, usePublicArtists } from "../../components/social";
 import { fmtTime } from "../../components/ui";
 
 const HEROES: Record<string, { kicker: string; title: JSX.Element; sub: string; features?: [string, string, string][] }> = {
@@ -47,6 +48,7 @@ export default function SplitMain() {
   const player = usePlayer();
   const hero = HEROES[theme] || HEROES["neon-studio"];
   const tracks = usePublicTracks(4);
+  const artists = usePublicArtists();
   const list = tracks.data?.tracks || [];
   const [tab, setTab] = useState("Create");
 
@@ -144,7 +146,7 @@ export default function SplitMain() {
             <p style={{ fontSize: 13, color: "var(--muted)" }}>
               Blending organic textures with electronic energy. Exploring a brighter future through sound.
             </p>
-            <button className="btn btn-primary" disabled title="Coming soon" style={{ width: "100%" }}>Follow</button>
+            <FollowButton slug={artists.data?.artists?.[0]?.slug} />
             <div style={{ display: "flex", gap: 18, marginTop: 14 }}>
               {[["24", "Tracks"], ["128K", "Followers"], ["4.2M", "Plays"]].map(([v, l]) => (
                 <div key={l}>

@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     bootstrap_admin_password: str = ""
     credit_cost_per_generation: int = 10
     web_dir: str = "./web"
+    # M9: task-locked LLM assistant (lyrics + style prompts) via llama.cpp.
+    llm_base_url: str = ""
+    llm_timeout_seconds: float = 120.0
 
     # Milestone 2: durable orchestration
     redis_url: str = "redis://127.0.0.1:6379/0"

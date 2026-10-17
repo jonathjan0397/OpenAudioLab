@@ -1,6 +1,7 @@
 import ArtworkTile from "./ArtworkTile";
 import Waveform from "./Waveform";
 import { usePlayer } from "./PlayerContext";
+import { exportArtifact } from "./social";
 import { PublicTrack, toPlayable } from "./tracks";
 import { fmtTime } from "./ui";
 
@@ -77,8 +78,8 @@ export default function NowPlaying({ tracks, big = false }: { tracks: PublicTrac
         <div className="np-export-title">Export</div>
         <div className="np-export-btns">
           <a className="btn" href={track.url} download>⇊ WAV</a>
-          <button className="btn" disabled title="Coming soon">♫ MP3</button>
-          <button className="btn" disabled title="Coming soon">≋ WAV Stems</button>
+          <button className="btn" onClick={() => exportArtifact(track.asset_id, "mp3")}>♫ MP3</button>
+          <button className="btn" onClick={() => exportArtifact(track.asset_id, "stems")}>≋ WAV Stems</button>
         </div>
       </div>
     </div>

@@ -7,6 +7,7 @@ import ArtworkTile from "../components/ArtworkTile";
 import Waveform from "../components/Waveform";
 import { usePlayer } from "../components/PlayerContext";
 import { Donut, Progress, StatusPill, fmtTime } from "../components/ui";
+import { exportArtifact } from "../components/social";
 
 interface Track {
   asset_id: string;
@@ -31,8 +32,8 @@ const SIDEBAR = [
   { to: "/", label: "Create Music", icon: "✦" },
   { to: "/studio", label: "My Tracks", icon: "♪" },
   { to: "/artists", label: "Artist Profiles", icon: "☺" },
-  { to: "/studio", label: "Training", icon: "◈" },
-  { to: "/studio", label: "Settings", icon: "⚙" },
+  { to: "/training", label: "Training", icon: "◈" },
+  { to: "/settings", label: "Settings", icon: "⚙" },
 ];
 
 function tokenOf(url: string): string | undefined {
@@ -231,8 +232,8 @@ export default function StudioPage() {
                       {t.shared ? "Shared" : "Share"}
                     </button>
                     <a className="btn" href={t.url} download>WAV</a>
-                    <button className="btn" disabled title="Coming soon">MP3</button>
-                    <button className="btn" disabled title="Coming soon">Stems</button>
+                    <button className="btn" onClick={() => exportArtifact(t.asset_id, "mp3")}>MP3</button>
+                    <button className="btn" onClick={() => exportArtifact(t.asset_id, "stems")}>Stems</button>
                   </div>
                 </div>
               ))}

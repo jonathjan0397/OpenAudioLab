@@ -10,6 +10,8 @@ from .lab import router as lab_router
 from .auth import router as auth_router
 from .admin import router as admin_router
 from .seo import router as seo_router
+from .llm import router as llm_router
+from .features import router as features_router
 
 __all__ = [
     "health_router",
@@ -24,4 +26,6 @@ __all__ = [
     "auth_router",
     "admin_router",
     "seo_router",
+    "llm_router",
+    "features_router",
 ]
