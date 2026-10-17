@@ -280,7 +280,7 @@ def wg_remove_peer(pub):
 
 def pick_offer():
     _, out, _ = sh([VASTAI, "search", "offers",
-                    "gpu_ram>=24000 num_gpus=1 rentable=true cuda_max_good>=12.8 verification=verified",
+                    "gpu_ram>=24 num_gpus=1 rentable=true cuda_max_good>=12.8 verification=verified",
                     "--raw", "-o", "dph_total", "--limit", "200"])
     try:
         offers = json.loads(out)
