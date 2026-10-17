@@ -49,7 +49,8 @@ def test_admin_audit(client) -> None:
     _seed_admin(client, "m10-aud@example.com")
     response = client.get("/api/v1/admin/audit")
     assert response.status_code == 200
-    assert isinstance(response.json(), list)
+    assert isinstance(response.json()["items"], list)
+    assert "total" in response.json()
 
 
 def test_admin_workers(client) -> None:
@@ -84,7 +85,8 @@ def test_admin_jobs_labels_and_filters(client) -> None:
     _seed_admin(client, "m10-job@example.com")
     response = client.get("/api/v1/admin/jobs?limit=5")
     assert response.status_code == 200
-    assert isinstance(response.json(), list)
+    assert isinstance(response.json()["items"], list)
+    assert "total" in response.json()
 
 
 def test_admin_trainings_join(client) -> None:

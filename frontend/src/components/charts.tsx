@@ -121,3 +121,90 @@ export function AreaChart({
     </div>
   );
 }
+
+export function BarChart({
+  labels,
+  series,
+  height = 220,
+}: {
+  labels: string[];
+  series: Series[];
+  height?: number;
+}) {
+  const [hover, setHover] = useState<number | null>(null);
+  const width = 640;
+  const pad = { l: 34, r: 8, t: 10, b: 22 };
+  const n = labels.length;
+  if (n < 2) return <div className="muted" style={{ color: "var(--muted)" }}>Not enough data yet.</div>;
+  const totals = labels.map((_, i) => series.reduce((sum, s) => sum + (s.values[i] || 0), 0));
+  const max = Math.max(...totals, 4);
+  const group = (width - pad.l - pad.r) / n;
+  const barW = Math.max(2, (group * 0.7) / series.length);
+  const y = (v: number) => pad.t + (1 - v / max) * (height - pad.t - pad.b);
+  const gx = (i: number) => pad.l + i * group + group * 0.15;
+
+  return (
+    <div style={{ position: "relative" }}>
+      <svg
+        className="area-chart"
+        viewBox={`0 0 ${width} ${height}`}
+        onMouseMove={(e) => {
+          const rect = (e.target as SVGElement).closest("svg")!.getBoundingClientRect();
+          const px = ((e.clientX - rect.left) / rect.width) * width;
+          const i = Math.floor(((px - pad.l) / (width - pad.l - pad.r)) * n);
+          setHover(Math.min(n - 1, Math.max(0, i)));
+        }}
+        onMouseLeave={() => setHover(null)}
+      >
+        {[0.25, 0.5, 0.75, 1].map((f) => (
+          <g key={f}>
+            <line x1={pad.l} x2={width - pad.r} y1={y(max * f)} y2={y(max * f)} stroke="var(--border)" strokeWidth={1} />
+            <text x={pad.l - 6} y={y(max * f) + 3} textAnchor="end" fontSize={9} fill="var(--muted)">
+              {Math.round(max * f)}
+            </text>
+          </g>
+        ))}
+        {labels.map((_l, i) =>
+          series.map((s, si) => {
+            const v = s.values[i] || 0;
+            const h = Math.max(v > 0 ? 1 : 0, (v / max) * (height - pad.t - pad.b));
+            return (
+              <rect
+                key={`${i}-${s.key}`}
+                x={gx(i) + si * barW}
+                y={height - pad.b - h}
+                width={barW}
+                height={h}
+                fill={s.color}
+                opacity={hover === i ? 0.9 : 0.55}
+              />
+            );
+          })
+        )}
+        {labels.map((l, i) =>
+          i % Math.ceil(n / 7) === 0 ? (
+            <text key={l + i} x={gx(i) + (barW * series.length) / 2} y={height - 6} textAnchor="middle" fontSize={9} fill="var(--muted)">
+              {l.slice(5)}
+            </text>
+          ) : null
+        )}
+      </svg>
+      {hover !== null && (
+        <div
+          className="chart-tip"
+          style={{ left: `${((gx(hover) + barW * series.length) / width) * 100}%`, top: `${(y(totals[hover]) / height) * 100}%` }}
+        >
+          {labels[hover]} · {totals[hover]} jobs
+        </div>
+      )}
+      <div className="legend" style={{ marginTop: 8 }}>
+        {series.map((s) => (
+          <span key={s.key}>
+            <i style={{ background: s.color }} />
+            {s.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}

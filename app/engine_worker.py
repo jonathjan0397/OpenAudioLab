@@ -278,7 +278,30 @@ class EngineWorker:
             duration_seconds=request.get("duration_seconds"),
         )
 
+    def _draining(self) -> bool:
+        """Admin drain flag: stop claiming new jobs (re-checked every 5s)."""
+        now = time.monotonic()
+        if now - getattr(self, "_drain_checked_at", 0.0) < 5.0:
+            return getattr(self, "_drain_flag", False)
+        try:
+            from sqlalchemy import select
+
+            with self.db.session() as session:
+                flag = session.execute(
+                    select(Worker.drain).where(Worker.id == self.worker_id)
+                ).scalar_one_or_none()
+            self._drain_flag = bool(flag)
+        except Exception:
+            self._drain_flag = False
+        self._drain_checked_at = now
+        return self._drain_flag
+
     def run_once(self) -> bool:
+        if self._draining():
+            self.register()
+            self._touch_heartbeat()
+            time.sleep(2)
+            return False
         job_id = self.queue.receive(self.receive_queues, self.settings.worker_brpop_timeout_seconds)
         if job_id is None:
             self.register()

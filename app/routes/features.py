@@ -8,15 +8,18 @@ pending a separator), and artist follows.
 from __future__ import annotations
 
 from datetime import timedelta
+import secrets
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import Field
 from sqlalchemy import func, select
 
+from ..auth import token_sha256
 from ..deps import owner_from_request
 from ..errors import ApiError
 from ..models import (
+    ApiKey,
     ArtistFollow,
     ArtistProfile,
     Asset,
@@ -237,3 +240,62 @@ def unfollow_artist(slug: str, request: Request, owner_id: str = Depends(owner_f
             session.delete(existing)
             session.commit()
         return JSONResponse(_follow_state(session, profile.id, owner_id))
+
+
+class ApiKeyCreate(StrictModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+def _key_dict(key: ApiKey) -> dict:
+    return {
+        "id": key.id,
+        "name": key.name,
+        "prefix": key.key_prefix,
+        "created_at": key.created_at.isoformat(),
+        "revoked_at": key.revoked_at.isoformat() if key.revoked_at else None,
+        "last_used_at": key.last_used_at.isoformat() if key.last_used_at else None,
+    }
+
+
+@router.get("/api-keys")
+def list_api_keys(request: Request, owner_id: str = Depends(owner_from_request)) -> JSONResponse:
+    with request.app.state.db.session() as session:
+        keys = list(
+            session.execute(
+                select(ApiKey)
+                .where(ApiKey.owner_id == owner_id)
+                .order_by(ApiKey.created_at.desc())
+            ).scalars()
+        )
+        return JSONResponse({"items": [_key_dict(k) for k in keys]})
+
+
+@router.post("/api-keys", status_code=201)
+def create_api_key(
+    payload: ApiKeyCreate, request: Request, owner_id: str = Depends(owner_from_request)
+) -> JSONResponse:
+    secret = "oal_" + secrets.token_urlsafe(30)
+    key = ApiKey(
+        owner_id=owner_id,
+        name=payload.name.strip(),
+        key_sha256=token_sha256(secret),
+        key_prefix=secret[:12],
+    )
+    with request.app.state.db.session() as session:
+        session.add(key)
+        session.commit()
+        body = _key_dict(key)
+    body["secret"] = secret
+    return JSONResponse(body, status_code=201)
+
+
+@router.delete("/api-keys/{key_id}")
+def revoke_api_key(key_id: str, request: Request, owner_id: str = Depends(owner_from_request)) -> JSONResponse:
+    with request.app.state.db.session() as session:
+        key = session.get(ApiKey, key_id)
+        if key is None or key.owner_id != owner_id:
+            raise ApiError(404, "NOT_FOUND", "API key not found.")
+        if key.revoked_at is None:
+            key.revoked_at = utcnow()
+            session.commit()
+        return JSONResponse(_key_dict(key))

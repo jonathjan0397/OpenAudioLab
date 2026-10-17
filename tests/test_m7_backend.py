@@ -67,7 +67,7 @@ def test_timeseries_and_admin_jobs(client) -> None:
 
     response = client.get("/api/v1/admin/jobs?limit=5")
     assert response.status_code == 200
-    assert isinstance(response.json(), list)
+    assert isinstance(response.json()["items"], list)
 
 
 def test_waveform_endpoint(client) -> None:

@@ -21,6 +21,18 @@ def owner_from_request(request: Request) -> str:
     if header and header.lower().startswith("bearer "):
         token = header[7:].strip()
         if token and len(token) <= 512:
+            from .auth import token_sha256
+            from .models import ApiKey, utcnow
+
+            digest = token_sha256(token)
+            with request.app.state.db.session() as session:
+                key = session.execute(
+                    select(ApiKey).where(ApiKey.key_sha256 == digest, ApiKey.revoked_at.is_(None))
+                ).scalar_one_or_none()
+                if key is not None:
+                    key.last_used_at = utcnow()
+                    session.commit()
+                    return key.owner_id
             return "tok_" + hashlib.sha256(token.encode("utf-8")).hexdigest()[:32]
         raise ApiError(401, "UNAUTHENTICATED", "A per-user bearer token is required.")
     # Cookie-session fallback for the website.

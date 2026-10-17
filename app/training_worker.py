@@ -84,7 +84,29 @@ class TrainingWorker:
                 worker.last_heartbeat = utcnow()
             session.commit()
 
+    def _draining(self) -> bool:
+        """Admin drain flag: stop claiming new jobs (re-checked every 5s)."""
+        now = time.monotonic()
+        if now - getattr(self, "_drain_checked_at", 0.0) < 5.0:
+            return getattr(self, "_drain_flag", False)
+        try:
+            from sqlalchemy import select
+
+            with self.db.session() as session:
+                flag = session.execute(
+                    select(Worker.drain).where(Worker.id == self.worker_id)
+                ).scalar_one_or_none()
+            self._drain_flag = bool(flag)
+        except Exception:
+            self._drain_flag = False
+        self._drain_checked_at = now
+        return self._drain_flag
+
     def run_once(self) -> bool:
+        if self._draining():
+            self.register()
+            time.sleep(2)
+            return False
         received = self.queue.receive(self.queues, self.settings.worker_brpop_timeout_seconds)
         if received is None:
             self.register()

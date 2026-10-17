@@ -1,8 +1,8 @@
-import { useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { NavLink, useLocation, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, AuthUser, SiteInfo } from "../api";
-import { AreaChart, Sparkline } from "../components/charts";
+import { AreaChart, BarChart, Sparkline } from "../components/charts";
 import { Avatar, Delta, Progress, StatusPill } from "../components/ui";
 
 interface AdminUser {
@@ -12,6 +12,11 @@ interface AdminUser {
   role: string;
   state: string;
   credits_balance: number;
+  jobs_count: number;
+}
+interface Page<T> {
+  items: T[];
+  total: number;
 }
 interface Stats {
   users_total: number;
@@ -81,6 +86,10 @@ interface AdminJob {
   started_at: string | null;
   finished_at: string | null;
 }
+interface JobDetail extends AdminJob {
+  error_message?: string | null;
+  events: { event: string; status: string; stage: string | null; created_at: string | null }[];
+}
 interface StorageInfo {
   total_bytes: number;
   quota_bytes: number;
@@ -96,6 +105,8 @@ interface Billing {
   subscriptions_pct: number;
   api_usage_pct: number;
   custom_training_pct: number;
+  export_pct?: number;
+  job_counts?: Record<string, number>;
 }
 interface AuditRow {
   event: string;
@@ -105,6 +116,24 @@ interface AuditRow {
   owner_id: string;
   operation: string;
   created_at: string | null;
+}
+interface CreditRow {
+  id: string;
+  owner_id: string;
+  user: string;
+  delta: number;
+  reason: string;
+  job_id: string | null;
+  created_at: string | null;
+}
+interface KeyRow {
+  id: string;
+  name: string;
+  prefix: string;
+  created_at: string;
+  revoked_at: string | null;
+  last_used_at: string | null;
+  secret?: string;
 }
 interface WorkerRow {
   id: string;
@@ -132,6 +161,13 @@ const SIDEBAR = [
 ];
 
 const TEMPLATES = ["open-canvas", "analog-soul", "neon-studio", "signal-lab"];
+const ENVIRONMENTS = ["production", "staging", "development"];
+const TASK_OPTIONS = [
+  { value: "", label: "All tasks" },
+  { value: "music.generate", label: "Text to Music" },
+  { value: "audio.export", label: "Audio Export" },
+  { value: "artist.train", label: "Artist Training" },
+];
 
 function fmtRuntime(secs: number | null | undefined): string {
   if (secs == null) return "—";
@@ -155,6 +191,7 @@ function pctDelta(now: number, prev: number): number | null {
 export default function AdminPage() {
   const qc = useQueryClient();
   const location = useLocation();
+  const [params] = useSearchParams();
   const section = location.pathname.replace(/^\/admin\/?/, "") || "overview";
 
   const [days, setDays] = useState(14);
@@ -163,6 +200,25 @@ export default function AdminPage() {
   const [metric, setMetric] = useState<"tracks" | "users" | "compute">("tracks");
   const [userQ, setUserQ] = useState("");
   const [jobStatus, setJobStatus] = useState("");
+  const [jobTask, setJobTask] = useState(params.get("task") || "");
+  const [jobLimit, setJobLimit] = useState(25);
+  const [auditEvent, setAuditEvent] = useState("");
+  const [auditLimit, setAuditLimit] = useState(50);
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [creditDraft, setCreditDraft] = useState<{ id: string; value: string } | null>(null);
+  const [keyName, setKeyName] = useState("");
+  const [newSecret, setNewSecret] = useState<string | null>(null);
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    setJobTask(params.get("task") || "");
+    setJobLimit(25);
+  }, [params]);
+
+  useEffect(() => {
+    const t = setInterval(() => setTick((x) => x + 1), 5000);
+    return () => clearInterval(t);
+  }, []);
 
   const me = useQuery({
     queryKey: ["me"],
@@ -188,13 +244,16 @@ export default function AdminPage() {
   });
   const recent = useQuery({
     queryKey: ["admin-jobs", "recent"],
-    queryFn: () => api.get<AdminJob[]>("/api/v1/admin/jobs?limit=8"),
+    queryFn: () => api.get<Page<AdminJob>>("/api/v1/admin/jobs?limit=8"),
     enabled,
     refetchInterval: 10000,
   });
   const allJobs = useQuery({
-    queryKey: ["admin-jobs", "all", jobStatus],
-    queryFn: () => api.get<AdminJob[]>(`/api/v1/admin/jobs?limit=100${jobStatus ? `&status=${jobStatus}` : ""}`),
+    queryKey: ["admin-jobs", "all", jobStatus, jobTask, jobLimit],
+    queryFn: () =>
+      api.get<Page<AdminJob>>(
+        `/api/v1/admin/jobs?limit=${jobLimit}${jobStatus ? `&status=${jobStatus}` : ""}${jobTask ? `&task=${jobTask}` : ""}`
+      ),
     enabled: enabled && section === "jobs",
     refetchInterval: 10000,
   });
@@ -228,9 +287,15 @@ export default function AdminPage() {
     enabled,
     refetchInterval: 60000,
   });
+  const credits = useQuery({
+    queryKey: ["admin-credits", auditLimit],
+    queryFn: () => api.get<Page<CreditRow>>(`/api/v1/admin/credits?limit=${Math.min(auditLimit, 100)}`),
+    enabled: enabled && section === "billing",
+  });
   const audit = useQuery({
-    queryKey: ["admin-audit"],
-    queryFn: () => api.get<AuditRow[]>("/api/v1/admin/audit?limit=50"),
+    queryKey: ["admin-audit", auditEvent, auditLimit],
+    queryFn: () =>
+      api.get<Page<AuditRow>>(`/api/v1/admin/audit?limit=${auditLimit}${auditEvent ? `&event=${encodeURIComponent(auditEvent)}` : ""}`),
     enabled: enabled && section === "audit",
   });
   const users = useQuery({
@@ -239,6 +304,22 @@ export default function AdminPage() {
     enabled,
   });
   const site = useQuery({ queryKey: ["site"], queryFn: () => api.get<SiteInfo>("/api/v1/site") });
+  const settings = useQuery({
+    queryKey: ["admin-settings"],
+    queryFn: () => api.get<{ settings: Record<string, string> }>("/api/v1/admin/settings"),
+    enabled,
+  });
+  const keys = useQuery({
+    queryKey: ["api-keys"],
+    queryFn: () => api.get<{ items: KeyRow[] }>("/api/v1/api-keys"),
+    enabled: enabled && section === "api",
+  });
+  const detail = useQuery({
+    queryKey: ["admin-job-detail", detailId],
+    queryFn: () => api.get<JobDetail>(`/api/v1/admin/jobs/${detailId}`),
+    enabled: !!detailId,
+    refetchInterval: detailId ? 5000 : false,
+  });
 
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -261,13 +342,44 @@ export default function AdminPage() {
     onError: (e: Error) => setError(e.message),
   });
   const patch = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: Record<string, string> }) =>
+    mutationFn: ({ id, body }: { id: string; body: Record<string, string | number> }) =>
       api.patch(`/api/v1/admin/users/${id}`, body),
     onSuccess: invalidate,
   });
   const setTemplate = useMutation({
     mutationFn: (value: string) => api.put("/api/v1/admin/settings/template", { value }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["site"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["site"] });
+      qc.invalidateQueries({ queryKey: ["admin-settings"] });
+    },
+  });
+  const setEnvironment = useMutation({
+    mutationFn: (value: string) => api.put("/api/v1/admin/settings/environment", { value }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-settings"] }),
+  });
+  const drain = useMutation({
+    mutationFn: (id: string) => api.post<{ drain: boolean }>(`/api/v1/admin/workers/${id}/drain`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-workers"] }),
+  });
+  const purge = useMutation({
+    mutationFn: () => api.del<{ purged: number }>("/api/v1/admin/workers/stale"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-workers"] }),
+  });
+  const cancelTraining = useMutation({
+    mutationFn: (id: string) => api.post<{ status: string }>(`/api/v1/admin/trainings/${id}/cancel`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-trainings"] }),
+  });
+  const createKey = useMutation({
+    mutationFn: () => api.post<KeyRow>("/api/v1/api-keys", { name: keyName || "default" }),
+    onSuccess: (k) => {
+      setNewSecret(k.secret || null);
+      setKeyName("");
+      qc.invalidateQueries({ queryKey: ["api-keys"] });
+    },
+  });
+  const revokeKey = useMutation({
+    mutationFn: (id: string) => api.del<KeyRow>(`/api/v1/api-keys/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }),
   });
 
   if (!me.data?.user) return <main className="page"><h1>Admin</h1><p>Sign in first.</p></main>;
@@ -285,6 +397,8 @@ export default function AdminPage() {
   const s = stats.data;
   const usersDelta = s ? pctDelta(s.active_users_30d, s.active_users_prev_30d) : null;
   const jobsDelta = s ? pctDelta(s.jobs_today, s.jobs_yesterday) : null;
+  const updatedAgo = stats.dataUpdatedAt ? Math.max(0, Math.round((Date.now() - stats.dataUpdatedAt) / 1000)) : null;
+  const envValue = settings.data?.settings?.environment || "production";
 
   const jobTable = (rows: AdminJob[]) => (
     <table className="table">
@@ -294,7 +408,7 @@ export default function AdminPage() {
       <tbody>
         {rows.map((j) => (
           <tr key={j.job_id}>
-            <td className="mono">{j.job_id.slice(0, 8)}</td>
+            <td><button className="link mono" style={{ border: 0, background: "none", cursor: "pointer", padding: 0, font: "inherit" }} onClick={() => setDetailId(j.job_id)}>{j.job_id.slice(0, 8)}</button></td>
             <td><Avatar name={j.user} sm /> {j.user}</td>
             <td>{j.task}</td>
             <td><StatusPill status={j.status} /></td>
@@ -310,7 +424,7 @@ export default function AdminPage() {
   const serviceRow = (sv: Service) => (
     <div key={sv.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", fontSize: 13, gap: 12 }}>
       <div style={{ minWidth: 0 }}>
-        <strong>{sv.name}</strong>
+        <a className="link" href={`/admin/jobs?task=${sv.operation}`}>{sv.name}</a>
         <div className="mono">{sv.kind} · {sv.version}</div>
       </div>
       <span className="mono" style={{ color: "var(--muted)", fontSize: 12 }}>
@@ -326,7 +440,12 @@ export default function AdminPage() {
       <div key={w.id} style={{ marginBottom: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13, marginBottom: 4 }}>
           <strong>{w.id}</strong>
-          <StatusPill status={w.status === "stale" ? "failed" : w.status === "draining" ? "cancelled" : "online"} label={w.status} />
+          <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <StatusPill status={w.status === "stale" ? "failed" : w.status === "draining" ? "cancelled" : "online"} label={w.status} />
+            {section === "workers" && w.status !== "stale" && (
+              <button className="btn" onClick={() => drain.mutate(w.id)}>{w.drain ? "Resume" : "Drain"}</button>
+            )}
+          </span>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "var(--muted)" }}>
           <span style={{ width: 38 }}>{w.gpu_util != null ? `${w.gpu_util}%` : "—"}</span>
@@ -347,7 +466,12 @@ export default function AdminPage() {
     <div key={t.run_id} style={{ marginBottom: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
         <strong>{t.profile}</strong>
-        <StatusPill status={t.status} />
+        <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <StatusPill status={t.status} />
+          {section === "training" && (t.status === "queued" || t.status === "running") && (
+            <button className="btn" onClick={() => cancelTraining.mutate(t.run_id)}>Cancel</button>
+          )}
+        </span>
       </div>
       <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>
         {t.user} · {t.stage ? `${t.stage}…` : t.status === "succeeded" ? "done" : "queued…"}
@@ -372,11 +496,18 @@ export default function AdminPage() {
         <div className="hero-strip admin-strip">
           <div>
             <h1>Admin {section === "overview" ? "Overview" : SIDEBAR.find((x) => x.to.endsWith("/" + section))?.label}</h1>
-            <div className="sub">Monitor platform health, usage, and operations in real time.</div>
+            <div className="sub">
+              Monitor platform health, usage, and operations in real time.
+              {updatedAgo != null && <span className="mono"> · updated {updatedAgo}s ago</span>}
+            </div>
           </div>
           <div className="strip-controls">
-            <select disabled title="Environment switching coming soon"><option>● Production</option></select>
-            <select disabled title="Date ranges coming soon"><option>Last 14 days</option></select>
+            <select value={envValue} onChange={(e) => setEnvironment.mutate(e.target.value)} title="Deployment environment">
+              {ENVIRONMENTS.map((e) => <option key={e} value={e}>● {e[0].toUpperCase() + e.slice(1)}</option>)}
+            </select>
+            <select value={days} onChange={(e) => setDays(Number(e.target.value))} title="Chart date range">
+              {[7, 14, 30].map((d) => <option key={d} value={d}>Last {d} days</option>)}
+            </select>
           </div>
         </div>
 
@@ -438,17 +569,24 @@ export default function AdminPage() {
                   <button type="button" className={granularity === "day" ? "active" : ""} onClick={() => setGranularity("day")}>Daily</button>
                   <button type="button" className={granularity === "hour" ? "active" : ""} onClick={() => setGranularity("hour")}>Hourly</button>
                 </div>
-                <select style={{ width: 110 }} value={days} onChange={(e) => setDays(Number(e.target.value))}>
-                  {[7, 14, 30].map((d) => <option key={d} value={d}>Last {d} days</option>)}
-                </select>
               </div>
-              <AreaChart
-                labels={labels}
-                series={[
-                  { key: "metric", label: metric === "tracks" ? "Completed" : metric === "users" ? "New Users" : "Active", color: "var(--accent)", values: metricValues },
-                  { key: "failed", label: "Failed", color: "#d43d3d", values: daysData.map((d) => d.failed) },
-                ]}
-              />
+              {granularity === "hour" ? (
+                <BarChart
+                  labels={labels}
+                  series={[
+                    { key: "metric", label: metric === "tracks" ? "Completed" : metric === "users" ? "New Users" : "Active", color: "var(--accent)", values: metricValues },
+                    { key: "failed", label: "Failed", color: "#d43d3d", values: daysData.map((d) => d.failed) },
+                  ]}
+                />
+              ) : (
+                <AreaChart
+                  labels={labels}
+                  series={[
+                    { key: "metric", label: metric === "tracks" ? "Completed" : metric === "users" ? "New Users" : "Active", color: "var(--accent)", values: metricValues },
+                    { key: "failed", label: "Failed", color: "#d43d3d", values: daysData.map((d) => d.failed) },
+                  ]}
+                />
+              )}
             </div>
 
             <div className="main-cols" style={{ marginTop: 20 }}>
@@ -459,7 +597,7 @@ export default function AdminPage() {
                     <span className="spacer" />
                     <a className="link" href="/admin/jobs">View all →</a>
                   </div>
-                  {jobTable(recent.data || [])}
+                  {jobTable(recent.data?.items || [])}
                 </div>
                 <div className="card">
                   <div className="card-header">
@@ -566,14 +704,50 @@ export default function AdminPage() {
               {error && <span className="pill err">{error}</span>}
             </div>
             <table className="table">
-              <thead><tr><th>User</th><th>Role</th><th>State</th><th>Credits</th></tr></thead>
+              <thead><tr><th>User</th><th>Role</th><th>State</th><th>Jobs</th><th>Credits</th></tr></thead>
               <tbody>
                 {(users.data?.users || []).map((u) => (
                   <tr key={u.id}>
                     <td><Avatar name={u.username} sm /> {u.username}<div className="mono">{u.email}</div></td>
                     <td><button className="btn" onClick={() => patch.mutate({ id: u.id, body: { role: u.role === "admin" ? "user" : "admin" } })}>{u.role}</button></td>
                     <td><button className="btn" onClick={() => patch.mutate({ id: u.id, body: { state: u.state === "active" ? "disabled" : "active" } })}>{u.state}</button></td>
-                    <td>{u.credits_balance.toLocaleString()}</td>
+                    <td>{u.jobs_count}</td>
+                    <td>
+                      {creditDraft?.id === u.id ? (
+                        <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                          <input
+                            style={{ width: 90 }}
+                            type="number"
+                            min={0}
+                            value={creditDraft.value}
+                            autoFocus
+                            onChange={(e) => setCreditDraft({ id: u.id, value: e.target.value })}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                patch.mutate({ id: u.id, body: { credits_balance: Number(creditDraft.value) } });
+                                setCreditDraft(null);
+                              }
+                              if (e.key === "Escape") setCreditDraft(null);
+                            }}
+                          />
+                          <button
+                            className="btn"
+                            onClick={() => {
+                              patch.mutate({ id: u.id, body: { credits_balance: Number(creditDraft.value) } });
+                              setCreditDraft(null);
+                            }}
+                          >set</button>
+                        </span>
+                      ) : (
+                        <button
+                          className="btn"
+                          title="Click to adjust credits"
+                          onClick={() => setCreditDraft({ id: u.id, value: String(u.credits_balance) })}
+                        >
+                          {u.credits_balance.toLocaleString()}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -584,14 +758,22 @@ export default function AdminPage() {
         {section === "jobs" && (
           <div className="card">
             <div className="card-header">
-              <h2>Generation Jobs</h2>
+              <h2>Generation Jobs ({allJobs.data?.total ?? 0})</h2>
               <span className="spacer" />
+              <select style={{ width: 140 }} value={jobTask} onChange={(e) => setJobTask(e.target.value)}>
+                {TASK_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
               <select style={{ width: 140 }} value={jobStatus} onChange={(e) => setJobStatus(e.target.value)}>
                 <option value="">All statuses</option>
                 {["queued", "running", "succeeded", "failed", "cancelled"].map((x) => <option key={x} value={x}>{x}</option>)}
               </select>
             </div>
-            {jobTable(allJobs.data || [])}
+            {jobTable(allJobs.data?.items || [])}
+            {(allJobs.data?.items.length ?? 0) < (allJobs.data?.total ?? 0) && (
+              <div style={{ marginTop: 10 }}>
+                <button className="btn" onClick={() => setJobLimit((n) => n + 25)}>Load more</button>
+              </div>
+            )}
           </div>
         )}
 
@@ -603,7 +785,7 @@ export default function AdminPage() {
               <tbody>
                 {(services.data?.services || []).map((sv) => (
                   <tr key={sv.name}>
-                    <td><strong>{sv.name}</strong><div className="mono">{sv.kind} · {sv.version}</div></td>
+                    <td><a className="link" href={`/admin/jobs?task=${sv.operation}`}>{sv.name}</a><div className="mono">{sv.kind} · {sv.version}</div></td>
                     <td><StatusPill status={sv.status} /></td>
                     <td>{sv.requests_24h}</td>
                     <td>{sv.avg_latency_seconds != null ? `${sv.avg_latency_seconds}s` : "—"}</td>
@@ -618,9 +800,14 @@ export default function AdminPage() {
 
         {section === "workers" && (
           <div className="card">
-            <div className="card-header"><h2>GPU Workers</h2></div>
+            <div className="card-header">
+              <h2>GPU Workers</h2>
+              <span className="spacer" />
+              <button className="btn" onClick={() => purge.mutate()}>Purge stale</button>
+            </div>
             {(workers.data?.workers || []).map(workerRow)}
             {(workers.data?.workers || []).length === 0 && <p style={{ color: "var(--muted)" }}>No workers registered.</p>}
+            {purge.data != null && <p style={{ color: "var(--muted)", fontSize: 12 }}>Last purge removed {purge.data.purged} worker(s).</p>}
           </div>
         )}
 
@@ -655,55 +842,126 @@ export default function AdminPage() {
         )}
 
         {section === "billing" && billing.data && (
-          <div className="card">
-            <div className="card-header"><h2>Billing & Credits</h2></div>
-            <div style={{ display: "flex", gap: 30, flexWrap: "wrap" }}>
-              {[
-                ["Current Period Revenue", `$${billing.data.revenue.toLocaleString()}`],
-                ["Credits Used", `${billing.data.credits_used.toLocaleString()} / ${billing.data.credits_quota.toLocaleString()}`],
-                ["Credits Granted", billing.data.credits_granted.toLocaleString()],
-                ["Plan", "Production"],
-              ].map(([k, v]) => (
-                <div key={k}>
-                  <div className="label" style={{ color: "var(--muted)", fontSize: 12 }}>{k}</div>
-                  <div style={{ fontSize: 22, fontWeight: 800 }}>{v}</div>
-                </div>
-              ))}
+          <>
+            <div className="card">
+              <div className="card-header"><h2>Billing & Credits</h2></div>
+              <div style={{ display: "flex", gap: 30, flexWrap: "wrap" }}>
+                {[
+                  ["Current Period Revenue", `$${billing.data.revenue.toLocaleString()}`],
+                  ["Credits Used", `${billing.data.credits_used.toLocaleString()} / ${billing.data.credits_quota.toLocaleString()}`],
+                  ["Credits Granted", billing.data.credits_granted.toLocaleString()],
+                  ["Plan", "Production"],
+                ].map(([k, v]) => (
+                  <div key={k}>
+                    <div className="label" style={{ color: "var(--muted)", fontSize: 12 }}>{k}</div>
+                    <div style={{ fontSize: 22, fontWeight: 800 }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop: 16, display: "grid", gap: 8, maxWidth: 460 }}>
+                {[
+                  ["API usage (generation)", billing.data.api_usage_pct],
+                  ["Custom training", billing.data.custom_training_pct],
+                  ["Audio export", billing.data.export_pct ?? 0],
+                  ["Subscriptions", billing.data.subscriptions_pct],
+                ].map(([label, pct]) => (
+                  <div key={label as string} style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}>
+                    <span style={{ width: 170 }}>{label}</span>
+                    <div style={{ flex: 1 }}><Progress value={(pct as number) / 100} /></div>
+                    <span className="mono" style={{ width: 48, textAlign: "right" }}>{pct}%</span>
+                  </div>
+                ))}
+              </div>
+              <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 14 }}>
+                Splits are derived from real job activity; subscriptions stay at 0 until paid plans land.
+              </p>
             </div>
-            <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 14 }}>
-              Subscriptions, API usage, and custom training splits are illustrative until real billing plans land.
-            </p>
-          </div>
+            <div className="card" style={{ marginTop: 20 }}>
+              <div className="card-header">
+                <h2>Credit Ledger ({credits.data?.total ?? 0})</h2>
+              </div>
+              <table className="table">
+                <thead><tr><th>When</th><th>User</th><th>Delta</th><th>Reason</th><th>Job</th></tr></thead>
+                <tbody>
+                  {(credits.data?.items || []).map((c) => (
+                    <tr key={c.id}>
+                      <td className="mono">{c.created_at?.slice(5, 16).replace("T", " ")}</td>
+                      <td><Avatar name={c.user} sm /> {c.user}</td>
+                      <td style={{ color: c.delta < 0 ? "#d43d3d" : "inherit" }}>{c.delta > 0 ? `+${c.delta}` : c.delta}</td>
+                      <td>{c.reason}</td>
+                      <td className="mono">{c.job_id ? <button className="link mono" style={{ border: 0, background: "none", cursor: "pointer", padding: 0, font: "inherit" }} onClick={() => setDetailId(c.job_id!)}>{c.job_id.slice(0, 8)}</button> : "—"}</td>
+                    </tr>
+                  ))}
+                  {(credits.data?.items || []).length === 0 && <tr><td colSpan={5} style={{ color: "var(--muted)" }}>No credit entries yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
 
         {section === "api" && (
           <div className="card">
             <div className="card-header"><h2>API Access</h2></div>
-            <p style={{ color: "var(--muted)", fontSize: 13 }}>
-              Bearer-token API keys are available today (Authorization: Bearer …). Key management UI is coming soon —
-              each API user gets a deterministic token hash for scoping.
-            </p>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <input style={{ width: 220 }} placeholder="new key name…" value={keyName} onChange={(e) => setKeyName(e.target.value)} />
+              <button className="btn btn-primary" onClick={() => createKey.mutate()}>Create key</button>
+            </div>
+            {newSecret && (
+              <p className="mono" style={{ fontSize: 12, padding: 8, border: "1px dashed var(--border)", marginBottom: 12 }}>
+                {newSecret} — copy it now, it is shown only once.
+              </p>
+            )}
+            <table className="table">
+              <thead><tr><th>Name</th><th>Prefix</th><th>Created</th><th>Last used</th><th>Status</th><th /></tr></thead>
+              <tbody>
+                {(keys.data?.items || []).map((k) => (
+                  <tr key={k.id}>
+                    <td><strong>{k.name}</strong></td>
+                    <td className="mono">{k.prefix}…</td>
+                    <td className="mono">{k.created_at.slice(0, 10)}</td>
+                    <td className="mono">{k.last_used_at ? k.last_used_at.slice(0, 16).replace("T", " ") : "never"}</td>
+                    <td><StatusPill status={k.revoked_at ? "cancelled" : "online"} label={k.revoked_at ? "revoked" : "active"} /></td>
+                    <td>{!k.revoked_at && <button className="btn" onClick={() => revokeKey.mutate(k.id)}>Revoke</button>}</td>
+                  </tr>
+                ))}
+                {(keys.data?.items || []).length === 0 && <tr><td colSpan={6} style={{ color: "var(--muted)" }}>No API keys yet — create one to call the API with Authorization: Bearer …</td></tr>}
+              </tbody>
+            </table>
           </div>
         )}
 
         {section === "audit" && (
           <div className="card">
-            <div className="card-header"><h2>Audit Log</h2></div>
+            <div className="card-header">
+              <h2>Audit Log ({audit.data?.total ?? 0})</h2>
+              <span className="spacer" />
+              <input
+                style={{ width: 160 }}
+                placeholder="filter event…"
+                value={auditEvent}
+                onChange={(e) => setAuditEvent(e.target.value)}
+              />
+            </div>
             <table className="table">
               <thead><tr><th>Event</th><th>Job</th><th>Owner</th><th>Operation</th><th>When</th></tr></thead>
               <tbody>
-                {(audit.data || []).map((a, i) => (
+                {(audit.data?.items || []).map((a, i) => (
                   <tr key={i}>
                     <td><StatusPill status={a.status} label={a.event} /></td>
-                    <td className="mono">{a.job_id.slice(0, 8)}</td>
+                    <td className="mono"><button className="link mono" style={{ border: 0, background: "none", cursor: "pointer", padding: 0, font: "inherit" }} onClick={() => setDetailId(a.job_id)}>{a.job_id.slice(0, 8)}</button></td>
                     <td className="mono">{a.owner_id.replace(/^(tok|usr)_/, "").slice(0, 8)}</td>
                     <td>{a.operation}</td>
                     <td className="mono">{a.created_at?.slice(5, 16).replace("T", " ")}</td>
                   </tr>
                 ))}
-                {(audit.data || []).length === 0 && <tr><td colSpan={5} style={{ color: "var(--muted)" }}>No events yet.</td></tr>}
+                {(audit.data?.items || []).length === 0 && <tr><td colSpan={5} style={{ color: "var(--muted)" }}>No events yet.</td></tr>}
               </tbody>
             </table>
+            {(audit.data?.items.length ?? 0) < (audit.data?.total ?? 0) && (
+              <div style={{ marginTop: 10 }}>
+                <button className="btn" onClick={() => setAuditLimit((n) => n + 50)}>Load more</button>
+              </div>
+            )}
           </div>
         )}
 
@@ -714,12 +972,59 @@ export default function AdminPage() {
             <select value={site.data?.template || "open-canvas"} onChange={(e) => setTemplate.mutate(e.target.value)}>
               {TEMPLATES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
+            <div className="label" style={{ color: "var(--muted)", fontSize: 12, margin: "14px 0 6px" }}>Environment</div>
+            <select value={envValue} onChange={(e) => setEnvironment.mutate(e.target.value)}>
+              {ENVIRONMENTS.map((e) => <option key={e} value={e}>{e}</option>)}
+            </select>
             <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 14 }}>
-              Environment and date-range controls are framework placeholders for now.
+              Template and environment are stored as site settings and applied platform-wide.
             </p>
           </div>
         )}
       </div>
+
+      {detailId && (
+        <div className="drawer-overlay" onClick={() => setDetailId(null)}>
+          <div className="drawer" onClick={(e) => e.stopPropagation()}>
+            <div className="card-header">
+              <h2>Job {detailId.slice(0, 8)}</h2>
+              <span className="spacer" />
+              <button className="btn" onClick={() => setDetailId(null)}>Close</button>
+            </div>
+            {!detail.data ? (
+              <p style={{ color: "var(--muted)" }}>Loading…</p>
+            ) : (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px", fontSize: 13, marginBottom: 12 }}>
+                  <span className="muted">User</span><span><Avatar name={detail.data.user} sm /> {detail.data.user}</span>
+                  <span className="muted">Task</span><span>{detail.data.task}</span>
+                  <span className="muted">Status</span><span><StatusPill status={detail.data.status} /></span>
+                  <span className="muted">Stage</span><span>{detail.data.stage || "—"}</span>
+                  <span className="muted">Progress</span><span>{detail.data.progress != null ? `${Math.round(detail.data.progress * 100)}%` : "—"}</span>
+                  <span className="muted">Runtime</span><span>{fmtRuntime(detail.data.runtime_seconds)}</span>
+                  <span className="muted">Created</span><span className="mono">{detail.data.created_at?.slice(0, 19).replace("T", " ")}</span>
+                  {detail.data.error_code && <><span className="muted">Error</span><span className="mono">{detail.data.error_code}: {detail.data.error_message}</span></>}
+                </div>
+                {detail.data.progress != null && detail.data.status === "running" && <Progress value={detail.data.progress} />}
+                <h3 style={{ margin: "14px 0 6px", fontSize: 14 }}>Events</h3>
+                <table className="table">
+                  <thead><tr><th>When</th><th>Event</th><th>Status</th><th>Stage</th></tr></thead>
+                  <tbody>
+                    {detail.data.events.map((ev, i) => (
+                      <tr key={i}>
+                        <td className="mono">{ev.created_at?.slice(5, 19).replace("T", " ")}</td>
+                        <td>{ev.event}</td>
+                        <td><StatusPill status={ev.status} /></td>
+                        <td>{ev.stage || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -52,7 +52,21 @@ def admin_list_users(
         rows = list(
             session.execute(stmt.order_by(User.created_at.desc()).limit(limit).offset(offset)).scalars()
         )
-    return JSONResponse({"users": [user_payload(u) for u in rows], "total": total})
+        from ..models import Job
+
+        owner_ids = ["usr_" + u.id for u in rows]
+        counts: dict[str, int] = {}
+        if owner_ids:
+            for oid, cnt in session.execute(
+                select(Job.owner_id, func.count()).where(Job.owner_id.in_(owner_ids)).group_by(Job.owner_id)
+            ).all():
+                counts[oid] = int(cnt)
+    return JSONResponse(
+        {
+            "users": [{**user_payload(u), "jobs_count": counts.get("usr_" + u.id, 0)} for u in rows],
+            "total": total,
+        }
+    )
 
 
 @router.post("/admin/users", status_code=201)
@@ -293,6 +307,7 @@ def admin_jobs(
             stmt = stmt.where(Job.status == status)
         if task:
             stmt = stmt.where(Job.operation == task)
+        total = session.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
         rows = list(
             session.execute(stmt.order_by(Job.created_at.desc()).limit(limit).offset(offset)).scalars()
         )
@@ -323,7 +338,7 @@ def admin_jobs(
                 "finished_at": j.finished_at.isoformat() if j.finished_at else None,
             }
         )
-    return JSONResponse(out)
+    return JSONResponse({"items": out, "total": total})
 
 
 @router.get("/admin/trainings")
@@ -468,6 +483,7 @@ def admin_billing(request: Request) -> JSONResponse:
     from ..models import CreditEntry
 
     settings = request.app.state.settings
+    from ..models import Job as _Job
     from ..models import User as _User
 
     with request.app.state.db.session() as session:
@@ -478,6 +494,12 @@ def admin_billing(request: Request) -> JSONResponse:
             select(sa_func.coalesce(sa_func.sum(CreditEntry.delta), 0)).where(CreditEntry.delta > 0)
         ).scalar_one()
         users_total = session.execute(select(sa_func.count()).select_from(_User)).scalar_one()
+        op_rows = session.execute(
+            select(_Job.operation, sa_func.count()).group_by(_Job.operation)
+        ).all()
+    op_counts = {op: int(n) for op, n in op_rows}
+    ops_total = sum(op_counts.values())
+    pct = lambda op: round(op_counts.get(op, 0) / ops_total * 100, 1) if ops_total else 0
     # Signup grants are a column default, not ledger entries; count them explicitly.
     granted_total = int(granted) + users_total * 1000
     used = int(credits_used)
@@ -491,39 +513,55 @@ def admin_billing(request: Request) -> JSONResponse:
             "credits_quota": quota,
             "credits_pct": round(used / quota * 100, 1),
             "subscriptions_pct": 0,
-            "api_usage_pct": 0,
-            "custom_training_pct": 0,
+            "api_usage_pct": pct("music.generate"),
+            "custom_training_pct": pct("artist.train"),
+            "export_pct": pct("audio.export"),
+            "job_counts": op_counts,
         }
     )
 
 
 @router.get("/admin/audit")
-def admin_audit(request: Request, limit: int = Query(default=50, ge=1, le=200)) -> JSONResponse:
+def admin_audit(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    event: str | None = Query(default=None, max_length=40),
+) -> JSONResponse:
     """Recent job lifecycle events across the platform."""
     from ..models import Job, JobEvent
 
     with request.app.state.db.session() as session:
+        stmt = select(JobEvent)
+        if event:
+            stmt = stmt.where(JobEvent.event == event)
+        total = session.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
         rows = list(
             session.execute(
                 select(JobEvent, Job.owner_id, Job.operation)
                 .join(Job, Job.id == JobEvent.job_id)
+                .where(*([JobEvent.event == event] if event else []))
                 .order_by(JobEvent.id.desc())
                 .limit(limit)
+                .offset(offset)
             ).all()
         )
     return JSONResponse(
-        [
-            {
-                "event": ev.event,
-                "status": ev.status,
-                "stage": ev.stage,
-                "job_id": ev.job_id,
-                "owner_id": owner,
-                "operation": operation,
-                "created_at": ev.created_at.isoformat() if ev.created_at else None,
-            }
-            for ev, owner, operation in rows
-        ]
+        {
+            "items": [
+                {
+                    "event": ev.event,
+                    "status": ev.status,
+                    "stage": ev.stage,
+                    "job_id": ev.job_id,
+                    "owner_id": owner,
+                    "operation": operation,
+                    "created_at": ev.created_at.isoformat() if ev.created_at else None,
+                }
+                for ev, owner, operation in rows
+            ],
+            "total": total,
+        }
     )
 
 
@@ -531,13 +569,14 @@ def admin_audit(request: Request, limit: int = Query(default=50, ge=1, le=200)) 
 def admin_workers(request: Request) -> JSONResponse:
     """All registered workers with derived status."""
     from ..models import Worker
+    from ..orchestration import as_utc
 
     with request.app.state.db.session() as session:
         workers = list(session.execute(select(Worker)).scalars())
     now = utcnow()
     out = []
     for w in workers:
-        fresh = w.last_heartbeat is not None and (now - w.last_heartbeat).total_seconds() < 120
+        fresh = w.last_heartbeat is not None and (now - as_utc(w.last_heartbeat)).total_seconds() < 120
         out.append(
             {
                 "id": w.id,
@@ -551,3 +590,195 @@ def admin_workers(request: Request) -> JSONResponse:
             }
         )
     return JSONResponse({"workers": out})
+
+
+ALLOWED_ENVIRONMENTS = ("production", "staging", "development")
+
+
+class EnvironmentSetting(BaseModel):
+    value: str
+
+
+@router.put("/admin/settings/environment")
+def admin_put_environment(payload: EnvironmentSetting, request: Request) -> JSONResponse:
+    if payload.value not in ALLOWED_ENVIRONMENTS:
+        raise ApiError(
+            422,
+            "ENVIRONMENT_UNKNOWN",
+            "Unknown environment.",
+            {"allowed": list(ALLOWED_ENVIRONMENTS)},
+        )
+    with request.app.state.db.session() as session:
+        row = session.get(SiteSetting, "environment")
+        if row is None:
+            session.add(SiteSetting(key="environment", value=payload.value))
+        else:
+            row.value = payload.value
+        session.commit()
+    return JSONResponse(content={"environment": payload.value})
+
+
+@router.get("/admin/credits")
+def admin_credits(
+    request: Request,
+    limit: int = Query(default=25, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    reason: str | None = Query(default=None, max_length=60),
+) -> JSONResponse:
+    """Credit ledger with usernames, newest first."""
+    from sqlalchemy import func as sa_func
+
+    from ..models import CreditEntry
+
+    with request.app.state.db.session() as session:
+        stmt = select(CreditEntry)
+        if reason:
+            stmt = stmt.where(CreditEntry.reason == reason)
+        total = session.execute(select(sa_func.count()).select_from(stmt.subquery())).scalar_one()
+        rows = list(
+            session.execute(
+                select(CreditEntry, User.username)
+                .outerjoin(User, User.id == func.replace(CreditEntry.owner_id, "usr_", ""))
+                .where(*([CreditEntry.reason == reason] if reason else []))
+                .order_by(CreditEntry.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            ).all()
+        )
+    return JSONResponse(
+        {
+            "items": [
+                {
+                    "id": entry.id,
+                    "owner_id": entry.owner_id,
+                    "user": username or entry.owner_id.replace("tok_", "api:")[:14],
+                    "delta": entry.delta,
+                    "reason": entry.reason,
+                    "job_id": entry.job_id,
+                    "created_at": entry.created_at.isoformat() if entry.created_at else None,
+                }
+                for entry, username in rows
+            ],
+            "total": total,
+        }
+    )
+
+
+@router.post("/admin/workers/{worker_id}/drain")
+def admin_worker_drain(worker_id: str, request: Request) -> JSONResponse:
+    """Toggle the drain flag; workers check it before claiming new jobs."""
+    from ..models import Worker
+
+    with request.app.state.db.session() as session:
+        worker = session.get(Worker, worker_id)
+        if worker is None:
+            raise ApiError(404, "WORKER_NOT_FOUND", "Worker not found.")
+        worker.drain = not worker.drain
+        session.commit()
+        return JSONResponse({"id": worker.id, "drain": worker.drain})
+
+
+@router.delete("/admin/workers/stale")
+def admin_workers_purge(request: Request) -> JSONResponse:
+    """Remove workers whose last heartbeat is older than 24 hours."""
+    from datetime import timedelta
+
+    from sqlalchemy import or_
+
+    from ..models import Worker
+
+    cutoff = utcnow() - timedelta(hours=24)
+    with request.app.state.db.session() as session:
+        rows = list(
+            session.execute(
+                select(Worker).where(
+                    or_(Worker.last_heartbeat.is_(None), Worker.last_heartbeat < cutoff)
+                )
+            ).scalars()
+        )
+        for worker in rows:
+            session.delete(worker)
+        session.commit()
+    return JSONResponse({"purged": len(rows)})
+
+
+@router.get("/admin/jobs/{job_id}")
+def admin_job_detail(job_id: str, request: Request) -> JSONResponse:
+    """Single job with its full event timeline."""
+    from ..models import Job, JobEvent
+
+    with request.app.state.db.session() as session:
+        job = session.execute(select(Job).where(Job.id == job_id)).scalar_one_or_none()
+        if job is None:
+            raise ApiError(404, "JOB_NOT_FOUND", "Job not found.")
+        username = None
+        if job.owner_id.startswith("usr_"):
+            user = session.get(User, job.owner_id[4:])
+            username = user.username if user else None
+        events = list(
+            session.execute(
+                select(JobEvent).where(JobEvent.job_id == job.id).order_by(JobEvent.id)
+            ).scalars()
+        )
+    runtime = None
+    if job.started_at and job.finished_at:
+        runtime = max(0.0, (job.finished_at - job.started_at).total_seconds())
+    return JSONResponse(
+        {
+            "job_id": job.id,
+            "owner_id": job.owner_id,
+            "user": username or job.owner_id.replace("tok_", "api:")[:14],
+            "operation": job.operation,
+            "task": TASK_LABELS.get(job.operation, job.operation),
+            "status": job.status,
+            "stage": job.stage,
+            "progress": job.progress,
+            "error_code": job.error_code,
+            "error_message": job.error_message,
+            "runtime_seconds": runtime,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "started_at": job.started_at.isoformat() if job.started_at else None,
+            "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+            "events": [
+                {
+                    "event": ev.event,
+                    "status": ev.status,
+                    "stage": ev.stage,
+                    "created_at": ev.created_at.isoformat() if ev.created_at else None,
+                }
+                for ev in events
+            ],
+        }
+    )
+
+
+@router.post("/admin/trainings/{run_id}/cancel")
+def admin_training_cancel(run_id: str, request: Request) -> JSONResponse:
+    """Cancel a queued/running training run from the admin console."""
+    from ..models import Job, TrainingRun
+    from ..orchestration import append_event
+
+    with request.app.state.db.session() as session:
+        run = session.get(TrainingRun, run_id)
+        if run is None:
+            raise ApiError(404, "RUN_NOT_FOUND", "Training run not found.")
+        job = session.execute(select(Job).where(Job.id == run.job_id)).scalar_one_or_none()
+        if job is None:
+            raise ApiError(404, "JOB_NOT_FOUND", "Training job not found.")
+        if job.status == "queued":
+            job.status = "cancelled"
+            job.cancel_requested_at = utcnow()
+            job.finished_at = utcnow()
+            append_event(session, job.id, job.status, job.status)
+        elif job.status == "running":
+            job.status = "cancelling"
+            job.cancel_requested_at = utcnow()
+            append_event(session, job.id, job.status, job.status)
+        elif job.status in ("cancelling", "cancelled"):
+            pass
+        else:
+            raise ApiError(
+                409, "STATE_CONFLICT", f"Training run in state '{job.status}' cannot be cancelled."
+            )
+        session.commit()
+        return JSONResponse({"run_id": run.id, "status": job.status})
