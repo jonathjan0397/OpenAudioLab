@@ -280,6 +280,7 @@ export default function AdminPage() {
   const [loraName, setLoraName] = useState("");
   const [loraTags, setLoraTags] = useState("");
   const [loraFiles, setLoraFiles] = useState<FileList | null>(null);
+  const [loraProgress, setLoraProgress] = useState<number | null>(null);
   const loras = useQuery({
     queryKey: ["admin-loras"],
     queryFn: () => api.get<{ loras: { id: string; name: string; tags: string[]; state: string; auto_apply: boolean; priority: number; default_scale: number; provenance: string; profile_version_id: string | null; training_status: string | null }[] }>("/api/v1/admin/loras"),
@@ -290,18 +291,27 @@ export default function AdminPage() {
     qc.invalidateQueries({ queryKey: ["admin-trainings"] });
   };
   const uploadLora = useMutation({
-    mutationFn: async () => {
-      const fd = new FormData();
-      fd.append("name", loraName);
-      fd.append("tags", loraTags);
-      Array.from(loraFiles || []).forEach((f) => fd.append("files", f));
-      const res = await fetch("/api/v1/admin/loras/upload", { method: "POST", credentials: "include", body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error?.message || "Upload failed");
-      return data as { titles: string[] };
-    },
-    onSuccess: () => { setLoraName(""); setLoraTags(""); setLoraFiles(null); invalidateLoras(); },
-    onError: (e: Error) => setError(e.message),
+    mutationFn: () =>
+      new Promise<{ titles: string[] }>((resolve, reject) => {
+        const fd = new FormData();
+        fd.append("name", loraName);
+        fd.append("tags", loraTags);
+        Array.from(loraFiles || []).forEach((f) => fd.append("files", f));
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/api/v1/admin/loras/upload");
+        xhr.withCredentials = true;
+        xhr.upload.onprogress = (e) => setLoraProgress(e.lengthComputable ? Math.round((e.loaded / e.total) * 100) : null);
+        xhr.onload = () => {
+          let data: any = {};
+          try { data = JSON.parse(xhr.responseText); } catch { /* keep default */ }
+          if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+          else reject(new Error(data?.error?.message || `Upload failed (HTTP ${xhr.status})`));
+        };
+        xhr.onerror = () => reject(new Error("Upload failed (network)"));
+        xhr.send(fd);
+      }),
+    onSuccess: () => { setLoraName(""); setLoraTags(""); setLoraFiles(null); setLoraProgress(null); invalidateLoras(); },
+    onError: (e: Error) => { setLoraProgress(null); setError(e.message); },
   });
   const publishLora = useMutation({
     mutationFn: (t: Training) =>
@@ -892,10 +902,28 @@ export default function AdminPage() {
                 disabled={!loraName || !loraFiles?.length || uploadLora.isPending}
                 onClick={() => uploadLora.mutate()}
               >
-                {uploadLora.isPending ? "Uploading…" : "Upload & train"}
+                {uploadLora.isPending ? (loraProgress !== null ? `Uploading ${loraProgress}%` : "Uploading…") : "Upload & train"}
               </button>
               {error && <span className="pill err">{error}</span>}
             </div>
+            {(trainings.data || []).some((t) => t.status === "queued" || t.status === "running") && (
+              <div style={{ marginBottom: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+                {(trainings.data || [])
+                  .filter((t) => t.status === "queued" || t.status === "running")
+                  .map((t) => (
+                    <div key={t.run_id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+                      <span style={{ minWidth: 160 }}>{t.profile}</span>
+                      <div style={{ flex: 1, height: 8, background: "var(--border)", borderRadius: 4, overflow: "hidden" }}>
+                        <div style={{ width: `${Math.round((t.progress || 0) * 100)}%`, height: "100%", background: "var(--accent)", transition: "width 0.5s" }} />
+                      </div>
+                      <span className="sub" style={{ minWidth: 150 }}>
+                        {t.status === "queued" ? "queued" : `${t.stage || "training"} ${Math.round((t.progress || 0) * 100)}%`}
+                        {t.eta_seconds != null ? ` · ~${Math.ceil(t.eta_seconds / 60)} min left` : ""}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            )}
             {(trainings.data || []).some((t) => t.status === "succeeded" && t.profile_version_id && !(loras.data?.loras || []).some((l) => l.profile_version_id === t.profile_version_id)) && (
               <div style={{ marginBottom: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {(trainings.data || [])

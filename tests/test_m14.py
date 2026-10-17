@@ -212,3 +212,13 @@ def test_admin_lora_pipeline(client) -> None:
     response = client.patch(f"/api/v1/admin/loras/{lora_id}", json={"auto_apply": False, "state": "retired"})
     assert response.status_code == 200 and response.json()["state"] == "retired"
     assert client.delete(f"/api/v1/admin/loras/{lora_id}").status_code == 204
+
+
+def test_upload_path_body_limit_exempt(client) -> None:
+    """The 1 MB JSON cap must not apply to /upload paths (admin LoRA uploads)."""
+    response = client.post(
+        "/api/v1/admin/loras/upload",
+        data={"blob": "x" * 1_500_000},
+        files=[("files", ("song.wav", b"wav-bytes", "audio/wav"))],
+    )
+    assert response.status_code != 413
