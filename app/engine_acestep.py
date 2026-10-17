@@ -202,7 +202,11 @@ class AceStepAdapter:
 
     def ensure_model(self) -> None:
         """Initialize the DiT only when no model is loaded (re-init would OOM)."""
-        status = self.transport.get_json("/v1/lora/status")
+        status = None
+        try:
+            status = self.transport.get_json("/v1/lora/status")
+        except EngineError:
+            status = None
         if status is not None and status.get("code") == 200:
             return
         response = self.transport.post_json("/v1/init", {})
