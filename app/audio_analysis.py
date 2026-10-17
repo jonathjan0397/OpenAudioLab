@@ -54,18 +54,20 @@ def analyze_file(path: str, duration_seconds: float = 30.0) -> dict:
 
 def genre_tags(path: str, top_k: int = 3) -> list[str]:
     try:
-        from musicnn import tagging
+        from musicnn import tagger
     except Exception:
         return []
     try:
-        tags, _ = tagging.predict(path, topk=top_k, tagset="genre")
+        tags = tagger.top_tags(path, topN=top_k * 4, print_tags=False)
     except Exception:
         return []
     out = []
-    for tag in tags:
+    for tag in tags or []:
         clean = GENRE_ALIASES.get(str(tag).strip().lower())
         if clean and clean not in out:
             out.append(clean)
+        if len(out) >= top_k:
+            break
     return out
 
 
