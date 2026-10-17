@@ -74,6 +74,7 @@ interface Training {
   created_at: string | null;
   hardware: string | null;
   error: string | null;
+  suggested_tags?: string[];
 }
 interface AdminJob {
   job_id: string;
@@ -337,7 +338,7 @@ export default function AdminPage() {
       api.post<{ id: string }>("/api/v1/admin/loras", {
         profile_version_id: t.profile_version_id,
         name: `${t.profile} style`,
-        tags: t.profile.toLowerCase().replace(/\s+/g, "-"),
+        tags: [t.profile.toLowerCase().replace(/\s+/g, "-"), ...(t.suggested_tags || [])].join(","),
       }),
     onSuccess: invalidateLoras,
   });
@@ -970,9 +971,14 @@ export default function AdminPage() {
                 {(trainings.data || [])
                   .filter((t) => t.status === "succeeded" && t.profile_version_id && !(loras.data?.loras || []).some((l) => l.profile_version_id === t.profile_version_id))
                   .map((t) => (
-                    <button key={t.run_id} className="btn" onClick={() => publishLora.mutate(t)}>
-                      ⇈ Publish “{t.profile}” as style model
-                    </button>
+                    <span key={t.run_id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <button className="btn" onClick={() => publishLora.mutate(t)}>
+                        ⇈ Publish “{t.profile}” as style model
+                      </button>
+                      {(t.suggested_tags || []).length > 0 && (
+                        <span className="sub" style={{ fontSize: 11 }}>auto-tags: {(t.suggested_tags || []).slice(0, 4).join(", ")}</span>
+                      )}
+                    </span>
                   ))}
               </div>
             )}

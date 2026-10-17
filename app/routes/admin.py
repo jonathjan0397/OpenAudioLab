@@ -367,7 +367,7 @@ def admin_trainings(request: Request, limit: int = Query(default=5, ge=1, le=50)
             session.execute(
                 select(
                     TrainingRun, Job.status, Job.progress, Job.stage, Job.created_at, Job.started_at,
-                    Job.finished_at, Job.error_code, Job.error_message, ArtistProfile.name, User.username,
+                    Job.finished_at, Job.error_code, Job.error_message, ArtistProfile.name, ArtistProfile.style_json, User.username,
                 )
                 .join(Job, Job.id == TrainingRun.job_id)
                 .outerjoin(ArtistProfileVersion, ArtistProfileVersion.id == TrainingRun.profile_version_id)
@@ -378,7 +378,7 @@ def admin_trainings(request: Request, limit: int = Query(default=5, ge=1, le=50)
             ).all()
         )
     out = []
-    for run, status, progress, stage, created, started, finished, err_code, err_msg, name, username in rows:
+    for run, status, progress, stage, created, started, finished, err_code, err_msg, name, style_json, username in rows:
         eta = None
         if status == "running" and progress and started:
             elapsed = (utcnow() - started).total_seconds()
@@ -396,6 +396,7 @@ def admin_trainings(request: Request, limit: int = Query(default=5, ge=1, le=50)
                 "created_at": created.isoformat() if created else None,
                 "hardware": run.hardware,
                 "error": f"{err_code}: {err_msg}"[:200] if err_code or err_msg else None,
+                "suggested_tags": (style_json or {}).get("suggested_tags", []),
             }
         )
     return JSONResponse(out)
