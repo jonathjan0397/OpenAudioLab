@@ -85,3 +85,10 @@ def test_admin_jobs_labels_and_filters(client) -> None:
     response = client.get("/api/v1/admin/jobs?limit=5")
     assert response.status_code == 200
     assert isinstance(response.json(), list)
+
+
+def test_admin_trainings_join(client) -> None:
+    _seed_admin(client, "m10-trn@example.com")
+    response = client.get("/api/v1/admin/trainings?limit=8")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
