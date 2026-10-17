@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, AuthUser } from "../api";
 import { toast } from "../components/Toast";
@@ -7,6 +8,12 @@ interface Plan {
   name: string;
   price_usd: number;
   monthly_credits: number;
+}
+interface Pack {
+  id: string;
+  name: string;
+  price_usd: number;
+  credits: number;
 }
 interface PlansResp {
   plans: Plan[];
@@ -18,13 +25,27 @@ interface PlansResp {
 const PERKS: Record<string, string[]> = {
   free: ["1,000 signup credits", "10 credits per generation", "WAV downloads", "Community sharing"],
   pro: ["2,500 credits / month", "MP3 + WAV exports", "Artist profiles", "Mood presets & LLM lyrics"],
-  premier: ["10,000 credits / month", "WAV stems (when live)", "Priority queue", "Custom artist training"],
+  premier: ["10,000 credits / month", "6-stem separation", "Priority queue", "Custom artist training"],
 };
 
 export default function PricingPage() {
   const qc = useQueryClient();
   const plans = useQuery({ queryKey: ["billing-plans"], queryFn: () => api.get<PlansResp>("/api/v1/billing/plans") });
+  const packs = useQuery({ queryKey: ["billing-packs"], queryFn: () => api.get<{ packs: Pack[] }>("/api/v1/billing/packs") });
   const me = useQuery({ queryKey: ["me"], queryFn: () => api.get<{ user: AuthUser }>("/api/v1/auth/me"), retry: false });
+
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    if (q.get("checkout") === "success") {
+      toast("Payment received — plan & credits updated");
+      qc.invalidateQueries({ queryKey: ["billing-plans"] });
+      qc.invalidateQueries({ queryKey: ["me"] });
+      window.history.replaceState({}, "", "/pricing");
+    } else if (q.get("checkout") === "cancel") {
+      toast("Checkout cancelled");
+      window.history.replaceState({}, "", "/pricing");
+    }
+  }, [qc]);
 
   const act = async (path: string, body?: unknown) => {
     const res = await fetch(`/api/v1/billing/${path}`, {
@@ -42,6 +63,25 @@ export default function PricingPage() {
     else toast(path === "unsubscribe" ? "Back on the Free plan" : path === "topup" ? `+${data.added} credits added` : `${data.plan} plan active`);
     qc.invalidateQueries({ queryKey: ["billing-plans"] });
     qc.invalidateQueries({ queryKey: ["me"] });
+  };
+
+  const checkout = async (body: Record<string, unknown>, fallback: () => void) => {
+    const res = await fetch("/api/v1/billing/checkout", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(body),
+    });
+    if (res.status === 503) {
+      fallback();
+      return;
+    }
+    const data = await res.json();
+    if (!res.ok) {
+      toast(data?.error?.message || "Checkout failed");
+      return;
+    }
+    window.location.href = data.url;
   };
 
   const signedIn = !!me.data?.user;
@@ -79,7 +119,7 @@ export default function PricingPage() {
                       </span>
                     )
                   ) : (
-                    <button className="btn btn-primary" onClick={() => act("subscribe", { plan: p.id })}>
+                    <button className="btn btn-primary" onClick={() => checkout({ kind: "plan", plan: p.id }, () => act("subscribe", { plan: p.id }))}>
                       Subscribe
                     </button>
                   ))}
@@ -89,13 +129,16 @@ export default function PricingPage() {
         })}
       </div>
       {signedIn && (
-        <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 18 }}>
-          Need more now?{" "}
-          <button className="btn" onClick={() => act("topup")}>
-            +{plans.data?.topup_credits ?? 500} credits top-up
-          </button>{" "}
-          (mock payment — billing gateway coming soon)
-        </p>
+        <div className="card" style={{ marginTop: 20, padding: "16px 20px" }}>
+          <div className="label" style={{ marginBottom: 10 }}>Credit packs (one-time)</div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {(packs.data?.packs || []).map((k) => (
+              <button key={k.id} className="btn" onClick={() => checkout({ kind: "pack", pack: k.id }, () => act("topup"))}>
+                {k.credits.toLocaleString()} credits — ${k.price_usd}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
     </main>
   );

@@ -44,6 +44,7 @@ def user_payload(user: User) -> dict:
         "state": user.state,
         "plan": user.plan,
         "credits_balance": user.credits_balance,
+        "stripe_customer_id": user.stripe_customer_id,
     }
 
 

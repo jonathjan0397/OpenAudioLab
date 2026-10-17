@@ -11,8 +11,10 @@ interface AdminUser {
   username: string;
   role: string;
   state: string;
+  plan: string;
   credits_balance: number;
   jobs_count: number;
+  stripe_customer_id: string | null;
 }
 interface Page<T> {
   items: T[];
@@ -200,6 +202,9 @@ export default function AdminPage() {
   const [task, setTask] = useState("all");
   const [metric, setMetric] = useState<"tracks" | "users" | "compute">("tracks");
   const [userQ, setUserQ] = useState("");
+  const [ledgerFor, setLedgerFor] = useState<AdminUser | null>(null);
+  const [adjDelta, setAdjDelta] = useState("");
+  const [adjNote, setAdjNote] = useState("");
   const [jobStatus, setJobStatus] = useState("");
   const [jobTask, setJobTask] = useState(params.get("task") || "");
   const [jobLimit, setJobLimit] = useState(25);
@@ -299,6 +304,26 @@ export default function AdminPage() {
       api.get<Page<AuditRow>>(`/api/v1/admin/audit?limit=${auditLimit}${auditEvent ? `&event=${encodeURIComponent(auditEvent)}` : ""}`),
     enabled: enabled && section === "audit",
   });
+  const ledger = useQuery({
+    queryKey: ["admin-user-credits", ledgerFor?.id],
+    queryFn: () => api.get<{ entries: { id: string; delta: number; reason: string; note: string | null; created_at: string | null }[] }>(`/api/v1/admin/users/${ledgerFor?.id}/credits`),
+    enabled: !!ledgerFor,
+  });
+  const adjust = useMutation({
+    mutationFn: () =>
+      api.post<{ credits_balance: number }>(`/api/v1/admin/users/${ledgerFor?.id}/credits`, {
+        delta: Number(adjDelta),
+        reason: "admin_adjust",
+        note: adjNote || null,
+      }),
+    onSuccess: () => {
+      setAdjDelta("");
+      setAdjNote("");
+      qc.invalidateQueries({ queryKey: ["admin-user-credits", ledgerFor?.id] });
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+    },
+  });
+
   const users = useQuery({
     queryKey: ["admin-users", userQ],
     queryFn: () => api.get<{ users: AdminUser[]; total: number }>(`/api/v1/admin/users${userQ ? `?q=${encodeURIComponent(userQ)}` : ""}`),
@@ -705,13 +730,22 @@ export default function AdminPage() {
               {error && <span className="pill err">{error}</span>}
             </div>
             <table className="table">
-              <thead><tr><th>User</th><th>Role</th><th>State</th><th>Jobs</th><th>Credits</th></tr></thead>
+              <thead><tr><th>User</th><th>Role</th><th>State</th><th>Plan</th><th>Jobs</th><th>Credits</th><th /></tr></thead>
               <tbody>
                 {(users.data?.users || []).map((u) => (
                   <tr key={u.id}>
                     <td><Avatar name={u.username} sm /> {u.username}<div className="mono">{u.email}</div></td>
                     <td><button className="btn" onClick={() => patch.mutate({ id: u.id, body: { role: u.role === "admin" ? "user" : "admin" } })}>{u.role}</button></td>
                     <td><button className="btn" onClick={() => patch.mutate({ id: u.id, body: { state: u.state === "active" ? "disabled" : "active" } })}>{u.state}</button></td>
+                    <td>
+                      <button
+                        className="btn"
+                        title="Cycle plan"
+                        onClick={() => patch.mutate({ id: u.id, body: { plan: u.plan === "free" ? "pro" : u.plan === "pro" ? "premier" : "free" } })}
+                      >
+                        {u.plan}
+                      </button>
+                    </td>
                     <td>{u.jobs_count}</td>
                     <td>
                       {creditDraft?.id === u.id ? (
@@ -749,10 +783,50 @@ export default function AdminPage() {
                         </button>
                       )}
                     </td>
+                    <td><button className="btn btn-ghost" onClick={() => setLedgerFor(u)}>ledger</button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {ledgerFor && (
+          <div className="drawer-overlay" onClick={() => setLedgerFor(null)}>
+            <div className="drawer" onClick={(e) => e.stopPropagation()}>
+              <div className="card-header">
+                <h2>{ledgerFor.username} — billing</h2>
+                <span className="spacer" />
+                <button className="btn" onClick={() => setLedgerFor(null)}>Close</button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px", fontSize: 13, marginBottom: 12 }}>
+                <span className="muted">Email</span><span>{ledgerFor.email}</span>
+                <span className="muted">Plan</span><span>{ledgerFor.plan}</span>
+                <span className="muted">Balance</span><span>{ledgerFor.credits_balance.toLocaleString()} cr</span>
+                <span className="muted">Stripe customer</span><span className="mono">{ledgerFor.stripe_customer_id || "—"}</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+                <input style={{ width: 90 }} type="number" placeholder="+/-" value={adjDelta} onChange={(e) => setAdjDelta(e.target.value)} />
+                <input style={{ width: 180 }} placeholder="note (optional)" value={adjNote} onChange={(e) => setAdjNote(e.target.value)} />
+                <button className="btn btn-primary" disabled={!adjDelta || adjust.isPending} onClick={() => adjust.mutate()}>
+                  {Number(adjDelta) >= 0 ? "Grant" : "Deduct"}
+                </button>
+              </div>
+              <table className="table">
+                <thead><tr><th>When</th><th>Delta</th><th>Reason</th><th>Note</th></tr></thead>
+                <tbody>
+                  {(ledger.data?.entries || []).map((e) => (
+                    <tr key={e.id}>
+                      <td className="mono">{e.created_at?.slice(0, 16).replace("T", " ")}</td>
+                      <td style={{ color: e.delta >= 0 ? "var(--ok, green)" : "var(--err, red)" }}>{e.delta >= 0 ? "+" : ""}{e.delta.toLocaleString()}</td>
+                      <td>{e.reason}</td>
+                      <td>{e.note || ""}</td>
+                    </tr>
+                  ))}
+                  {ledger.data && ledger.data.entries.length === 0 && <tr><td colSpan={4} style={{ color: "var(--muted)" }}>No ledger entries yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 

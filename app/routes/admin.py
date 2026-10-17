@@ -28,6 +28,13 @@ class AdminPatchUser(BaseModel):
     role: str | None = Field(default=None, pattern=r"^(user|admin)$")
     state: str | None = Field(default=None, pattern=r"^(active|disabled)$")
     credits_balance: int | None = Field(default=None, ge=0)
+    plan: str | None = Field(default=None, pattern=r"^(free|pro|premier)$")
+
+
+class AdminCreditAdjust(BaseModel):
+    delta: int = Field(ge=-1_000_000, le=1_000_000)
+    reason: str = Field(default="admin_adjust", max_length=60)
+    note: str | None = Field(default=None, max_length=200)
 
 
 class TemplateSetting(BaseModel):
@@ -109,6 +116,8 @@ def admin_patch_user(user_id: str, payload: AdminPatchUser, request: Request) ->
             user.state = payload.state
         if payload.credits_balance is not None:
             user.credits_balance = payload.credits_balance
+        if payload.plan is not None:
+            user.plan = payload.plan
         user.updated_at = utcnow()
         session.commit()
         session.refresh(user)
@@ -794,3 +803,56 @@ def admin_training_cancel(run_id: str, request: Request) -> JSONResponse:
             )
         session.commit()
         return JSONResponse({"run_id": run.id, "status": job.status})
+
+
+@router.post("/admin/users/{user_id}/credits")
+def admin_user_credits(user_id: str, payload: AdminCreditAdjust, request: Request) -> JSONResponse:
+    from ..models import CreditEntry
+
+    with request.app.state.db.session() as session:
+        user = session.get(User, user_id)
+        if user is None:
+            raise ApiError(404, "USER_NOT_FOUND", "User not found.")
+        user.credits_balance = max(0, user.credits_balance + payload.delta)
+        session.add(
+            CreditEntry(
+                owner_id="usr_" + user.id,
+                delta=payload.delta,
+                reason=payload.reason,
+                note=payload.note,
+            )
+        )
+        session.commit()
+        balance = user.credits_balance
+    return JSONResponse({"credits_balance": balance})
+
+
+@router.get("/admin/users/{user_id}/credits")
+def admin_user_ledger(user_id: str, request: Request, limit: int = Query(default=50, ge=1, le=200)) -> JSONResponse:
+    from ..models import CreditEntry
+
+    with request.app.state.db.session() as session:
+        if session.get(User, user_id) is None:
+            raise ApiError(404, "USER_NOT_FOUND", "User not found.")
+        rows = list(
+            session.execute(
+                select(CreditEntry)
+                .where(CreditEntry.owner_id == "usr_" + user_id)
+                .order_by(CreditEntry.created_at.desc())
+                .limit(limit)
+            ).scalars()
+        )
+    return JSONResponse(
+        {
+            "entries": [
+                {
+                    "id": e.id,
+                    "delta": e.delta,
+                    "reason": e.reason,
+                    "note": e.note,
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
+                }
+                for e in rows
+            ]
+        }
+    )

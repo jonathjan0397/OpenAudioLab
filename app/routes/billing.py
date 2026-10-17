@@ -5,7 +5,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
+from ..errors import ApiError
 from ..models import CreditEntry, User
 from ..routes.auth import current_user
 
@@ -79,3 +81,129 @@ def subscription_revenue(session) -> float:
     for plan, count in session.execute(select(User.plan, func.count()).group_by(User.plan)).all():
         total += PLANS.get(plan, PLANS["free"])["price_usd"] * int(count)
     return total
+
+
+# --- M14d: Stripe Checkout + webhooks ----------------------------------------
+
+PACKS: dict[str, dict] = {
+    "small": {"id": "small", "name": "Starter pack", "price_usd": 5, "credits": 1000},
+    "medium": {"id": "medium", "name": "Creator pack", "price_usd": 20, "credits": 5000},
+    "large": {"id": "large", "name": "Studio pack", "price_usd": 45, "credits": 12000},
+}
+
+
+class CheckoutRequest(BaseModel):
+    kind: str = Field(pattern=r"^(plan|pack)$")
+    plan: str | None = Field(default=None, pattern=r"^(pro|premier)$")
+    pack: str | None = Field(default=None, pattern=r"^(small|medium|large)$")
+
+
+@router.get("/billing/packs")
+def billing_packs(user: User = Depends(current_user)) -> JSONResponse:
+    return JSONResponse({"packs": list(PACKS.values())})
+
+
+@router.post("/billing/checkout", status_code=201)
+def billing_checkout(
+    payload: CheckoutRequest, request: Request, user: User = Depends(current_user)
+) -> JSONResponse:
+    settings = request.app.state.settings
+    if payload.kind == "plan" and not payload.plan:
+        raise ApiError(422, "PLAN_REQUIRED", "Choose a plan.")
+    if payload.kind == "pack" and not payload.pack:
+        raise ApiError(422, "PACK_REQUIRED", "Choose a credit pack.")
+    if not settings.stripe_secret_key:
+        raise ApiError(503, "STRIPE_DISABLED", "Card payments are not configured yet.")
+    import stripe
+
+    stripe.api_key = settings.stripe_secret_key
+    if payload.kind == "plan":
+        item = PLANS[payload.plan]
+        name, unit, credits = item["name"], item["price_usd"] * 100, item["monthly_credits"]
+        line = {
+            "price_data": {
+                "currency": "usd",
+                "product_data": {"name": f"OpenAudioLab {item['name']}"},
+                "unit_amount": unit,
+                "recurring": {"interval": "month"},
+            },
+            "quantity": 1,
+        }
+        mode = "subscription"
+    else:
+        item = PACKS[payload.pack]
+        name, unit, credits = item["name"], item["price_usd"] * 100, item["credits"]
+        line = {
+            "price_data": {
+                "currency": "usd",
+                "product_data": {"name": f"OpenAudioLab {item['name']}"},
+                "unit_amount": unit,
+            },
+            "quantity": 1,
+        }
+        mode = "payment"
+    session = stripe.checkout.Session.create(
+        mode=mode,
+        line_items=[line],
+        client_reference_id=user.id,
+        customer_email=user.email,
+        metadata={"kind": payload.kind, "plan": payload.plan or "", "pack": payload.pack or "", "credits": str(credits)},
+        success_url=settings.site_url + "/pricing?checkout=success",
+        cancel_url=settings.site_url + "/pricing?checkout=cancel",
+    )
+    with request.app.state.db.session() as db:
+        fresh = db.get(User, user.id)
+        if getattr(session, "customer", None):
+            fresh.stripe_customer_id = str(session.customer)
+        db.commit()
+    return JSONResponse(
+        status_code=201,
+        content={"url": session.url, "session_id": session.id},
+    )
+
+
+@router.post("/billing/webhook")
+async def billing_webhook(request: Request) -> JSONResponse:
+    settings = request.app.state.settings
+    if not settings.stripe_webhook_secret:
+        raise ApiError(503, "STRIPE_DISABLED", "Webhook secret is not configured.")
+    import stripe
+
+    stripe.api_key = settings.stripe_secret_key
+    body = await request.body()
+    try:
+        event = stripe.Webhook.construct_event(
+            body, request.headers.get("stripe-signature", ""), settings.stripe_webhook_secret
+        )
+    except Exception as exc:
+        raise ApiError(400, "WEBHOOK_SIGNATURE", f"Signature verification failed: {exc}")
+    event_type = event["type"]
+    obj = event["data"]["object"]
+    from ..models import User as _User
+
+    if event_type == "checkout.session.completed":
+        meta = obj.get("metadata") or {}
+        owner = obj.get("client_reference_id")
+        with request.app.state.db.session() as session:
+            fresh = session.get(_User, owner) if owner else None
+            if fresh is not None:
+                if meta.get("kind") == "plan" and meta.get("plan"):
+                    fresh.plan = meta["plan"]
+                    if obj.get("subscription"):
+                        fresh.stripe_subscription_id = str(obj["subscription"])
+                    _grant(session, fresh, int(meta.get("credits") or 0), "subscription")
+                elif meta.get("kind") == "pack":
+                    _grant(session, fresh, int(meta.get("credits") or 0), "topup")
+                session.commit()
+    elif event_type == "customer.subscription.deleted":
+        with request.app.state.db.session() as session:
+            rows = list(
+                session.execute(
+                    select(_User).where(_User.stripe_subscription_id == obj.get("id"))
+                ).scalars()
+            )
+            for fresh in rows:
+                fresh.plan = "free"
+                fresh.stripe_subscription_id = None
+            session.commit()
+    return JSONResponse({"received": True})

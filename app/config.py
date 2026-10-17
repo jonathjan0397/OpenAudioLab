@@ -88,6 +88,11 @@ class Settings(BaseSettings):
     upload_session_ttl_minutes: int = 60
     ffmpeg_bin: str = "ffmpeg"
     ffprobe_bin: str = "ffprobe"
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_mode: str = "live"
+    site_url: str = "https://openaudiolab.io"
+
     demucs_python: str = ""
     demucs_model: str = "htdemucs_6s"
     demucs_device: str = "cpu"

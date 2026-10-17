@@ -121,3 +121,34 @@ def test_variations_cost(client) -> None:
         from app.config import Settings
 
         assert spent == 2 * Settings().credit_cost_per_generation
+
+
+def test_stripe_checkout_disabled(client) -> None:
+    _seed_owner(client, "m14-stripe@example.com", "m14stripe")
+    response = client.post("/api/v1/billing/checkout", json={"kind": "pack", "pack": "small"})
+    assert response.status_code == 503  # no stripe key in test env
+    response = client.post("/api/v1/billing/checkout", json={"kind": "plan"})
+    assert response.status_code == 422
+
+
+def test_admin_credit_adjust_and_ledger(client) -> None:
+    owner = _seed_owner(client, "m14-ledger@example.com", "m14ledger")
+    # promote to admin for the admin routes
+    from app.models import User
+
+    with client.app.state.db.session() as session:
+        session.get(User, owner).role = "admin"
+        session.commit()
+    response = client.post(f"/api/v1/admin/users/{owner}/credits", json={"delta": 250, "note": "goodwill"})
+    assert response.status_code == 200
+    assert response.json()["credits_balance"] == 1250
+    response = client.post(f"/api/v1/admin/users/{owner}/credits", json={"delta": -500, "note": "correction"})
+    assert response.json()["credits_balance"] == 750
+    ledger = client.get(f"/api/v1/admin/users/{owner}/credits").json()["entries"]
+    assert ledger[0]["delta"] == -500 and ledger[0]["note"] == "correction"
+    assert ledger[1]["delta"] == 250
+
+
+def test_billing_webhook_signature(client) -> None:
+    response = client.post("/api/v1/billing/webhook", content=b"{}", headers={"content-type": "application/json"})
+    assert response.status_code == 503  # no webhook secret configured in tests
