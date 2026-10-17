@@ -25,7 +25,17 @@ class AceStepTrainingAdapter:
         return response.get("data") or {}
 
     def ensure_model(self, model: str | None = None) -> dict[str, Any]:
-        """The upstream server lazy-loads the DiT; preprocessing needs it."""
+        """The upstream server lazy-loads the DiT; preprocessing needs it.
+
+        Re-initializing an already-loaded DiT doubles VRAM and OOMs on the
+        shared GPU, so probe lora status first (500/404 = not loaded).
+        """
+        try:
+            status = self.transport.get_json("/v1/lora/status")
+        except EngineError:
+            status = None
+        if status is not None and status.get("code") == 200:
+            return status.get("data") or {}
         response = self.transport.post_json("/v1/init", {"model": model} if model else {})
         return self._data(response)
 
