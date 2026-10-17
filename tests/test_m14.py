@@ -49,6 +49,7 @@ def test_llm_draft(client) -> None:
     assert body["style"] == "lofi, chill, female vocals"
     assert "rainy study session" in client.app.state.llm.last_user
     assert "lofi, rainy" in client.app.state.llm.last_user  # vocabulary seeded
+    client.app.state.llm = None
 
 
 def test_auto_lora_match(client) -> None:
