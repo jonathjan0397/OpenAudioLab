@@ -11,6 +11,7 @@ import { exportArtifact } from "../components/social";
 
 interface Track {
   asset_id: string;
+  role?: string;
   title: string | null;
   shared: boolean;
   favorite: boolean;
@@ -213,6 +214,9 @@ export default function StudioPage() {
                     </div>
                   </div>
                   <div className="wave">
+                    {t.role && t.role !== "mix_wav" ? (
+                      <span className="pill muted">{t.role === "mix_mp3" ? "MP3 export" : t.role}</span>
+                    ) : (
                     <Waveform
                       assetId={t.asset_id}
                       token={tokenOf(t.url)}
@@ -222,6 +226,7 @@ export default function StudioPage() {
                         setTimeout(() => player.seek(r), 60);
                       }}
                     />
+                    )}
                   </div>
                   <div className="actions">
                     <StatusPill status={t.expired ? "failed" : "completed"} label={t.expired ? "expired" : "ready"} />

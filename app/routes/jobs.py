@@ -836,6 +836,7 @@ def my_tracks(
         items.append(
             {
                 "asset_id": asset.id,
+                "role": asset.role,
                 "title": asset.title,
                 "shared": asset.shared,
                 "favorite": asset.id in favorite_ids,
