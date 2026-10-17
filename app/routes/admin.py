@@ -1106,11 +1106,13 @@ def admin_vast_instances(request: Request) -> JSONResponse:
     from ..models import VastInstance
 
     live: dict[str, str] = {}
+    live_ok = False
     try:
         rows = _vast_request(request, "GET", "/instances/")
         rows = rows.get("instances", []) if isinstance(rows, dict) else rows
         for row in rows if isinstance(rows, list) else []:
             live[str(row.get("id"))] = str(row.get("actual_status", ""))
+        live_ok = True
     except ApiError:
         pass
     with request.app.state.db.session() as session:
@@ -1129,7 +1131,7 @@ def admin_vast_instances(request: Request) -> JSONResponse:
                 "stopped_at": rec.stopped_at.isoformat() if rec.stopped_at else None,
             }
         )
-    return JSONResponse({"instances": out, "live_available": bool(live)})
+    return JSONResponse({"instances": out, "live_available": live_ok})
 
 
 @router.post("/admin/vast/instances/{vast_instance_id}/action")
