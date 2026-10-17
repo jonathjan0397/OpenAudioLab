@@ -118,7 +118,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<MainPage />} />
         <Route path="/studio" element={<StudioPage />} />
-        <Route path="/admin" element={<AdminPage />} />
+        <Route path="/admin/*" element={<AdminPage />} />
         <Route path="/artists" element={<ArtistPage />} />
         <Route path="/artists/:slug" element={<ArtistPage />} />
         <Route path="/explore" element={<ExplorePage />} />

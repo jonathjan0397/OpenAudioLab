@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # M9: task-locked LLM assistant (lyrics + style prompts) via llama.cpp.
     llm_base_url: str = ""
     llm_timeout_seconds: float = 120.0
+    # M10: admin console framework values (billing is illustrative until real plans).
+    admin_revenue: float = 0.0
+    admin_storage_quota_bytes: int = 5 * 1024**4
 
     # Milestone 2: durable orchestration
     redis_url: str = "redis://127.0.0.1:6379/0"

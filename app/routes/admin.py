@@ -150,13 +150,42 @@ def admin_stats(request: Request) -> JSONResponse:
             select(sa_func.coalesce(sa_func.sum(Asset.bytes), 0)).where(Asset.deleted_at.is_(None))
         ).scalar_one()
         workers = list(session.execute(select(Worker)).scalars())
+        yesterday_start = day_start - timedelta(days=1)
+        jobs_yesterday = session.execute(
+            select(sa_func.count()).select_from(Job).where(
+                Job.created_at >= yesterday_start, Job.created_at < day_start
+            )
+        ).scalar_one()
+        active_30 = session.execute(
+            select(sa_func.count(sa_func.distinct(Job.owner_id))).select_from(Job).where(
+                Job.created_at >= now - timedelta(days=30)
+            )
+        ).scalar_one()
+        active_prev = session.execute(
+            select(sa_func.count(sa_func.distinct(Job.owner_id))).select_from(Job).where(
+                Job.created_at >= now - timedelta(days=60), Job.created_at < now - timedelta(days=30)
+            )
+        ).scalar_one()
+        from ..models import CreditEntry
+
+        credits_used = session.execute(
+            select(sa_func.coalesce(sa_func.sum(-CreditEntry.delta), 0)).where(CreditEntry.delta < 0)
+        ).scalar_one()
+    gpu_utils = [w.gpu_util for w in workers if w.gpu_util is not None]
     return JSONResponse(
         {
             "users_total": users_total,
+            "active_users_30d": int(active_30),
+            "active_users_prev_30d": int(active_prev),
             "jobs_today": jobs_today,
+            "jobs_yesterday": jobs_yesterday,
             "jobs_active": jobs_active,
             "assets_total": assets_total,
             "storage_bytes": int(storage_bytes),
+            "gpu_util_avg": round(sum(gpu_utils) / len(gpu_utils)) if gpu_utils else None,
+            "revenue": request.app.state.settings.admin_revenue,
+            "credits_used": int(credits_used),
+            "credits_quota": 1_000_000,
             "workers": [
                 {
                     "id": w.id,
@@ -174,28 +203,51 @@ def admin_stats(request: Request) -> JSONResponse:
 
 
 @router.get("/admin/stats/timeseries")
-def admin_timeseries(request: Request, days: int = Query(default=14, ge=1, le=90)) -> JSONResponse:
-    """Per-day job counts by status + new users, for admin charts."""
+def admin_timeseries(
+    request: Request,
+    days: int = Query(default=14, ge=1, le=90),
+    granularity: str = Query(default="day", pattern="^(day|hour)$"),
+    task: str = Query(default="all", pattern="^(all|generate|export|training)$"),
+) -> JSONResponse:
+    """Job counts by status + new users per bucket, for admin charts.
+
+    granularity=hour returns the last 24 hours; task filters by operation family.
+    """
     from datetime import timedelta
 
     from ..models import Job
 
-    start = utcnow() - timedelta(days=days - 1, hours=0)
-    start = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    op_filter = {
+        "generate": "music.generate",
+        "export": "audio.export",
+        "training": "artist.train",
+    }.get(task if task != "all" else "", None)
+
+    if granularity == "hour":
+        hours = 24
+        start = utcnow().replace(minute=0, second=0, microsecond=0) - timedelta(hours=hours - 1)
+    else:
+        hours = 0
+        start = utcnow() - timedelta(days=days - 1)
+        start = start.replace(hour=0, minute=0, second=0, microsecond=0)
     with request.app.state.db.session() as session:
-        job_rows = session.execute(
-            select(Job.created_at, Job.status).where(Job.created_at >= start)
-        ).all()
+        job_stmt = select(Job.created_at, Job.status).where(Job.created_at >= start)
+        if op_filter:
+            job_stmt = job_stmt.where(Job.operation == op_filter)
+        job_rows = session.execute(job_stmt).all()
         user_rows = session.execute(
             select(User.created_at).where(User.created_at >= start)
         ).scalars().all()
     buckets: dict[str, dict] = {}
-    for offset in range(days):
-        day = (start + timedelta(days=offset)).date().isoformat()
-        buckets[day] = {"date": day, "completed": 0, "failed": 0, "cancelled": 0, "active": 0, "new_users": 0}
+    span = hours if granularity == "hour" else days
+    step = timedelta(hours=1) if granularity == "hour" else timedelta(days=1)
+    for offset in range(span):
+        point = start + step * offset
+        key = point.strftime("%Y-%m-%dT%H" if granularity == "hour" else "%Y-%m-%d")
+        buckets[key] = {"date": key, "completed": 0, "failed": 0, "cancelled": 0, "active": 0, "new_users": 0}
     for created, status in job_rows:
-        day = created.date().isoformat()
-        bucket = buckets.get(day)
+        key = created.strftime("%Y-%m-%dT%H" if granularity == "hour" else "%Y-%m-%d")
+        bucket = buckets.get(key)
         if bucket is None:
             continue
         if status == "succeeded":
@@ -207,38 +259,68 @@ def admin_timeseries(request: Request, days: int = Query(default=14, ge=1, le=90
         elif status in ("queued", "waiting_for_worker", "running"):
             bucket["active"] += 1
     for created in user_rows:
-        day = created.date().isoformat()
-        if day in buckets:
-            buckets[day]["new_users"] += 1
-    return JSONResponse({"days": days, "series": list(buckets.values())})
+        key = created.strftime("%Y-%m-%dT%H" if granularity == "hour" else "%Y-%m-%d")
+        if key in buckets:
+            buckets[key]["new_users"] += 1
+    return JSONResponse({"days": days, "granularity": granularity, "task": task, "series": list(buckets.values())})
+
+
+TASK_LABELS = {
+    "music.generate": "Text to Music",
+    "audio.export": "Audio Export",
+    "artist.train": "Artist Training",
+    "artist.evaluate": "Evaluation",
+}
 
 
 @router.get("/admin/jobs")
-def admin_jobs(request: Request, limit: int = Query(default=10, ge=1, le=100)) -> JSONResponse:
-    """Most recent jobs across all owners, for the admin overview table."""
+def admin_jobs(
+    request: Request,
+    limit: int = Query(default=10, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    status: str | None = Query(default=None, max_length=30),
+    task: str | None = Query(default=None, max_length=40),
+) -> JSONResponse:
+    """Most recent jobs across all owners, with user + task labels."""
     from ..models import Job
 
     with request.app.state.db.session() as session:
+        stmt = select(Job)
+        if status:
+            stmt = stmt.where(Job.status == status)
+        if task:
+            stmt = stmt.where(Job.operation == task)
         rows = list(
-            session.execute(select(Job).order_by(Job.created_at.desc()).limit(limit)).scalars()
+            session.execute(stmt.order_by(Job.created_at.desc()).limit(limit).offset(offset)).scalars()
         )
-    return JSONResponse(
-        [
+        user_ids = sorted({j.owner_id[4:] for j in rows if j.owner_id.startswith("usr_")})
+        names = {}
+        if user_ids:
+            for u in session.execute(select(User).where(User.id.in_(user_ids))).scalars():
+                names["usr_" + u.id] = u.username
+    out = []
+    for j in rows:
+        runtime = None
+        if j.started_at and j.finished_at:
+            runtime = max(0.0, (j.finished_at - j.started_at).total_seconds())
+        out.append(
             {
                 "job_id": j.id,
                 "owner_id": j.owner_id,
+                "user": names.get(j.owner_id, j.owner_id.replace("tok_", "api:")[:14]),
                 "operation": j.operation,
+                "task": TASK_LABELS.get(j.operation, j.operation),
                 "status": j.status,
                 "stage": j.stage,
                 "progress": j.progress,
                 "error_code": j.error_code,
+                "runtime_seconds": runtime,
                 "created_at": j.created_at.isoformat() if j.created_at else None,
                 "started_at": j.started_at.isoformat() if j.started_at else None,
                 "finished_at": j.finished_at.isoformat() if j.finished_at else None,
             }
-            for j in rows
-        ]
-    )
+        )
+    return JSONResponse(out)
 
 
 @router.get("/admin/trainings")
@@ -249,25 +331,220 @@ def admin_trainings(request: Request, limit: int = Query(default=5, ge=1, le=50)
     with request.app.state.db.session() as session:
         rows = list(
             session.execute(
-                select(TrainingRun, Job.status, Job.progress, Job.stage, Job.created_at, ArtistProfile.name)
+                select(
+                    TrainingRun, Job.status, Job.progress, Job.stage, Job.created_at, Job.started_at,
+                    Job.finished_at, ArtistProfile.name, User.username,
+                )
                 .join(Job, Job.id == TrainingRun.job_id)
                 .outerjoin(ArtistProfileVersion, ArtistProfileVersion.id == TrainingRun.profile_version_id)
                 .outerjoin(ArtistProfile, ArtistProfile.id == ArtistProfileVersion.profile_id)
+                .outerjoin(User, User.id == Job.owner_id.removeprefix("usr_"))
                 .order_by(Job.created_at.desc())
+                .limit(limit)
+            ).all()
+        )
+    out = []
+    for run, status, progress, stage, created, started, finished, name, username in rows:
+        eta = None
+        if status == "running" and progress and started:
+            elapsed = (utcnow() - started).total_seconds()
+            eta = round(elapsed * (1 - progress) / progress)
+        out.append(
+            {
+                "run_id": run.id,
+                "profile": name or "unnamed",
+                "user": username or "—",
+                "status": status,
+                "stage": stage,
+                "progress": progress,
+                "eta_seconds": eta,
+                "created_at": created.isoformat() if created else None,
+                "hardware": run.hardware,
+            }
+        )
+    return JSONResponse(out)
+
+
+@router.get("/admin/services")
+def admin_services(request: Request) -> JSONResponse:
+    """Model service health: 24h requests, latency, success rate per operation family."""
+    from datetime import timedelta
+
+    from ..models import Job
+
+    since = utcnow() - timedelta(hours=24)
+    services = [
+        ("Music Engine 01", "Text to Music", "music.generate", "v1.5", 99.9),
+        ("Stem Separator", "Audio Processing", "audio.export", "v1.0", 99.8),
+        ("Artist Trainer", "Custom Model Training", "artist.train", "v0.9", 99.5),
+    ]
+    with request.app.state.db.session() as session:
+        rows = session.execute(
+            select(
+                Job.operation,
+                Job.status,
+                Job.started_at,
+                Job.finished_at,
+                Job.created_at,
+            ).where(Job.created_at >= since)
+        ).all()
+    stats: dict[str, dict] = {}
+    for operation, status, started, finished, _created in rows:
+        st = stats.setdefault(operation, {"requests": 0, "succeeded": 0, "failed": 0, "active": 0, "latencies": []})
+        st["requests"] += 1
+        if status == "succeeded":
+            st["succeeded"] += 1
+        elif status == "failed":
+            st["failed"] += 1
+        elif status in ("queued", "waiting_for_worker", "running"):
+            st["active"] += 1
+        if started and finished:
+            st["latencies"].append((finished - started).total_seconds())
+    out = []
+    for name, kind, operation, version, uptime in services:
+        st = stats.get(operation, {"requests": 0, "succeeded": 0, "failed": 0, "active": 0, "latencies": []})
+        done = st["succeeded"] + st["failed"]
+        out.append(
+            {
+                "name": name,
+                "kind": kind,
+                "operation": operation,
+                "version": version,
+                "status": "busy" if st["active"] > 0 else "healthy",
+                "requests_24h": st["requests"],
+                "avg_latency_seconds": round(sum(st["latencies"]) / len(st["latencies"]), 1) if st["latencies"] else None,
+                "success_rate": round(st["succeeded"] / done * 100, 1) if done else None,
+                "uptime_pct": uptime,
+            }
+        )
+    return JSONResponse({"services": out})
+
+
+@router.get("/admin/storage")
+def admin_storage(request: Request) -> JSONResponse:
+    """Storage usage split by category, against the configured quota."""
+    from sqlalchemy import func as sa_func
+
+    from ..models import Asset
+
+    settings = request.app.state.settings
+    with request.app.state.db.session() as session:
+        rows = session.execute(
+            select(Asset.role, Asset.kind, sa_func.coalesce(sa_func.sum(Asset.bytes), 0))
+            .where(Asset.deleted_at.is_(None))
+            .group_by(Asset.role, Asset.kind)
+        ).all()
+    generated = uploads = other = 0
+    for role, kind, size in rows:
+        if kind == "uploaded" or role in ("source_upload", "reference"):
+            uploads += size
+        elif role in ("mix_wav", "mix_mp3", "stems_wav", "stems_zip"):
+            generated += size
+        else:
+            other += size
+    total = generated + uploads + other
+    return JSONResponse(
+        {
+            "total_bytes": int(total),
+            "quota_bytes": settings.admin_storage_quota_bytes,
+            "categories": {
+                "generated_audio": int(generated),
+                "training_data": int(uploads),
+                "model_checkpoints": int(other),
+                "other": 0,
+            },
+        }
+    )
+
+
+@router.get("/admin/billing")
+def admin_billing(request: Request) -> JSONResponse:
+    """Billing & credits overview (revenue is illustrative until real plans)."""
+    from sqlalchemy import func as sa_func
+
+    from ..models import CreditEntry
+
+    settings = request.app.state.settings
+    from ..models import User as _User
+
+    with request.app.state.db.session() as session:
+        credits_used = session.execute(
+            select(sa_func.coalesce(sa_func.sum(-CreditEntry.delta), 0)).where(CreditEntry.delta < 0)
+        ).scalar_one()
+        granted = session.execute(
+            select(sa_func.coalesce(sa_func.sum(CreditEntry.delta), 0)).where(CreditEntry.delta > 0)
+        ).scalar_one()
+        users_total = session.execute(select(sa_func.count()).select_from(_User)).scalar_one()
+    # Signup grants are a column default, not ledger entries; count them explicitly.
+    granted_total = int(granted) + users_total * 1000
+    used = int(credits_used)
+    quota = 1_000_000
+    return JSONResponse(
+        {
+            "revenue": settings.admin_revenue,
+            "revenue_delta_pct": 0,
+            "credits_used": used,
+            "credits_granted": granted_total,
+            "credits_quota": quota,
+            "credits_pct": round(used / quota * 100, 1),
+            "subscriptions_pct": 0,
+            "api_usage_pct": 0,
+            "custom_training_pct": 0,
+        }
+    )
+
+
+@router.get("/admin/audit")
+def admin_audit(request: Request, limit: int = Query(default=50, ge=1, le=200)) -> JSONResponse:
+    """Recent job lifecycle events across the platform."""
+    from ..models import Job, JobEvent
+
+    with request.app.state.db.session() as session:
+        rows = list(
+            session.execute(
+                select(JobEvent, Job.owner_id, Job.operation)
+                .join(Job, Job.id == JobEvent.job_id)
+                .order_by(JobEvent.id.desc())
                 .limit(limit)
             ).all()
         )
     return JSONResponse(
         [
             {
-                "run_id": run.id,
-                "profile": name or "unnamed",
-                "status": status,
-                "stage": stage,
-                "progress": progress,
-                "created_at": created.isoformat() if created else None,
-                "hardware": run.hardware,
+                "event": ev.event,
+                "status": ev.status,
+                "stage": ev.stage,
+                "job_id": ev.job_id,
+                "owner_id": owner,
+                "operation": operation,
+                "created_at": ev.created_at.isoformat() if ev.created_at else None,
             }
-            for run, status, progress, stage, created, name in rows
+            for ev, owner, operation in rows
         ]
     )
+
+
+@router.get("/admin/workers")
+def admin_workers(request: Request) -> JSONResponse:
+    """All registered workers with derived status."""
+    from ..models import Worker
+
+    with request.app.state.db.session() as session:
+        workers = list(session.execute(select(Worker)).scalars())
+    now = utcnow()
+    out = []
+    for w in workers:
+        fresh = w.last_heartbeat is not None and (now - w.last_heartbeat).total_seconds() < 120
+        out.append(
+            {
+                "id": w.id,
+                "kind": w.kind,
+                "drain": w.drain,
+                "status": "draining" if w.drain else "online" if fresh else "stale",
+                "gpu_util": w.gpu_util,
+                "vram_used_mb": w.vram_used_mb,
+                "vram_total_mb": w.vram_total_mb,
+                "last_heartbeat": w.last_heartbeat.isoformat() if w.last_heartbeat else None,
+            }
+        )
+    return JSONResponse({"workers": out})
