@@ -65,16 +65,23 @@ export default function CreateWidget({
   });
 
   const generate = useMutation({
-    mutationFn: () =>
-      api.post<JobAccepted>("/api/v1/jobs", {
+    mutationFn: async () => {
+      let lyrics: string | undefined;
+      if (!instrumental) {
+        const r = await api.post<{ text: string }>("/api/v1/llm/lyrics", { prompt: desc, mode: "write" });
+        lyrics = r.text;
+      }
+      return api.post<JobAccepted>("/api/v1/jobs", {
         operation: "music.generate",
         model_id: "ace-step-1.5",
         music_description: mood ? `${desc}, ${mood.toLowerCase()} mood` : desc,
+        ...(lyrics ? { lyrics, lyrics_origin: "frontend_llm" } : {}),
         duration_seconds: duration,
         instrumental,
         ...(loraId ? { lora_id: loraId } : {}),
         outputs: ["mix_wav"],
-      }),
+      });
+    },
     onSuccess: (d) => {
       setError("");
       setJobId(d.job_id);
