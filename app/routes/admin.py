@@ -1108,6 +1108,7 @@ def admin_vast_instances(request: Request) -> JSONResponse:
     live: dict[str, str] = {}
     try:
         rows = _vast_request(request, "GET", "/instances/")
+        rows = rows.get("instances", []) if isinstance(rows, dict) else rows
         for row in rows if isinstance(rows, list) else []:
             live[str(row.get("id"))] = str(row.get("actual_status", ""))
     except ApiError:
