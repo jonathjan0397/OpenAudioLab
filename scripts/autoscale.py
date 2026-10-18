@@ -213,6 +213,9 @@ def worker_env(transport="wg", slot=None, role="engine_worker"):
             # The node's own engine holds most VRAM; without this the training
             # worker defers forever waiting for free memory that never comes.
             "-e OAL_TRAIN_MIN_FREE_MB=0",
+            # Large datasets: scan/preprocess are blocking HTTP calls; the 30 m
+            # default kills 1000+-track jobs mid-preprocess.
+            "-e OAL_TRAIN_HTTP_TIMEOUT_SECONDS=7200",
         ]
     else:
         # Burst tier: Vast nodes drain only the overflow queue, so the always-on
@@ -568,6 +571,26 @@ def tick(r, st, dry_run=False):
     return depth
 
 
+def train_running() -> bool:
+    """True while any artist.train job is claimed and running (best-effort)."""
+    eng = _engine()
+    if eng is None:
+        return False
+    try:
+        import sqlalchemy
+
+        with eng.connect() as conn:
+            n = conn.execute(
+                sqlalchemy.text(
+                    "select count(*) from jobs "
+                    "where operation='artist.train' and status='running'"
+                )
+            ).scalar()
+        return bool(n)
+    except Exception:
+        return False
+
+
 def training_tick(r, st, now, dry_run=False):
     """Keep up to OAL_TRAIN_MAX_NODES Vast training nodes while jobs are pending."""
     train_depth = r.llen(TRAIN_QUEUE)
@@ -600,6 +623,9 @@ def training_tick(r, st, now, dry_run=False):
             st["train_nodes"] = tnodes
     else:
         st["train_pending_since"] = None
+        if train_running():
+            st["train_idle_since"] = None
+            return
         if tnodes:
             idle = st.get("train_idle_since") or now
             st["train_idle_since"] = idle

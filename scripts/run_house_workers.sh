@@ -15,7 +15,7 @@ docker run -d --name oal-worker-hub --gpus all --network host --restart unless-s
   -e OAL_ENGINE_IDLE_STOP_SECONDS=600 -e OAL_REDIS_URL="$REDIS" -e OAL_SECRET_KEY="$SECRET" \
   -e OAL_STORAGE_BACKEND=local -e OAL_STORAGE_DIR=/data/oal \
   -e OAL_TRAIN_WORKDIR=/opt/acestep/training-data -e OAL_TRAIN_MIN_FREE_MB=0 \
-  -e OAL_ENGINE_AUTOSTART=0 \
+  -e OAL_TRAIN_HTTP_TIMEOUT_SECONDS=7200 -e OAL_ENGINE_AUTOSTART=0 \
   -e OAL_WORKER_ROLE=training_worker,audio_worker -e OAL_WORKER_TIER=baseline \
   -v /mnt/oal-storage:/data/oal -v oal-acestep-cache:/root/.cache \
   "$IMAGE"
@@ -29,7 +29,7 @@ docker run -d --name oal-worker-gpu1 --gpus all --restart unless-stopped \
   -e OAL_ENGINE_IDLE_STOP_SECONDS=600 -e OAL_REDIS_URL="$REDIS" -e OAL_SECRET_KEY="$SECRET" \
   -e OAL_STORAGE_BACKEND=local -e OAL_STORAGE_DIR=/data/oal \
   -e OAL_TRAIN_WORKDIR=/opt/acestep/training-data-gpu1 -e OAL_TRAIN_MIN_FREE_MB=0 \
-  -e OAL_ENGINE_AUTOSTART=0 \
+  -e OAL_TRAIN_HTTP_TIMEOUT_SECONDS=7200 -e OAL_ENGINE_AUTOSTART=0 \
   -e OAL_WORKER_ROLE=training_worker -e OAL_WORKER_TIER=baseline \
   -v /mnt/oal-storage:/data/oal -v oal-acestep-cache-gpu1:/root/.cache \
   "$IMAGE"
