@@ -52,10 +52,15 @@ def convert_one(t, stage_dir):
     if out.exists() and out.stat().st_size > 100_000:
         return out
     tmp = out.with_suffix(".tmp.wav")
-    subprocess.run(
-        ["ffmpeg", "-y", "-loglevel", "error", "-i", t["path"],
-         "-ar", "44100", "-ac", "2", "-c:a", "pcm_s16le", str(tmp)],
-        check=True, capture_output=True)
+    for attempt in range(3):
+        subprocess.run(
+            ["ffmpeg", "-y", "-nostdin", "-loglevel", "error", "-i", t["path"],
+             "-ar", "44100", "-ac", "2", "-c:a", "pcm_s16le", str(tmp)],
+            check=True, capture_output=True)
+        if tmp.exists() and tmp.stat().st_size > 100_000:
+            break
+        import time as _t
+        _t.sleep(2 * (attempt + 1))
     tmp.rename(out)
     return out
 
@@ -93,7 +98,11 @@ def main():
     lock = threading.Lock()
 
     if not args.skip_convert:
-        todo = [t for t in tracks if t["key"] not in state["tracks"] or "wav" not in state["tracks"][t["key"]]]
+        def _bad_wav(t):
+            entry = state["tracks"].get(t["key"], {})
+            wav = entry.get("wav")
+            return not wav or not Path(wav).exists() or Path(wav).stat().st_size <= 100_000
+        todo = [t for t in tracks if _bad_wav(t)]
         print(f"convert: {len(todo)} of {len(tracks)}", flush=True)
         done = 0
         with cf.ThreadPoolExecutor(max_workers=8) as pool:
