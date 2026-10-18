@@ -129,13 +129,22 @@ def main():
     done = 0
 
     def work(t):
+        nonlocal client
         wav_path = Path(state["tracks"][t["key"]]["wav"])
-        asset_id = upload_one(client, t, wav_path)
-        r = client.post(f"/datasets/{state['dataset_id']}/tracks",
-                        json={"asset_id": asset_id, "labels": {"caption": caption(t)}})
-        if r.status_code == 409 and "TRACK_DUPLICATE" in r.text:
-            return
-        r.raise_for_status()
+        for attempt in range(4):
+            try:
+                asset_id = upload_one(client, t, wav_path)
+                r = client.post(f"/datasets/{state['dataset_id']}/tracks",
+                                json={"asset_id": asset_id, "labels": {"caption": caption(t)}})
+                if not (r.status_code == 409 and "TRACK_DUPLICATE" in r.text):
+                    r.raise_for_status()
+                break
+            except Exception:
+                if attempt == 3:
+                    raise
+                import time as _t
+                _t.sleep(5 * (attempt + 1))
+                client = login()
         with lock:
             state["tracks"][t["key"]]["asset_id"] = asset_id
 
