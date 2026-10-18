@@ -102,7 +102,7 @@ echo "[worker] code revision: $(cat "$APP_DIR/REVISION" 2>/dev/null || echo unkn
 
 if [ "${OAL_ENGINE_AUTOSTART:-1}" = "0" ]; then
     echo "[worker] starting ACE-Step server (external mode)"
-    ( cd /opt/acestep && exec uv run acestep-api ) &
+    ( cd /opt/acestep && exec uv run --frozen --no-sync acestep-api ) &
     i=0
     until curl -fsS "http://127.0.0.1:8001/health" >/dev/null 2>&1; do
         i=$((i + 1))
