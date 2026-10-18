@@ -109,7 +109,11 @@ def main():
             futs = {pool.submit(convert_one, t, stage_dir): t for t in todo}
             for fut in cf.as_completed(futs):
                 t = futs[fut]
-                out = fut.result()
+                try:
+                    out = fut.result()
+                except Exception as exc:
+                    print(f"convert fail {t['key']} {t['path']}: {str(exc)[:150]}", flush=True)
+                    continue
                 with lock:
                     state["tracks"].setdefault(t["key"], {})["wav"] = str(out)
                 done += 1
