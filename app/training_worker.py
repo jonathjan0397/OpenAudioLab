@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import socket
+import threading
 import time
 from pathlib import Path
 from uuid import uuid4
@@ -280,8 +281,19 @@ class TrainingWorker:
 
         set_job_stage(self.db, job_id, "preparing dataset")
         self._ensure_engine_ready(lambda: heartbeat(self.db, attempt_id, lease_token))
-        self.adapter.scan_dataset(str(dataset_dir), f"oal-{job_id[:8]}", all_instrumental)
-        self.adapter.preprocess(str(workdir / "tensors"))
+        stop_hb = threading.Event()
+
+        def _keepalive() -> None:
+            while not stop_hb.wait(10):
+                heartbeat(self.db, attempt_id, lease_token)
+
+        keepalive = threading.Thread(target=_keepalive, daemon=True)
+        keepalive.start()
+        try:
+            self.adapter.scan_dataset(str(dataset_dir), f"oal-{job_id[:8]}", all_instrumental)
+            self.adapter.preprocess(str(workdir / "tensors"))
+        finally:
+            stop_hb.set()
         heartbeat(self.db, attempt_id, lease_token)
         self.adapter.start_training(
             str(workdir / "tensors"), str(workdir / "lora"), epochs=epochs, seed=seed,
