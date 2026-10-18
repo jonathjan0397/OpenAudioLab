@@ -36,7 +36,7 @@ def main():
             "hyperparams": hp | {"train_epochs": epochs},
             "seed": 42,
         }
-        r = client.post("/trainings", json=body)
+        r = client.post("/trainings", json=body, headers={"Idempotency-Key": f"house-{v['name']}-1"})
         ok = r.status_code == 202
         print(f"{v['name']:12s} {r.status_code} {r.json().get('job_id', r.text[:160])}")
         if not ok:
