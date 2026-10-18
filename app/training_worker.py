@@ -220,6 +220,20 @@ class TrainingWorker:
             session.commit()
 
     def _train(self, job_id: str, attempt_id: str, lease_token: str) -> None:
+        stop_hb = threading.Event()
+
+        def _keepalive() -> None:
+            while not stop_hb.wait(10):
+                heartbeat(self.db, attempt_id, lease_token)
+
+        keepalive = threading.Thread(target=_keepalive, daemon=True)
+        keepalive.start()
+        try:
+            self._train_inner(job_id, attempt_id, lease_token)
+        finally:
+            stop_hb.set()
+
+    def _train_inner(self, job_id: str, attempt_id: str, lease_token: str) -> None:
         with self.db.session() as session:
             job = get_job_by_id(session, job_id)
             request = dict(job.request_json)
@@ -280,20 +294,9 @@ class TrainingWorker:
             session.commit()
 
         set_job_stage(self.db, job_id, "preparing dataset")
-        stop_hb = threading.Event()
-
-        def _keepalive() -> None:
-            while not stop_hb.wait(10):
-                heartbeat(self.db, attempt_id, lease_token)
-
-        keepalive = threading.Thread(target=_keepalive, daemon=True)
-        keepalive.start()
-        try:
-            self._ensure_engine_ready()
-            self.adapter.scan_dataset(str(dataset_dir), f"oal-{job_id[:8]}", all_instrumental)
-            self.adapter.preprocess(str(workdir / "tensors"))
-        finally:
-            stop_hb.set()
+        self._ensure_engine_ready()
+        self.adapter.scan_dataset(str(dataset_dir), f"oal-{job_id[:8]}", all_instrumental)
+        self.adapter.preprocess(str(workdir / "tensors"))
         heartbeat(self.db, attempt_id, lease_token)
         self.adapter.start_training(
             str(workdir / "tensors"), str(workdir / "lora"), epochs=epochs, seed=seed,

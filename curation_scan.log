@@ -1,0 +1,18 @@
+/Cold-Archive/OpenAudioLab/scripts/scan_library.py:27: DeprecationWarning: Testing an element's truth value will raise an exception in future versions.  Use specific 'len(elem)' or 'elem is not None' test instead.
+  return [(e.text or "").strip() for e in root.findall(tag) if e and e.text and e.text.strip()]
+250/3255 artists, 2612 tracks
+500/3255 artists, 3668 tracks
+750/3255 artists, 6857 tracks
+1000/3255 artists, 11177 tracks
+1250/3255 artists, 15294 tracks
+1500/3255 artists, 19320 tracks
+1750/3255 artists, 52656 tracks
+2000/3255 artists, 56566 tracks
+2250/3255 artists, 60681 tracks
+2500/3255 artists, 64714 tracks
+2750/3255 artists, 68739 tracks
+3000/3255 artists, 72902 tracks
+3250/3255 artists, 81124 tracks
+artists=3255 albums=9541 tracks=81170
+genre coverage: 0 (0.0%)  src={'none': 81170}
+year coverage:  65195 (80.3%)  src={'album.nfo': 65195, 'none': 15975}

@@ -1,0 +1,3 @@
+artists=3255 albums=9541 tracks=81170
+genre coverage: 70630 (87.0%)  src={'album.nfo': 70490, 'id3': 140, 'none': 10540}
+year coverage:  65196 (80.3%)  src={'album.nfo': 65195, 'none': 15974, 'id3': 1}

@@ -1,0 +1,21 @@
+convert: 875 of 1316
+Traceback (most recent call last):
+  File "/Cold-Archive/OpenAudioLab/scripts/import_house_dataset.py", line 187, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/Cold-Archive/OpenAudioLab/scripts/import_house_dataset.py", line 112, in main
+    out = fut.result()
+          ^^^^^^^^^^^^
+  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/usr/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Cold-Archive/OpenAudioLab/scripts/import_house_dataset.py", line 56, in convert_one
+    subprocess.run(
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['ffmpeg', '-y', '-nostdin', '-loglevel', 'error', '-i', '/mnt/truenas/Media Library/Music/Music Library/Reba McEntire/RZ-RG Billboard For TOP 50 COUNTRY (Mar.03.2015)/40 Going Out Like That.mp3', '-ar', '44100', '-ac', '2', '-c:a', 'pcm_s16le', '/Cold-Archive/house-wav/t00444.tmp.wav']' returned non-zero exit status 254.
