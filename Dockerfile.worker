@@ -23,6 +23,15 @@ RUN git clone https://github.com/ace-step/ACE-Step-1.5.git . \
     && git checkout "$ACESTEP_REF" \
     && uv sync --frozen
 
+# DataLoader with num_workers>0 forks from the training runner thread; the
+# forked workers then never receive indices (queue feeder races with the
+# fork) and training hangs at step 0 with GPU memory allocated. Load
+# tensors in-process instead; PreprocessedDataModule already nulls
+# prefetch_factor/persistent_workers when num_workers==0.
+RUN sed -i 's/num_workers: int = 4/num_workers: int = 0/' \
+    /opt/acestep/acestep/training/configs.py \
+    && grep -q 'num_workers: int = 0' /opt/acestep/acestep/training/configs.py
+
 # --- Our worker dependencies (system python, separate from ACE-Step's venv) --
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
