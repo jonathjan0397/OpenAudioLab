@@ -92,6 +92,8 @@ TRAIN_WAIT_LOCAL = float(os.environ.get("OAL_TRAIN_VAST_AFTER_SECONDS", "120"))
 TRAIN_DOWN_SECONDS = float(os.environ.get("OAL_TRAIN_DOWN_SECONDS", "240"))
 TRAIN_LOADING_STALL_SECONDS = float(os.environ.get("OAL_TRAIN_LOADING_STALL_SECONDS", "1200"))
 TRAIN_CREATE_GUARD_SECONDS = float(os.environ.get("OAL_TRAIN_CREATE_GUARD_SECONDS", "600"))
+TRAIN_MAX_NODES = int(os.environ.get("OAL_TRAIN_MAX_NODES", "1"))
+MAX_DPH = float(os.environ.get("OAL_SCALE_MAX_DPH", "0"))
 PRUNE_SECONDS = float(os.environ.get("OAL_PRUNE_SECONDS", "3600"))
 RETENTION_DAYS = int(os.environ.get("OAL_RETENTION_DAYS", "30"))
 
@@ -299,6 +301,8 @@ def pick_offer():
         if not (geo.endswith(", US") or geo.endswith(", CA")):
             continue
         if rel < MIN_RELIABILITY or cc < MIN_COMPUTE_CAP or dph <= 0 or down <= 0:
+            continue
+        if MAX_DPH and dph > MAX_DPH:
             continue
         score = dph / down
         if best is None or score < best[0]:
@@ -565,7 +569,7 @@ def tick(r, st, dry_run=False):
 
 
 def training_tick(r, st, now, dry_run=False):
-    """Keep one Vast training node while artist.train jobs are pending."""
+    """Keep up to OAL_TRAIN_MAX_NODES Vast training nodes while jobs are pending."""
     train_depth = r.llen(TRAIN_QUEUE)
     tnodes = st.get("train_nodes", [])
     tstopped = st.get("train_stopped", [])
@@ -573,8 +577,8 @@ def training_tick(r, st, now, dry_run=False):
         st["train_idle_since"] = None
         since = st.get("train_pending_since") or now
         st["train_pending_since"] = since
-        if not tnodes and now - since >= TRAIN_WAIT_LOCAL:
-            if REUSE and tstopped:
+        if len(tnodes) < TRAIN_MAX_NODES and now - since >= TRAIN_WAIT_LOCAL:
+            while len(tnodes) < TRAIN_MAX_NODES and REUSE and tstopped:
                 node = tstopped.pop(0)
                 if start_instance(node["contract"], dry_run):
                     node["created_at"] = now
@@ -583,7 +587,7 @@ def training_tick(r, st, now, dry_run=False):
                     log(f"training pending={train_depth} -> restarted stopped training node {node['contract']}")
                 else:
                     registry_remove(node["contract"])
-            if not tnodes:
+            if len(tnodes) < TRAIN_MAX_NODES:
                 last_created = st.get("train_last_created_at") or 0
                 if now - last_created >= TRAIN_CREATE_GUARD_SECONDS:
                     cid = create_instance(None, dry_run, VAST_TRANSPORT, role="training_worker")
