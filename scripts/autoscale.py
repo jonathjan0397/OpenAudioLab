@@ -307,6 +307,12 @@ def pick_offer():
             continue
         if MAX_DPH and dph > MAX_DPH:
             continue
+        # The instance's --disk request must fit on the host disk (with headroom
+        # for the image layers and the host's own reservation). Offers whose
+        # disk_space is smaller than the request get silently capped -> ENOSPC
+        # mid-download (~40min wasted per attempt).
+        if (o.get("disk_space") or 0) < int(DISK) + 30:
+            continue
         score = dph / down
         if best is None or score < best[0]:
             best = (score, o)

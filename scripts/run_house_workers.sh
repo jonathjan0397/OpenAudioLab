@@ -18,6 +18,7 @@ docker run -d --name oal-worker-hub --gpus all --network host --restart unless-s
   -e OAL_TRAIN_HTTP_TIMEOUT_SECONDS=7200 -e OAL_ENGINE_AUTOSTART=0 \
   -e OAL_WORKER_ROLE=training_worker,audio_worker -e OAL_WORKER_TIER=baseline \
   -v /mnt/oal-storage:/data/oal -v oal-acestep-cache:/root/.cache \
+  -v /Cold-Archive/oal-train-gpu0:/opt/acestep/training-data \
   "$IMAGE"
 
 docker run -d --name oal-worker-gpu1 --gpus all --restart unless-stopped \
@@ -32,6 +33,7 @@ docker run -d --name oal-worker-gpu1 --gpus all --restart unless-stopped \
   -e OAL_TRAIN_HTTP_TIMEOUT_SECONDS=7200 -e OAL_ENGINE_AUTOSTART=0 \
   -e OAL_WORKER_ROLE=training_worker -e OAL_WORKER_TIER=baseline \
   -v /mnt/oal-storage:/data/oal -v oal-acestep-cache-gpu1:/root/.cache \
+  -v /Cold-Archive/oal-train-gpu1:/opt/acestep/training-data-gpu1 \
   "$IMAGE"
 
 sleep 5
