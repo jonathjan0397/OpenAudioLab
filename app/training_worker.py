@@ -280,7 +280,6 @@ class TrainingWorker:
             session.commit()
 
         set_job_stage(self.db, job_id, "preparing dataset")
-        self._ensure_engine_ready(lambda: heartbeat(self.db, attempt_id, lease_token))
         stop_hb = threading.Event()
 
         def _keepalive() -> None:
@@ -290,6 +289,7 @@ class TrainingWorker:
         keepalive = threading.Thread(target=_keepalive, daemon=True)
         keepalive.start()
         try:
+            self._ensure_engine_ready()
             self.adapter.scan_dataset(str(dataset_dir), f"oal-{job_id[:8]}", all_instrumental)
             self.adapter.preprocess(str(workdir / "tensors"))
         finally:
