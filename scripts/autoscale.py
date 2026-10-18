@@ -104,7 +104,11 @@ OFFER_COOLDOWN = {}       # offer_id -> unix ts until which the offer is banned
 _OFFER_OF_CONTRACT = {}   # contract id -> offer id of the create that made it
 for _seed in os.environ.get("OAL_OFFER_COOLDOWN", "").split(","):
     _seed = _seed.strip()
-    if _seed:
+    if "-" in _seed and _seed.replace("-", "").isdigit():
+        _lo, _hi = _seed.split("-", 1)
+        for _oid in range(int(_lo), int(_hi) + 1):
+            OFFER_COOLDOWN[str(_oid)] = time.time() + OFFER_COOLDOWN_SECONDS
+    elif _seed:
         OFFER_COOLDOWN[_seed] = time.time() + OFFER_COOLDOWN_SECONDS
 
 
