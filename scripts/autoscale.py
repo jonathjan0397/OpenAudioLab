@@ -310,7 +310,7 @@ def pick_offer():
     # dominant burst cost), rather than the cheapest-but-slowest node.
     best = None
     for o in offers:
-        if OFFER_COOLDOWN.get(o.get("id"), 0) > time.time():
+        if OFFER_COOLDOWN.get(str(o.get("id")), 0) > time.time():
             continue
         geo = str(o.get("geolocation", ""))
         cc = o.get("compute_cap") or 0
@@ -361,7 +361,7 @@ def create_instance(slot=None, dry_run=False, transport="wg", role="engine_worke
     # untracked would leak it. Only a create with no contract is a true failure.
     cid = int(m.group(1)) if m else None
     if cid:
-        _OFFER_OF_CONTRACT[str(cid)] = offer
+        _OFFER_OF_CONTRACT[str(cid)] = str(offer)
     if cid and slot and transport == "wg":
         wg_add_peer(slot["pubkey"], slot["ip"])
     if cid:
