@@ -97,6 +97,16 @@ MAX_DPH = float(os.environ.get("OAL_SCALE_MAX_DPH", "0"))
 PRUNE_SECONDS = float(os.environ.get("OAL_PRUNE_SECONDS", "3600"))
 RETENTION_DAYS = int(os.environ.get("OAL_RETENTION_DAYS", "30"))
 
+# Offers whose instances repeatedly die during boot ("stuck loading") go here
+# for a few hours so pick_offer stops re-buying the same broken host.
+OFFER_COOLDOWN_SECONDS = float(os.environ.get("OAL_OFFER_COOLDOWN_SECONDS", "10800"))
+OFFER_COOLDOWN = {}       # offer_id -> unix ts until which the offer is banned
+_OFFER_OF_CONTRACT = {}   # contract id -> offer id of the create that made it
+for _seed in os.environ.get("OAL_OFFER_COOLDOWN", "").split(","):
+    _seed = _seed.strip()
+    if _seed:
+        OFFER_COOLDOWN[_seed] = time.time() + OFFER_COOLDOWN_SECONDS
+
 
 def log(msg):
     print(time.strftime("%Y-%m-%d %H:%M:%S"), msg, flush=True)
@@ -296,6 +306,8 @@ def pick_offer():
     # dominant burst cost), rather than the cheapest-but-slowest node.
     best = None
     for o in offers:
+        if OFFER_COOLDOWN.get(o.get("id"), 0) > time.time():
+            continue
         geo = str(o.get("geolocation", ""))
         cc = o.get("compute_cap") or 0
         rel = o.get("reliability2") or 0
@@ -344,6 +356,8 @@ def create_instance(slot=None, dry_run=False, transport="wg", role="engine_worke
     # reported success:False -- the node booted and is billing, so leaving it
     # untracked would leak it. Only a create with no contract is a true failure.
     cid = int(m.group(1)) if m else None
+    if cid:
+        _OFFER_OF_CONTRACT[str(cid)] = offer
     if cid and slot and transport == "wg":
         wg_add_peer(slot["pubkey"], slot["ip"])
     if cid:
@@ -429,6 +443,10 @@ def reconcile(st):
                     log(f"reconcile: {key} node {cid} stuck loading >{int(TRAIN_LOADING_STALL_SECONDS)}s -> destroy")
                     destroy_instance(cid, False)
                     registry_remove(cid)
+                    off = _OFFER_OF_CONTRACT.get(cid)
+                    if off:
+                        OFFER_COOLDOWN[off] = now + OFFER_COOLDOWN_SECONDS
+                        log(f"reconcile: offer {off} (contract {cid}) failed to boot; cooling down {int(OFFER_COOLDOWN_SECONDS/60)}min")
                 else:
                     kept.append(n)
                 continue
