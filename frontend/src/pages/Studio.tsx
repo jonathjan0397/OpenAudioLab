@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, AuthUser } from "../api";
 import CreateWidget, { DRAFT_KEY } from "../components/CreateWidget";
@@ -99,6 +99,7 @@ export default function StudioPage() {
   const [filter, setFilter] = useState("all");
   const [stemsFor, setStemsFor] = useState<string | null>(null);
   const [detailsFor, setDetailsFor] = useState<string | null>(null);
+  const [newArtistName, setNewArtistName] = useState("");
   const [wsActive, setWsActive] = useState<string | null>(null);
   const [wsNewName, setWsNewName] = useState("");
   const stemsQuery = useQuery<{ asset_id: string; stems: { category: string | null; asset_id: string; url: string }[] }>({
@@ -178,6 +179,14 @@ export default function StudioPage() {
     mutationFn: ({ id, etag, body }: { id: string; etag: string; body: Record<string, unknown> }) =>
       api.patch(`/api/v1/artist-profiles/${id}`, body, { "If-Match": etag }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["artist-profiles"] }),
+  });
+
+  const artistCreate = useMutation({
+    mutationFn: (name: string) => api.post("/api/v1/artist-profiles", { name }),
+    onSuccess: () => {
+      setNewArtistName("");
+      qc.invalidateQueries({ queryKey: ["artist-profiles"] });
+    },
   });
 
   const reuseFromManifest = (m: Record<string, any> | undefined) => {
@@ -524,6 +533,16 @@ export default function StudioPage() {
               <div className="card-header">
                 <h3>My Artists</h3>
                 <span className="spacer" />
+                <input
+                  value={newArtistName}
+                  onChange={(e) => setNewArtistName(e.target.value)}
+                  placeholder="New artist name"
+                  maxLength={80}
+                  style={{ width: 160 }}
+                />
+                <button className="btn" disabled={!newArtistName.trim() || artistCreate.isPending} onClick={() => artistCreate.mutate(newArtistName.trim())}>
+                  + Add
+                </button>
                 <NavLink to="/artists" className="btn">Browse all</NavLink>
               </div>
               {(artists.data || []).length === 0 && (
@@ -533,7 +552,9 @@ export default function StudioPage() {
                 <div key={a.profile_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="title" style={{ fontSize: 14 }}>{a.name}</div>
-                    <div className="sub" style={{ fontSize: 12 }}>/{a.slug} · {a.sharing_policy}{a.bio ? ` · ${a.bio.slice(0, 40)}` : ""}</div>
+                    <div className="sub" style={{ fontSize: 12 }}>
+                      {a.slug ? <Link className="link" to={`/artists/${a.slug}`}>/{a.slug}</Link> : "no slug"} · {a.sharing_policy}{a.bio ? ` · ${a.bio.slice(0, 40)}` : ""}
+                    </div>
                   </div>
                   <button
                     className="btn"
