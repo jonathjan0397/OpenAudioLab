@@ -1,3 +1,5 @@
 pytest==8.*
 fakeredis==2.*
 moto==5.*
+numpy==2.*
+soundfile==0.12.*

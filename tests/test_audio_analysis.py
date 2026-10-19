@@ -24,6 +24,7 @@ def test_suggest_tags_empty_summary() -> None:
 
 
 def test_analyze_paths_detects_tempo_and_key(tmp_path) -> None:
+    pytest.importorskip("librosa")
     wav = tmp_path / "track0.wav"
     _write_click_wav(str(wav))
     summary = analyze_paths([str(wav)], with_genres=False)
