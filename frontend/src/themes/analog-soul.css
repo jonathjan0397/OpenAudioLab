@@ -1,0 +1,39 @@
+/* Analog-Soul — dark walnut, amber, serif headings, vinyl warmth */
+[data-theme="analog-soul"] {
+  --bg: #17110b;
+  --surface: #211810;
+  --surface-2: #2b2015;
+  --text: #f3e9dc;
+  --muted: #a8927a;
+  --border: #3a2c1d;
+  --accent: #f0a35e;
+  --accent-2: #8a5a2b;
+  --accent-3: #d9c39a;
+  --accent-text: #241708;
+  --wave-a: #f0a35e;
+  --wave-b: #d9c39a;
+  --radius: 12px;
+  --font: "IBM Plex Sans", system-ui, sans-serif;
+  --font-heading: "Playfair Display", Georgia, serif;
+  --font-hand: "Caveat", cursive;
+  --shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+  --hero-image: url("/themes/analog-soul/hero.png");
+  --strip-image: url("/themes/analog-soul/strip.png");
+}
+[data-theme="analog-soul"] .site-header { background: #1b140c; }
+[data-theme="analog-soul"] .logo .tld { color: var(--accent); }
+[data-theme="analog-soul"] .hero-title { font-weight: 600; }
+[data-theme="analog-soul"] .main-hero { grid-template-columns: 1.05fr 0.95fr; }
+[data-theme="analog-soul"] .hero-art { min-height: 360px; }
+[data-theme="analog-soul"] .btn { border-color: var(--border); }
+[data-theme="analog-soul"] .btn-primary { border-radius: 999px; font-weight: 600; }
+[data-theme="analog-soul"] .card { border-color: #3a2c1d; }
+[data-theme="analog-soul"] .chip { border-radius: 999px; }
+[data-theme="analog-soul"] .chip.active { border-color: var(--accent); color: var(--accent); }
+[data-theme="analog-soul"] .segmented { border-radius: 999px; }
+[data-theme="analog-soul"] .segmented button.active { background: var(--accent); color: var(--accent-text); }
+[data-theme="analog-soul"] .main-cols { display: grid; grid-template-columns: 1fr 320px; gap: 26px; align-items: start; }
+[data-theme="analog-soul"] .dash-sidebar a.active { background: var(--surface-2); color: var(--accent); }
+[data-theme="analog-soul"] .hero-strip { background-color: #1b140c; }
+[data-theme="analog-soul"] .hero-strip h1 { font-weight: 600; }
+[data-theme="analog-soul"] .hero-note { color: var(--accent-3); }

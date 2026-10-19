@@ -1,0 +1,218 @@
+name: openaudiolab
+
+# Core control-plane profile (CONTAINER_RUNTIME_PLAN.md). GPU engine/training
+# services arrive in milestones 2-3 as separate profiles (test, ace, training).
+# Usage: docker compose --profile core up --build
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["core"]
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: oal
+      POSTGRES_USER: oal
+      POSTGRES_PASSWORD: ${OAL_POSTGRES_PASSWORD:?set OAL_POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oal -d oal"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["core"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # S3-compatible store for standalone deployment. Not consumed by the API
+  # until milestone 2 (artifact upload/finalization). quay.io anonymous pulls
+  # can hit rate limits; use `docker login quay.io` or a mirror if pull fails.
+  object-storage:
+    image: docker.io/minio/minio:latest
+    profiles: ["storage"]
+    command: server /data --address ":9000" --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${OAL_OBJECT_ACCESS_KEY:?set OAL_OBJECT_ACCESS_KEY in .env}
+      MINIO_ROOT_PASSWORD: ${OAL_OBJECT_SECRET_KEY:?set OAL_OBJECT_SECRET_KEY in .env}
+    volumes:
+      - object-storage-data:/data
+
+  migrate:
+    build: .
+    profiles: ["core"]
+    command: alembic upgrade head
+    environment:
+      OAL_DATABASE_URL: postgresql+psycopg2://oal:${OAL_POSTGRES_PASSWORD}@postgres:5432/oal
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: .
+    profiles: ["core"]
+    ports:
+      - "50555:50555"
+    environment:
+      OAL_DATABASE_URL: postgresql+psycopg2://oal:${OAL_POSTGRES_PASSWORD}@postgres:5432/oal
+      OAL_REDIS_URL: redis://redis:6379/0
+      OAL_SECRET_KEY: ${OAL_SECRET_KEY:?set OAL_SECRET_KEY in .env}
+      OAL_STORAGE_DIR: /srv/openaudiolab/artifacts-data
+      OAL_CORS_ORIGINS: ${OAL_CORS_ORIGINS:-http://localhost:3000}
+      OAL_BIND_HOST: 0.0.0.0
+    volumes:
+      - artifacts-data:/srv/openaudiolab/artifacts-data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  dispatcher:
+    build: .
+    profiles: ["core"]
+    command: python -m app.dispatcher
+    environment:
+      OAL_DATABASE_URL: postgresql+psycopg2://oal:${OAL_POSTGRES_PASSWORD}@postgres:5432/oal
+      OAL_REDIS_URL: redis://redis:6379/0
+      OAL_SECRET_KEY: ${OAL_SECRET_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  maintenance:
+    build: .
+    profiles: ["core"]
+    command: python -m app.maintenance --interval 600
+    environment:
+      OAL_DATABASE_URL: postgresql+psycopg2://oal:${OAL_POSTGRES_PASSWORD}@postgres:5432/oal
+      OAL_STORAGE_DIR: /srv/openaudiolab/artifacts-data
+    volumes:
+      - artifacts-data:/srv/openaudiolab/artifacts-data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # Opt-in deterministic WAV fixture worker (synthetic test audio, never real
+  # engine output). Enable with: docker compose --profile core --profile test up
+  fixture-worker:
+    build: .
+    profiles: ["test"]
+    command: python -m app.worker
+    environment:
+      OAL_DATABASE_URL: postgresql+psycopg2://oal:${OAL_POSTGRES_PASSWORD}@postgres:5432/oal
+      OAL_REDIS_URL: redis://redis:6379/0
+      OAL_SECRET_KEY: ${OAL_SECRET_KEY}
+      OAL_STORAGE_DIR: /srv/openaudiolab/artifacts-data
+    volumes:
+      - artifacts-data:/srv/openaudiolab/artifacts-data
+    depends_on:
+      api:
+        condition: service_started
+
+  # ACE-Step 1.5 profile: private upstream server (GPU) + our engine worker.
+  # The upstream server holds model weights; the API never loads them.
+  # Image build is the deployment deliverable; host-venv runtime is what was
+  # benchmarked in milestone 3 (see docs/MILESTONE_3.md).
+  acestep-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.acestep
+    profiles: ["ace"]
+    environment:
+      ACESTEP_INIT_LLM: "false"
+      ACESTEP_DEVICE: cuda:0
+      ACESTEP_API_KEY: ${OAL_ACESTEP_API_KEY:-}
+    volumes:
+      - acestep-checkpoints:/opt/acestep/checkpoints
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+
+  engine-worker:
+    build: .
+    profiles: ["ace"]
+    command: python -m app.engine_worker
+    environment:
+      OAL_DATABASE_URL: postgresql+psycopg2://oal:${OAL_POSTGRES_PASSWORD}@postgres:5432/oal
+      OAL_REDIS_URL: redis://redis:6379/0
+      OAL_SECRET_KEY: ${OAL_SECRET_KEY}
+      OAL_STORAGE_DIR: /srv/openaudiolab/artifacts-data
+      OAL_ACESTEP_BASE_URL: http://acestep-server:8001
+      OAL_ACESTEP_API_KEY: ${OAL_ACESTEP_API_KEY:-}
+    volumes:
+      - artifacts-data:/srv/openaudiolab/artifacts-data
+    depends_on:
+      api:
+        condition: service_started
+      acestep-server:
+        condition: service_started
+
+  # CPU audio export worker (FFmpeg MP3, WAV copy, stem ZIP). Stem separation
+  # needs a separator runtime in this container (OAL_DEMUCS_PYTHON); without
+  # it, stem exports fail closed with SEPARATOR_UNAVAILABLE.
+  audio-worker:
+    build: .
+    profiles: ["ace"]
+    command: python -m app.audio_worker
+    environment:
+      OAL_DATABASE_URL: postgresql+psycopg2://oal:${OAL_POSTGRES_PASSWORD}@postgres:5432/oal
+      OAL_REDIS_URL: redis://redis:6379/0
+      OAL_SECRET_KEY: ${OAL_SECRET_KEY}
+      OAL_STORAGE_DIR: /srv/openaudiolab/artifacts-data
+      OAL_DEMUCS_PYTHON: ${OAL_DEMUCS_PYTHON:-}
+    volumes:
+      - artifacts-data:/srv/openaudiolab/artifacts-data
+    depends_on:
+      api:
+        condition: service_started
+
+  # Training/evaluation worker (milestone 5). Needs shared access to the
+  # upstream server's filesystem for dataset materialization and adapter
+  # artifacts (same-host deployment; remote training workers are a later
+  # deployment concern).
+  training-worker:
+    build: .
+    profiles: ["ace"]
+    command: python -m app.training_worker
+    environment:
+      OAL_DATABASE_URL: postgresql+psycopg2://oal:${OAL_POSTGRES_PASSWORD}@postgres:5432/oal
+      OAL_REDIS_URL: redis://redis:6379/0
+      OAL_SECRET_KEY: ${OAL_SECRET_KEY}
+      OAL_STORAGE_DIR: /srv/openaudiolab/artifacts-data
+      OAL_ACESTEP_BASE_URL: http://acestep-server:8001
+      OAL_ACESTEP_API_KEY: ${OAL_ACESTEP_API_KEY:-}
+      OAL_TRAIN_WORKDIR: /srv/openaudiolab/training-data
+    volumes:
+      - artifacts-data:/srv/openaudiolab/artifacts-data
+      - training-data:/srv/openaudiolab/training-data
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  postgres-data:
+  object-storage-data:
+  artifacts-data:
+  acestep-checkpoints:
+  training-data:

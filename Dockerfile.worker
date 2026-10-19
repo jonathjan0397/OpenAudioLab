@@ -1,0 +1,86 @@
+# Combined OpenAudioLab worker image: the pinned ACE-Step 1.5 runtime (private
+# server on 8001) plus our worker dependencies, in one image. Our application
+# code is NOT baked — the entrypoint fetches it from the backend over the
+# WireGuard tunnel, so code iteration never rebuilds this heavy runtime image.
+#
+# Build once, publish to Docker Hub, and ephemeral GPU nodes just `docker pull`.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir uv
+
+# --- ACE-Step 1.5 runtime (pinned upstream commit; torch via uv.lock) --------
+ARG ACESTEP_REF=ca1e85f
+WORKDIR /opt/acestep
+RUN git clone https://github.com/ace-step/ACE-Step-1.5.git . \
+    && git checkout "$ACESTEP_REF" \
+    && uv sync --frozen
+
+# DataLoader with num_workers>0 forks from the training runner thread; the
+# forked workers then never receive indices (queue feeder races with the
+# fork) and training hangs at step 0 with GPU memory allocated. Load
+# tensors in-process instead; PreprocessedDataModule already nulls
+# prefetch_factor/persistent_workers when num_workers==0.
+RUN sed -i 's/num_workers: int = 4/num_workers: int = 0/' \
+    /opt/acestep/acestep/training/configs.py \
+    && grep -q 'num_workers: int = 0' /opt/acestep/acestep/training/configs.py
+
+# --- Our worker dependencies (system python, separate from ACE-Step's venv) --
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# --- Demucs stem separation (M13): own CUDA torch in system python, isolated
+# from ACE-Step's uv venv; weights cache under /root/.cache (mounted volume).
+RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cu128 demucs
+
+# demucs imports numpy at runtime but pip left it out of the resolved set
+RUN pip install --no-cache-dir numpy
+
+# --- Audio auto-tagging (M16): librosa DSP + MusicNN genre model (CPU TF) ----
+# musicnn predates Keras 3; tf-keras + TF_USE_LEGACY_KERAS pins tf.keras to 2.x.
+ENV TF_USE_LEGACY_KERAS=1
+RUN pip install --no-cache-dir tensorflow-cpu tf-keras librosa \
+    && pip install --no-cache-dir --no-deps musicnn
+
+# --- WireGuard client + NFS mount tooling (late layer, heavy layers cached) ---
+# Lets a self-contained node bring its own tunnel up (entrypoint wg-quick) when
+# run with NET_ADMIN, and mount the hub's NFS storage dir (entrypoint mount).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wireguard-tools iproute2 iptables nfs-common \
+        openssh-client rsync ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Tailscale static binaries (userspace mode works without NET_ADMIN) -------
+RUN curl -fsSL https://pkgs.tailscale.com/stable/tailscale_1.104.1_amd64.tgz -o /tmp/ts.tgz \
+    && tar -xzf /tmp/ts.tgz -C /tmp \
+    && cp /tmp/tailscale_1.104.1_amd64/tailscale /tmp/tailscale_1.104.1_amd64/tailscaled /usr/local/bin/ \
+    && rm -rf /tmp/ts.tgz /tmp/tailscale_1.104.1_amd64
+
+# --- Bootstrap (app code arrives at runtime from the backend bundle) ---------
+COPY docker/worker-entrypoint.sh /usr/local/bin/worker-entrypoint.sh
+RUN chmod +x /usr/local/bin/worker-entrypoint.sh
+
+ENV ACESTEP_API_HOST=0.0.0.0 \
+    ACESTEP_API_PORT=8001 \
+    ACESTEP_INIT_LLM=false \
+    ACESTEP_DEVICE=cuda:0 \
+    OAL_BACKEND_URL=http://10.0.0.1:50555 \
+    OAL_WORKER_ROLE=engine_worker \
+    OAL_APP_DIR=/srv/openaudiolab/code
+
+WORKDIR /srv/openaudiolab
+
+# Health reflects worker liveness (a heartbeat file the worker touches every
+# ~5s), NOT the ACE-Step /health endpoint: the engine worker now starts acestep
+# lazily and stops it when idle, so /health is intentionally down between jobs.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=5 \
+    CMD test -f /tmp/oal_worker_heartbeat && [ $(( $(date +%s) - $(stat -c %Y /tmp/oal_worker_heartbeat) )) -lt 90 ] || exit 1
+
+ENTRYPOINT ["/usr/local/bin/worker-entrypoint.sh"]

@@ -1,0 +1,32 @@
+/* Open-Canvas — cream paper, heavy grotesque, orange accent, flowing waves */
+[data-theme="open-canvas"] {
+  --bg: #faf7f2;
+  --surface: #ffffff;
+  --surface-2: #f4efe7;
+  --text: #171310;
+  --muted: #7a736a;
+  --border: #e7e0d5;
+  --accent: #f4511e;
+  --accent-2: #ffb199;
+  --accent-3: #7c4dff;
+  --accent-text: #ffffff;
+  --wave-a: #f4511e;
+  --wave-b: #ffb199;
+  --radius: 16px;
+  --font: "Inter", system-ui, sans-serif;
+  --font-heading: "Archivo Black", "Inter", sans-serif;
+  --font-hand: "Caveat", cursive;
+  --shadow: 0 2px 10px rgba(60, 40, 20, 0.07);
+  --hero-image: url("/themes/open-canvas/hero.png");
+  --strip-image: url("/themes/open-canvas/strip.png");
+}
+[data-theme="open-canvas"] .site-header { background: #fffdf9; }
+[data-theme="open-canvas"] .hero-title { font-weight: 400; }
+[data-theme="open-canvas"] .main-hero { grid-template-columns: 1.05fr 1fr; }
+[data-theme="open-canvas"] .hero-art { min-height: 380px; }
+[data-theme="open-canvas"] .btn-primary { border-radius: 12px; }
+[data-theme="open-canvas"] .card { border-radius: 18px; }
+[data-theme="open-canvas"] .main-layout { display: grid; gap: 0; }
+[data-theme="open-canvas"] .main-cols { display: grid; grid-template-columns: 1fr 300px; gap: 26px; align-items: start; }
+[data-theme="open-canvas"] .hero-strip { background-color: #fffdf9; }
+[data-theme="open-canvas"] .hero-strip h1 { font-weight: 400; }

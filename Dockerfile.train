@@ -1,0 +1,57 @@
+# Standalone ACE-Step LoRA training image: the pinned ACE-Step 1.5 runtime
+# (same commit as Dockerfile.worker, sharing its cached layers) plus the model
+# checkpoints baked in, driven by the house-agent entrypoint. No OAL worker
+# deps, no OAL entrypoint, no code bundle — a self-contained training unit.
+#
+# Build once, publish to Docker Hub; Vast nodes just `docker pull`.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git curl ca-certificates \
+        openssh-client rsync zstd \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir uv
+
+# --- ACE-Step 1.5 runtime (pinned upstream commit; torch via uv.lock) --------
+ARG ACESTEP_REF=ca1e85f
+WORKDIR /opt/acestep
+RUN git clone https://github.com/ace-step/ACE-Step-1.5.git . \
+    && git checkout "$ACESTEP_REF" \
+    && uv sync --frozen
+
+# DataLoader with num_workers>0 forks from the training runner thread; the
+# forked workers then never receive indices (queue feeder races with the fork)
+# and training hangs at step 0. Same fix as Dockerfile.worker (45e39a5).
+RUN sed -i 's/num_workers: int = 4/num_workers: int = 0/' \
+    /opt/acestep/acestep/training/configs.py \
+    && grep -q 'num_workers: int = 0' /opt/acestep/acestep/training/configs.py
+
+# --- Baked checkpoints (deterministic boot; no HF download at runtime) -------
+# Unified 1.7B repo lands at checkpoints/ root (acestep-v15-turbo/, vae/,
+# acestep-5Hz-lm-1.7B/, Qwen3-Embedding-0.6B/); XL turbo is self-contained.
+# Note: the engine's MODEL_REPO_MAPPING has no xl entry, so a runtime download
+# of acestep-v15-xl-turbo would wrongly fetch the unified repo — baking it
+# makes ensure_model_downloaded skip entirely.
+RUN /opt/acestep/.venv/bin/python -c \
+    "from huggingface_hub import snapshot_download; \
+     snapshot_download('ACE-Step/Ace-Step1.5', local_dir='/opt/acestep/checkpoints')"
+RUN /opt/acestep/.venv/bin/python -c \
+    "from huggingface_hub import snapshot_download; \
+     snapshot_download('ACE-Step/acestep-v15-xl-turbo', \
+                       local_dir='/opt/acestep/checkpoints/acestep-v15-xl-turbo')"
+
+# --- House agent ---------------------------------------------------------------
+COPY docker/house-agent.sh /usr/local/bin/house-agent.sh
+RUN chmod +x /usr/local/bin/house-agent.sh
+
+ENV ACESTEP_API_HOST=0.0.0.0 \
+    ACESTEP_API_PORT=8001 \
+    ACESTEP_INIT_LLM=false \
+    ACESTEP_DEVICE=cuda:0
+
+ENTRYPOINT ["/usr/local/bin/house-agent.sh"]

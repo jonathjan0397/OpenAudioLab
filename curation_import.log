@@ -1,0 +1,50 @@
+convert: 0 of 1316
+profile=b80674a9-75b6-48af-8c23-8296aedc873c dataset=e672e4ec-1aad-4dab-b7cd-777b013930d0
+upload: 1295 of 1316
+uploaded 50/1295
+uploaded 100/1295
+uploaded 150/1295
+uploaded 200/1295
+uploaded 250/1295
+uploaded 300/1295
+uploaded 350/1295
+uploaded 400/1295
+uploaded 450/1295
+uploaded 500/1295
+uploaded 550/1295
+uploaded 600/1295
+uploaded 650/1295
+uploaded 700/1295
+uploaded 750/1295
+uploaded 800/1295
+uploaded 850/1295
+uploaded 900/1295
+uploaded 950/1295
+uploaded 1000/1295
+uploaded 1050/1295
+uploaded 1100/1295
+uploaded 1150/1295
+uploaded 1200/1295
+uploaded 1250/1295
+uploaded 1295/1295
+errors: 876
+  t00441 Client error '422 Unprocessable Entity' for url 'http://192.151.156.124:50555/api/v1/assets/uploads/c65b2e29-7d55-457c-8694-51da0333dcc1/data'
+For more information check: https://developer.mozilla.org
+  t00442 Client error '422 Unprocessable Entity' for url 'http://192.151.156.124:50555/api/v1/assets/uploads/61adc7b8-a852-4dff-8cee-99a4592741ba/data'
+For more information check: https://developer.mozilla.org
+  t00443 Client error '422 Unprocessable Entity' for url 'http://192.151.156.124:50555/api/v1/assets/uploads/39a34c58-30c4-467f-8fa9-b34674811786/data'
+For more information check: https://developer.mozilla.org
+  t00444 Client error '422 Unprocessable Entity' for url 'http://192.151.156.124:50555/api/v1/assets/uploads/a812e3d5-1c33-4b16-89e2-c0bc9aed4357/data'
+For more information check: https://developer.mozilla.org
+  t00445 Client error '422 Unprocessable Entity' for url 'http://192.151.156.124:50555/api/v1/assets/uploads/9194113b-8844-4784-80bd-0c91f520da1f/data'
+For more information check: https://developer.mozilla.org
+  t00440 Client error '422 Unprocessable Entity' for url 'http://192.151.156.124:50555/api/v1/assets/uploads/84985617-a95f-4b55-b870-55070fe5caf3/complete'
+For more information check: https://developer.mozilla
+  t00446 Client error '422 Unprocessable Entity' for url 'http://192.151.156.124:50555/api/v1/assets/uploads/57a5276f-77b5-4711-84b3-94f101f5e768/data'
+For more information check: https://developer.mozilla.org
+  t00447 Client error '422 Unprocessable Entity' for url 'http://192.151.156.124:50555/api/v1/assets/uploads/c4c51c19-2d18-469c-99d9-f207caa36e5f/data'
+For more information check: https://developer.mozilla.org
+  t00448 Client error '422 Unprocessable Entity' for url 'http://192.151.156.124:50555/api/v1/assets/uploads/c797d37c-4d32-4b52-972b-c6833c80b2af/data'
+For more information check: https://developer.mozilla.org
+  t00449 Client error '422 Unprocessable Entity' for url 'http://192.151.156.124:50555/api/v1/assets/uploads/56791e92-3f20-4710-ae93-3d578c56e8fa/data'
+For more information check: https://developer.mozilla.org

@@ -1,0 +1,42 @@
+/* Signal-Lab — deep navy, lime accent, wireframe waves, tech sans */
+[data-theme="signal-lab"] {
+  --bg: #0a0f1a;
+  --surface: #101828;
+  --surface-2: #172136;
+  --text: #eef3fb;
+  --muted: #7f8ea8;
+  --border: #223047;
+  --accent: #b5f542;
+  --accent-2: #4aa3ff;
+  --accent-3: #c084fc;
+  --accent-text: #10180a;
+  --wave-a: #4aa3ff;
+  --wave-b: #b5f542;
+  --radius: 10px;
+  --font: "IBM Plex Sans", system-ui, sans-serif;
+  --font-heading: "IBM Plex Sans", system-ui, sans-serif;
+  --shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  --glow: 0 0 16px rgba(181, 245, 66, 0.35);
+  --hero-image: url("/themes/signal-lab/hero.png");
+}
+[data-theme="signal-lab"] .site-header { background: #0b1120; }
+[data-theme="signal-lab"] .logo .tld { color: var(--accent-2); }
+[data-theme="signal-lab"] .hero-title .lime { color: var(--accent); }
+[data-theme="signal-lab"] .main-hero { grid-template-columns: 1fr; position: relative; }
+[data-theme="signal-lab"] .hero-art {
+  position: absolute; right: -20px; top: -30px; width: 55%; height: 110%;
+  min-height: 240px; opacity: 0.9; pointer-events: none;
+}
+[data-theme="signal-lab"] .hero-copy { position: relative; z-index: 1; max-width: 55%; }
+[data-theme="signal-lab"] .btn-primary { border-radius: 8px; font-weight: 700; }
+[data-theme="signal-lab"] .card { border-color: #223047; }
+[data-theme="signal-lab"] .chip.active { border-color: var(--accent); color: var(--accent); }
+[data-theme="signal-lab"] .segmented button.active { background: var(--accent); color: var(--accent-text); }
+[data-theme="signal-lab"] .main-cols { display: grid; grid-template-columns: 1fr 330px; gap: 22px; align-items: start; }
+[data-theme="signal-lab"] .dash-sidebar a.active {
+  border: 1px solid var(--accent); color: var(--accent); background: transparent;
+}
+[data-theme="signal-lab"] .progress > i { background: var(--accent); }
+[data-theme="signal-lab"] .stat-card .icon {
+  background: transparent; border: 1px solid var(--border); color: var(--accent-2);
+}

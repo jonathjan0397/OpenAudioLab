@@ -1,0 +1,16 @@
+/opt/acestep/.venv/lib/python3.12/site-packages/torchao/quantization/quant_api.py:1825: SyntaxWarning: invalid escape sequence '\.'
+  * regex for parameter names, must start with `re:`, e.g. `re:language\.layers\..+\.q_proj.weight`.
+2026-10-19 08:25:45.994 | WARNING  | acestep.training.trainer:<module>:40 - bitsandbytes not installed. Using standard AdamW.
+/opt/acestep/.venv/lib/python3.12/site-packages/torch/nn/utils/weight_norm.py:144: FutureWarning: `torch.nn.utils.weight_norm` is deprecated in favor of `torch.nn.utils.parametrizations.weight_norm`.
+  WeightNorm.apply(module, name, dim)
+[Side-Step] Pass 1 FAIL 97 Knowing Me, Knowing You.mp3: Failed to decode audio samples: Could not push packet to decoder: Invalid data found when processing input
+[Side-Step] Pass 1 FAIL 63 Here I Am (Come And Take Me).mp3: Failed to decode audio samples: Could not push packet to decoder: Invalid data found when processing input
+[Side-Step] Pass 1 FAIL 82 Sha La La (Makes Me Happy).mp3: Failed to decode audio samples: Could not push packet to decoder: Invalid data found when processing input
+[Side-Step] Pass 1 FAIL 09 Trying To Reason With Hurrican.mp3: Failed to decode audio samples: Could not push packet to decoder: Invalid data found when processing input
+[Side-Step] Pass 1 FAIL 09 Truckstop Salvation.mp3: Failed to decode audio samples: Could not push packet to decoder: Invalid data found when processing input
+[Side-Step] Pass 1 FAIL 20 High Cumberland Jubilee - Comi.mp3: Failed to decode audio samples: Could not push packet to decoder: Invalid data found when processing input
+[Side-Step] Pass 1 FAIL 02 Superwoman (Where Were You When I Needed You).mp3: Failed to decode audio samples: Could not push packet to decoder: Invalid data found when processing input
+[Side-Step] Pass 1 FAIL 02 Aquarius.mp3: Failed to decode audio samples: Could not push packet to decoder: Invalid data found when processing input
+[INFO] Loading model from /opt/acestep/checkpoints/acestep-v15-turbo (variant=turbo, dtype=torch.bfloat16)
+[OK] Model loaded with attn_implementation=sdpa
+PREPROCESS_RESULT {"processed": 192, "failed": 8, "total": 200, "output_dir": "/work/tensors_pop"}

@@ -1,0 +1,41 @@
+convert: 875 of 1316
+converted 100/875
+converted 200/875
+converted 300/875
+converted 400/875
+converted 500/875
+converted 600/875
+converted 700/875
+converted 800/875
+profile=b80674a9-75b6-48af-8c23-8296aedc873c dataset=e672e4ec-1aad-4dab-b7cd-777b013930d0
+upload: 876 of 1316
+uploaded 50/876
+uploaded 100/876
+uploaded 150/876
+uploaded 200/876
+uploaded 250/876
+uploaded 300/876
+uploaded 350/876
+uploaded 400/876
+uploaded 450/876
+uploaded 500/876
+uploaded 550/876
+uploaded 600/876
+uploaded 650/876
+uploaded 700/876
+uploaded 750/876
+uploaded 800/876
+uploaded 850/876
+uploaded 876/876
+errors: 35
+  t00440 Client error '422 Unprocessable Entity' for url 'http://192.151.156.124:50555/api/v1/assets/uploads/842e704c-2524-47a6-8132-2b8fbee9b269/complete'
+For more information check: https://developer.mozilla
+  t00521 [Errno 111] Connection refused
+  t00517 [Errno 111] Connection refused
+  t00522 [Errno 111] Connection refused
+  t00526 [Errno 111] Connection refused
+  t00527 [Errno 111] Connection refused
+  t00528 [Errno 111] Connection refused
+  t00524 [Errno 111] Connection refused
+  t00525 [Errno 111] Connection refused
+  t00523 [Errno 111] Connection refused

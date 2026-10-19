@@ -1,0 +1,28 @@
+# ACE-Step 1.5 upstream headless server (private port 8001; never public).
+# Runtime validated on the host with uv (torch 2.10.0+cu128, commit ca1e85f);
+# this image build is the deployment deliverable and has not been benchmarked
+# inside Docker yet (milestone 3 records the host-validated evidence).
+FROM python:3.12-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && pip install --no-cache-dir uv \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/acestep
+COPY .env.pinned* ./
+RUN git clone --depth 1 --rev 1.5 https://github.com/ace-step/ACE-Step-1.5.git . 2>/dev/null \
+    || git clone --depth 1 https://github.com/ace-step/ACE-Step-1.5.git .
+RUN uv sync --frozen
+
+ENV ACESTEP_API_HOST=0.0.0.0 \
+    ACESTEP_API_PORT=8001 \
+    ACESTEP_INIT_LLM=false \
+    ACESTEP_DEVICE=cuda:0
+
+EXPOSE 8001
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=5 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3).status == 200 else 1)"
+
+CMD ["uv", "run", "acestep-api"]

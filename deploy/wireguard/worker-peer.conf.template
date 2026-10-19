@@ -1,0 +1,19 @@
+# WireGuard CLIENT config template for an ephemeral worker node dialing into the
+# OpenAudioLab hub on the home server (star topology; nodes are NOT mercury
+# peers). The node dials OUT, so no inbound ports are needed on the NAT'd Vast
+# instance.
+#
+# Copy to /etc/wireguard/wg-oal.conf on the node, fill the node key + assigned
+# 10.203.0.x address and the hub public key, then `wg-quick up wg-oal`. The hub
+# must add this node as a peer (AllowedIPs = its /32) before the handshake.
+
+[Interface]
+PrivateKey = <NODE_PRIVATE_KEY>
+Address = 10.203.0.<NODE_ID>/24
+ListenPort = <RANDOM_PORT>
+
+[Peer]
+PublicKey = <HUB_PUBLIC_KEY>
+Endpoint = 192.151.156.124:51822
+AllowedIPs = 10.203.0.0/24
+PersistentKeepalive = 25

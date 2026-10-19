@@ -1,0 +1,17 @@
+[Unit]
+Description=House LoRA standalone trainer (%i)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=administrator
+WorkingDirectory=/home/administrator/OpenAudioLab
+EnvironmentFile=-/home/administrator/oal-backend/.env.backend
+Environment=HOUSE_VASTAI=/home/administrator/OpenAudioLab/.venv/bin/vastai
+ExecStart=/home/administrator/OpenAudioLab/.venv/bin/python scripts/house_train.py run --model %i
+# oneshot default 90s would kill the run; the runner enforces its own wall clock
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
