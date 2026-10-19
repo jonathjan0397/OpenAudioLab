@@ -23,11 +23,13 @@ export interface ArtistStats {
   plays: number;
 }
 
-export function usePublicTracks(limit = 12, tag?: string) {
+export function usePublicTracks(limit = 12, tag?: string, mode = "recent") {
   return useQuery({
-    queryKey: ["public-tracks", limit, tag || ""],
+    queryKey: ["public-tracks", limit, tag || "", mode],
     queryFn: () =>
-      api.get<{ tracks: PublicTrack[] }>(`/api/v1/public/tracks?limit=${limit}${tag ? `&tag=${encodeURIComponent(tag)}` : ""}`),
+      api.get<{ tracks: PublicTrack[] }>(
+        `/api/v1/public/tracks?limit=${limit}&mode=${encodeURIComponent(mode)}${tag ? `&tag=${encodeURIComponent(tag)}` : ""}`
+      ),
   });
 }
 

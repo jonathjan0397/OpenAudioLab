@@ -98,6 +98,16 @@ def test_tag_filter(client) -> None:
     assert rows == []
 
 
+def test_public_tracks_discover_mode(client) -> None:
+    owner = _seed_owner(client, "m13-discover@example.com", "m13discover")
+    first = _seed_asset(client, owner, "Discover One")
+    second = _seed_asset(client, owner, "Discover Two")
+
+    rows = client.get("/api/v1/public/tracks?mode=discover&limit=2").json()["tracks"]
+    assert {t["asset_id"] for t in rows} == {first, second}
+    assert client.get("/api/v1/public/tracks?mode=bogus").status_code == 422
+
+
 def test_spotlight_and_stats(client) -> None:
     owner = _seed_owner(client, "m13-spot@example.com", "m13spot")
     asset_id = _seed_asset(client, owner, "Spotlight Hit")

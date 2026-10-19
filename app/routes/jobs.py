@@ -822,11 +822,12 @@ def public_tracks(
     request: Request,
     limit: int = Query(default=12, ge=1, le=50),
     tag: str | None = Query(default=None, max_length=40),
+    mode: str = Query(default="recent", pattern="^(recent|discover)$"),
 ) -> JSONResponse:
     settings = request.app.state.settings
     now = utcnow()
     from sqlalchemy import String as SAString
-    from sqlalchemy import cast
+    from sqlalchemy import cast, func
 
     from ..deps import owner_from_request
     from ..errors import ApiError as _ApiError
@@ -845,9 +846,8 @@ def public_tracks(
         )
         if tag:
             stmt = stmt.where(cast(Asset.tags_json, SAString).like(f'%"{tag.lower()}"%'))
-        rows = list(
-            session.execute(stmt.order_by(Asset.created_at.desc()).limit(limit)).scalars()
-        )
+        order = func.random() if mode == "discover" else Asset.created_at.desc()
+        rows = list(session.execute(stmt.order_by(order).limit(limit)).scalars())
         likes = _like_counts(session, [a.id for a in rows])
         creators = _creator_names(session, {a.owner_id for a in rows})
         asset_ids = [a.id for a in rows]

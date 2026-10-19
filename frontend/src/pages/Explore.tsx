@@ -29,10 +29,11 @@ export default function ExplorePage() {
   const q = params.get("q") || "";
   const [input, setInput] = useState(q);
   const [mood, setMood] = useState("All");
+  const [mode, setMode] = useState<"recent" | "discover">("recent");
   const theme = useTheme();
   const player = usePlayer();
   const qc = useQueryClient();
-  const tracks = usePublicTracks(12, mood === "All" ? undefined : mood.toLowerCase());
+  const tracks = usePublicTracks(12, mood === "All" ? undefined : mood.toLowerCase(), mode);
   const results = useQuery({
     queryKey: ["search", q],
     queryFn: () => api.get<SearchResults>(`/api/v1/search?q=${encodeURIComponent(q)}`),
@@ -63,6 +64,16 @@ export default function ExplorePage() {
       <div className="section-head" style={{ marginTop: 10 }}>
         <h2>Explore</h2>
         <span className="sub">Fresh sounds from the community</span>
+        <span className="spacer" />
+        <div className="segmented">
+          <button type="button" className={mode === "recent" ? "active" : ""} onClick={() => setMode("recent")}>Recent</button>
+          <button type="button" className={mode === "discover" ? "active" : ""} onClick={() => setMode("discover")}>Discover</button>
+        </div>
+        {mode === "discover" && (
+          <button className="btn btn-ghost" onClick={() => tracks.refetch()} disabled={tracks.isFetching}>
+            ↻ Shuffle
+          </button>
+        )}
       </div>
       <form
         className="create-input-row"
