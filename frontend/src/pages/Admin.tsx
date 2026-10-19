@@ -247,6 +247,7 @@ export default function AdminPage() {
   const [task, setTask] = useState("all");
   const [metric, setMetric] = useState<"tracks" | "users" | "compute">("tracks");
   const [userQ, setUserQ] = useState("");
+  const [userOffset, setUserOffset] = useState(0);
   const [ledgerFor, setLedgerFor] = useState<AdminUser | null>(null);
   const [adjDelta, setAdjDelta] = useState("");
   const [adjNote, setAdjNote] = useState("");
@@ -266,6 +267,10 @@ export default function AdminPage() {
     setJobTask(params.get("task") || "");
     setJobLimit(25);
   }, [params]);
+
+  useEffect(() => {
+    setUserOffset(0);
+  }, [userQ]);
 
   useEffect(() => {
     const t = setInterval(() => setTick((x) => x + 1), 5000);
@@ -377,8 +382,13 @@ export default function AdminPage() {
     onSuccess: invalidateLoras,
   });
   const deleteLora = useMutation({
-    mutationFn: (id: string) => fetch(`/api/v1/admin/loras/${id}`, { method: "DELETE", credentials: "include" }),
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/v1/admin/loras/${id}`, { method: "DELETE", credentials: "include" });
+      if (!res.ok) throw new Error(`Delete failed (${res.status})`);
+      return res.status === 204 ? null : res.json().catch(() => null);
+    },
     onSuccess: invalidateLoras,
+    onError: (e: Error) => setError(e.message),
   });
 
   const trainings = useQuery({
@@ -431,8 +441,11 @@ export default function AdminPage() {
   });
 
   const users = useQuery({
-    queryKey: ["admin-users", userQ],
-    queryFn: () => api.get<{ users: AdminUser[]; total: number }>(`/api/v1/admin/users${userQ ? `?q=${encodeURIComponent(userQ)}` : ""}`),
+    queryKey: ["admin-users", userQ, userOffset],
+    queryFn: () =>
+      api.get<{ users: AdminUser[]; total: number }>(
+        `/api/v1/admin/users?limit=50&offset=${userOffset}${userQ ? `&q=${encodeURIComponent(userQ)}` : ""}`
+      ),
     enabled,
   });
   const site = useQuery({ queryKey: ["site"], queryFn: () => api.get<SiteInfo>("/api/v1/site") });
@@ -949,6 +962,13 @@ export default function AdminPage() {
                 ))}
               </tbody>
             </table>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
+              <button className="btn" disabled={userOffset === 0} onClick={() => setUserOffset((n) => Math.max(0, n - 50))}>Prev</button>
+              <span className="sub">
+                {Math.min(userOffset + 1, users.data?.total ?? 0)}–{Math.min(userOffset + (users.data?.users.length ?? 0), users.data?.total ?? 0)} of {users.data?.total ?? 0}
+              </span>
+              <button className="btn" disabled={userOffset + (users.data?.users.length ?? 0) >= (users.data?.total ?? 0)} onClick={() => setUserOffset((n) => n + 50)}>Next</button>
+            </div>
           </div>
         )}
 
