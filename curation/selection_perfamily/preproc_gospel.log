@@ -1,0 +1,8 @@
+/opt/acestep/.venv/lib/python3.12/site-packages/torchao/quantization/quant_api.py:1825: SyntaxWarning: invalid escape sequence '\.'
+  * regex for parameter names, must start with `re:`, e.g. `re:language\.layers\..+\.q_proj.weight`.
+2026-10-19 13:10:30.914 | WARNING  | acestep.training.trainer:<module>:40 - bitsandbytes not installed. Using standard AdamW.
+/opt/acestep/.venv/lib/python3.12/site-packages/torch/nn/utils/weight_norm.py:144: FutureWarning: `torch.nn.utils.weight_norm` is deprecated in favor of `torch.nn.utils.parametrizations.weight_norm`.
+  WeightNorm.apply(module, name, dim)
+[INFO] Loading model from /opt/acestep/checkpoints/acestep-v15-turbo (variant=turbo, dtype=torch.bfloat16)
+[OK] Model loaded with attn_implementation=sdpa
+PREPROCESS_RESULT {"processed": 83, "failed": 0, "total": 83, "output_dir": "/work/tensors_gospel"}
