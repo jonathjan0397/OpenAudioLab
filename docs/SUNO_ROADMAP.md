@@ -26,7 +26,7 @@ Status legend:
 | Style models | Trained style adapters selectable or auto-applied | `done` | Continue admin LoRA pipeline and tag matching. |
 | Custom voices | Artist-specific voice identity, not only style | `research` | Document capability gap until real voice hardware evidence exists. |
 | Stems | Export separated stems for a generated track | `partial` | Expose stem status and mixer progress in Studio. |
-| Credits and billing | Verified payments, top-ups, subscriptions, ledger | `partial` | Add payment/invoice records and reconciliation beyond Stripe webhooks. |
+| Credits and billing | Verified payments, top-ups, subscriptions, ledger | `done` | Monitor Stripe webhook coverage and reconcile refunds manually when needed. |
 | Admin accountability | Jobs, workers, credits, errors, pricing, audit | `partial` | Fix pagination, raw fetch handling, and billing truthfulness. |
 | Themes | Multiple visual identities with shared business logic | `done` | Preserve Neon Studio, Open Canvas, Analog Soul, Signal Lab. |
 | Voice training evidence | Hardware run proves voice identity | `research` | Run a dedicated voice dataset after style batch completes. |
@@ -35,5 +35,5 @@ Status legend:
 1. Done: make the creator a reliable unified workspace: persistent draft, separate description/styles, AI rewrite actions, undo/history, and locked fields.
 2. Done: make artist management visible to signed-in users: create/edit profile, avatar, public/private, curated songs.
 3. Make discovery feel real: randomized or personalized public feed, fewer static placeholders.
-4. Partially done: make billing/admin trustworthy: production mock-grant guard is in place; add payment/invoice references and admin polish.
+4. Done: make billing/admin trustworthy: production mock-grant guard, payment/invoice/refund event records, admin billing mode, and admin pagination are in place.
 5. Keep voice training honest: current LoRAs are style adapters unless a real voice run proves otherwise.

@@ -100,6 +100,20 @@ interface StorageInfo {
   quota_bytes: number;
   categories: { generated_audio: number; training_data: number; model_checkpoints: number; other: number };
 }
+interface BillingEventRow {
+  id: string;
+  owner_id: string | null;
+  event_type: string;
+  kind: string | null;
+  item_id: string | null;
+  amount_usd: number;
+  credits: number;
+  status: string;
+  stripe_event_id: string | null;
+  invoice_id: string | null;
+  subscription_id: string | null;
+  created_at: string | null;
+}
 interface Billing {
   revenue: number;
   revenue_delta_pct: number;
@@ -113,6 +127,8 @@ interface Billing {
   custom_training_pct: number;
   export_pct?: number;
   job_counts?: Record<string, number>;
+  billing_mode?: string;
+  events?: BillingEventRow[];
 }
 interface AuditRow {
   event: string;
@@ -451,7 +467,7 @@ export default function AdminPage() {
   const site = useQuery({ queryKey: ["site"], queryFn: () => api.get<SiteInfo>("/api/v1/site") });
   const settings = useQuery({
     queryKey: ["admin-settings"],
-    queryFn: () => api.get<{ settings: Record<string, string> }>("/api/v1/admin/settings"),
+    queryFn: () => api.get<{ settings: Record<string, string>; billing_mode?: string }>("/api/v1/admin/settings"),
     enabled,
   });
   const keys = useQuery({
@@ -1237,7 +1253,11 @@ export default function AdminPage() {
         {section === "billing" && billing.data && (
           <>
             <div className="card">
-              <div className="card-header"><h2>Billing & Credits</h2></div>
+              <div className="card-header">
+                <h2>Billing & Credits</h2>
+                <span className="spacer" />
+                <span className="pill">{billing.data.billing_mode || "production"}</span>
+              </div>
               <div style={{ display: "flex", gap: 30, flexWrap: "wrap" }}>
                 {[
                   ["Current Period Revenue", `$${billing.data.revenue.toLocaleString()}`],
@@ -1285,6 +1305,28 @@ export default function AdminPage() {
                     </tr>
                   ))}
                   {(credits.data?.items || []).length === 0 && <tr><td colSpan={5} style={{ color: "var(--muted)" }}>No credit entries yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            <div className="card" style={{ marginTop: 20 }}>
+              <div className="card-header">
+                <h2>Payment & Invoice Events</h2>
+              </div>
+              <table className="table">
+                <thead><tr><th>When</th><th>Event</th><th>Item</th><th>Amount</th><th>Credits</th><th>Status</th><th>Reference</th></tr></thead>
+                <tbody>
+                  {(billing.data.events || []).map((e) => (
+                    <tr key={e.id}>
+                      <td className="mono">{e.created_at?.slice(5, 16).replace("T", " ") || "—"}</td>
+                      <td>{e.event_type}</td>
+                      <td>{e.kind ? `${e.kind}${e.item_id ? `: ${e.item_id}` : ""}` : "—"}</td>
+                      <td className="mono">${(e.amount_usd / 100).toFixed(2)}</td>
+                      <td>{e.credits || "—"}</td>
+                      <td><StatusPill status={e.status === "credited" ? "online" : e.status === "cancelled" ? "cancelled" : "running"} label={e.status} /></td>
+                      <td className="mono">{e.invoice_id || e.subscription_id || e.stripe_event_id || "—"}</td>
+                    </tr>
+                  ))}
+                  {(billing.data.events || []).length === 0 && <tr><td colSpan={7} style={{ color: "var(--muted)" }}>No Stripe payment events recorded yet.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -1468,8 +1510,10 @@ export default function AdminPage() {
             <select value={envValue} onChange={(e) => setEnvironment.mutate(e.target.value)}>
               {ENVIRONMENTS.map((e) => <option key={e} value={e}>{e}</option>)}
             </select>
+            <div className="label" style={{ color: "var(--muted)", fontSize: 12, margin: "14px 0 6px" }}>Billing Mode</div>
+            <div className="mono">{settings.data?.billing_mode || "production"}</div>
             <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 14 }}>
-              Template and environment are stored as site settings and applied platform-wide.
+              Template and environment are stored as site settings and applied platform-wide. Billing mode is server-configured.
             </p>
           </div>
         )}

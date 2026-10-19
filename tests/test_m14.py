@@ -156,6 +156,53 @@ def test_billing_webhook_signature(client) -> None:
     assert response.status_code == 503  # no webhook secret configured in tests
 
 
+def test_billing_webhook_records_event_idempotently(client, monkeypatch) -> None:
+    import json
+
+    import stripe
+    from sqlalchemy import select
+
+    from app.models import BillingEvent, CreditEntry, User
+
+    owner = _seed_owner(client, "m14-webhook@example.com", "m14webhook")
+    settings = client.app.state.settings
+    old_secret = settings.stripe_webhook_secret
+    settings.stripe_webhook_secret = "whsec_test"
+    monkeypatch.setattr(stripe.Webhook, "construct_event", lambda body, sig, secret: json.loads(body))
+    payload = {
+        "id": "evt_pack",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_test",
+                "client_reference_id": owner,
+                "metadata": {"kind": "pack", "pack": "small", "credits": "1000"},
+                "amount_total": 500,
+                "payment_intent": "pi_test",
+            }
+        },
+    }
+    body = json.dumps(payload).encode()
+    headers = {"content-type": "application/json"}
+    try:
+        first = client.post("/api/v1/billing/webhook", content=body, headers=headers)
+        assert first.status_code == 200
+        assert first.json() == {"received": True, "duplicate": False}
+        second = client.post("/api/v1/billing/webhook", content=body, headers=headers)
+        assert second.json() == {"received": True, "duplicate": True}
+        with client.app.state.db.session() as session:
+            events = list(session.execute(select(BillingEvent)).scalars())
+            credits = list(session.execute(select(CreditEntry).where(CreditEntry.owner_id == f"usr_{owner}")).scalars())
+            user = session.get(User, owner)
+        assert len(events) == 1
+        assert events[0].status == "credited"
+        assert events[0].amount_usd == 500
+        assert credits[0].delta == 1000
+        assert user.credits_balance == 2000
+    finally:
+        settings.stripe_webhook_secret = old_secret
+
+
 def _seed_admin(client, email: str, username: str) -> str:
     from app.models import User
 

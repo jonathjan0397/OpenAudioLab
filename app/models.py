@@ -454,6 +454,27 @@ class CreditEntry(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class BillingEvent(Base):
+    """Payment/invoice/refund audit trail for Stripe-backed billing (Milestone 2)."""
+
+    __tablename__ = "billing_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    owner_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(80), index=True)
+    stripe_event_id: Mapped[str | None] = mapped_column(String(120), nullable=True, unique=True)
+    checkout_session_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    payment_intent_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    invoice_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    subscription_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    item_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    amount_usd: Mapped[int] = mapped_column(Integer, default=0)
+    credits: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(40), default="recorded")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
 class Workspace(Base):
     """Customer-facing song collection for organising tracks (M17)."""
 

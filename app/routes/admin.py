@@ -128,7 +128,12 @@ def admin_patch_user(user_id: str, payload: AdminPatchUser, request: Request) ->
 def admin_get_settings(request: Request) -> JSONResponse:
     with request.app.state.db.session() as session:
         rows = list(session.execute(select(SiteSetting)).scalars())
-    return JSONResponse({"settings": {row.key: row.value for row in rows}})
+    return JSONResponse(
+        {
+            "settings": {row.key: row.value for row in rows},
+            "billing_mode": getattr(request.app.state.settings, "billing_mode", "production"),
+        }
+    )
 
 
 @router.put("/admin/settings/template")
@@ -499,7 +504,7 @@ def admin_billing(request: Request) -> JSONResponse:
     """Billing & credits overview (revenue is illustrative until real plans)."""
     from sqlalchemy import func as sa_func
 
-    from ..models import CreditEntry
+    from ..models import BillingEvent, CreditEntry
 
     settings = request.app.state.settings
     from ..models import Job as _Job
@@ -520,6 +525,11 @@ def admin_billing(request: Request) -> JSONResponse:
             select(_Job.operation, sa_func.count()).group_by(_Job.operation)
         ).all()
         revenue = _revenue(session)
+        events = list(
+            session.execute(
+                select(BillingEvent).order_by(BillingEvent.created_at.desc()).limit(20)
+            ).scalars()
+        )
     op_counts = {op: int(n) for op, n in op_rows}
     ops_total = sum(op_counts.values())
     pct = lambda op: round(op_counts.get(op, 0) / ops_total * 100, 1) if ops_total else 0
@@ -541,6 +551,24 @@ def admin_billing(request: Request) -> JSONResponse:
             "custom_training_pct": pct("artist.train"),
             "export_pct": pct("audio.export"),
             "job_counts": op_counts,
+            "billing_mode": getattr(settings, "billing_mode", "production"),
+            "events": [
+                {
+                    "id": e.id,
+                    "owner_id": e.owner_id,
+                    "event_type": e.event_type,
+                    "kind": e.kind,
+                    "item_id": e.item_id,
+                    "amount_usd": e.amount_usd,
+                    "credits": e.credits,
+                    "status": e.status,
+                    "stripe_event_id": e.stripe_event_id,
+                    "invoice_id": e.invoice_id,
+                    "subscription_id": e.subscription_id,
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
+                }
+                for e in events
+            ],
         }
     )
 

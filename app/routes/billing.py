@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from ..errors import ApiError
-from ..models import CreditEntry, User
+from ..models import BillingEvent, CreditEntry, User
 from ..routes.auth import current_user
 
 router = APIRouter(tags=["billing"])
@@ -34,6 +34,24 @@ def _require_mock_billing(request: Request) -> None:
     mode = getattr(request.app.state.settings, "billing_mode", "production")
     if mode != "mock":
         raise ApiError(409, "MOCK_BILLING_DISABLED", "Use Stripe checkout for billing in production.")
+
+
+def _owner_id(user_id: str | None) -> str | None:
+    return f"usr_{user_id}" if user_id else None
+
+
+def _user_for_customer(session, customer_id: str | None) -> User | None:
+    if not customer_id:
+        return None
+    return session.execute(select(User).where(User.stripe_customer_id == customer_id)).scalars().first()
+
+
+def _event_amount(obj: dict) -> int:
+    for key in ("amount_total", "amount", "amount_captured", "amount_refunded"):
+        value = obj.get(key)
+        if isinstance(value, (int, float)) and value:
+            return int(value)
+    return 0
 
 
 def load_pricing(session) -> dict[str, list[dict]]:
@@ -229,32 +247,71 @@ async def billing_webhook(request: Request) -> JSONResponse:
 
     raw = json.loads(body)
     event_type = raw["type"]
+    event_id = raw.get("id")
     obj = raw["data"]["object"]
-    from ..models import User as _User
+    meta = obj.get("metadata") or {}
+    credits = int(meta.get("credits") or 0)
+    owner_user_id = obj.get("client_reference_id")
+    status = "recorded"
 
-    if event_type == "checkout.session.completed":
-        meta = obj.get("metadata") or {}
-        owner = obj.get("client_reference_id")
-        with request.app.state.db.session() as session:
-            fresh = session.get(_User, owner) if owner else None
+    with request.app.state.db.session() as session:
+        if event_id and session.execute(
+            select(BillingEvent).where(BillingEvent.stripe_event_id == event_id)
+        ).scalar_one_or_none():
+            return JSONResponse({"received": True, "duplicate": True})
+
+        if event_type == "checkout.session.completed":
+            fresh = session.get(User, owner_user_id) if owner_user_id else None
+            if fresh is None:
+                fresh = _user_for_customer(session, obj.get("customer"))
             if fresh is not None:
+                owner_user_id = fresh.id
                 if meta.get("kind") == "plan" and meta.get("plan"):
                     fresh.plan = meta["plan"]
                     if obj.get("subscription"):
                         fresh.stripe_subscription_id = str(obj["subscription"])
-                    _grant(session, fresh, int(meta.get("credits") or 0), "subscription")
+                    _grant(session, fresh, credits, "subscription")
                 elif meta.get("kind") == "pack":
-                    _grant(session, fresh, int(meta.get("credits") or 0), "topup")
-                session.commit()
-    elif event_type == "customer.subscription.deleted":
-        with request.app.state.db.session() as session:
+                    _grant(session, fresh, credits, "topup")
+                status = "credited"
+        elif event_type == "customer.subscription.deleted":
             rows = list(
                 session.execute(
-                    select(_User).where(_User.stripe_subscription_id == obj.get("id"))
+                    select(User).where(User.stripe_subscription_id == obj.get("id"))
                 ).scalars()
             )
             for fresh in rows:
                 fresh.plan = "free"
                 fresh.stripe_subscription_id = None
-            session.commit()
-    return JSONResponse({"received": True})
+            if rows:
+                owner_user_id = rows[0].id
+            status = "cancelled"
+        elif event_type == "charge.refunded":
+            fresh = _user_for_customer(session, obj.get("customer"))
+            if fresh is not None:
+                owner_user_id = fresh.id
+            status = "refunded"
+        elif event_type.startswith("invoice."):
+            fresh = _user_for_customer(session, obj.get("customer"))
+            if fresh is not None:
+                owner_user_id = fresh.id
+            status = "invoice"
+
+        session.add(
+            BillingEvent(
+                owner_id=_owner_id(owner_user_id),
+                event_type=event_type,
+                stripe_event_id=event_id,
+                checkout_session_id=obj.get("id") if event_type == "checkout.session.completed" else None,
+                payment_intent_id=obj.get("payment_intent") or obj.get("payment_intent_id"),
+                invoice_id=obj.get("invoice") or obj.get("id") if event_type.startswith("invoice.") else None,
+                subscription_id=obj.get("subscription") or (obj.get("id") if event_type.startswith("customer.subscription.") else None),
+                kind=meta.get("kind"),
+                item_id=meta.get("plan") or meta.get("pack"),
+                amount_usd=_event_amount(obj),
+                credits=credits,
+                status=status,
+            )
+        )
+        session.commit()
+    return JSONResponse({"received": True, "duplicate": False})
