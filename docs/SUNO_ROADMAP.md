@@ -20,7 +20,7 @@ Status legend:
 | Advanced creator | Lyrics, style, title, instrumental, duration, seed, variations | `partial` | Structured sections and full-song assistant validation remain pending. |
 | AI songwriting assistant | Draft, rewrite, humanize, title, style suggestions | `done` | Monitor LLM latency and keep locked fields respected. |
 | Approved lyrics path | User-approved lyrics reach generation unchanged | `done` | Preserve lyrics hash and origin in job records. |
-| Generation manifest | Durable requested/resolved/effective recipe per take | `partial` | Server-side manifest and Details view exist; reproduction UX remains pending. |
+| Generation manifest | Durable requested/resolved/effective recipe per take | `partial` | Server-side manifest, Details view, and recipe reuse exist; exact reproduction verification remains pending. |
 | Artist profiles | Named public/private creator identity | `done` | Add delete/rename polish and profile validation. |
 | Artist pages | Public page with avatar, bio, tracks, follows, stats | `partial` | Only shared curated songs appear; Studio artist workflow remains pending. |
 | Discovery | Randomized or personalized community feed | `partial` | Explore random song discovery exists; homepage artist discovery remains pending. |
@@ -43,5 +43,5 @@ Status legend:
 1. Done: remove account-wide public artist fallback; public artist pages show only shared curated songs.
 2. Done: store a durable generation manifest per asset and expose it through `/artifacts/{id}/manifest` and Studio Details.
 3. Implement structured lyric sections and full-song assistant validation before promoting creator parity to `done`.
-4. Build reproduction/reuse controls from the generation manifest, preserving exact lyrics and actual seed.
+4. Done: add recipe reuse from the generation manifest, preserving lyrics and actual seed in the creator draft.
 5. Continue billing ledger work: recurring credits, refund reconciliation, and one transactional credit service.
