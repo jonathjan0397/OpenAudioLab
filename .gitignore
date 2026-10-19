@@ -22,3 +22,8 @@ node_modules/
 oal.db
 frontend/node_modules/
 frontend/dist/
+
+# House LoRA training artifacts (large; kept on NAS / hub share, not in git)
+TrainingData/
+curation/selection_perfamily/tensors_*
+curation/selection_perfamily/tensors-*.tar.zst

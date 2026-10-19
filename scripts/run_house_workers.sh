@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-IMAGE=stratastack/oal-worker:5eaa583-torch2.10-cu128-ts7
+IMAGE=stratastack/oal-worker:45e39a5-torch2.10-cu128-ts7
 DB='postgresql+psycopg2://oal:993903361d4157b90803f309e6a0f6d2@10.203.0.1:55432/oal'
 REDIS='redis://:3acc81a98ee300acba919d424164e0e5@10.203.0.1:6379/0'
 SECRET=4022736855959b810ab98d772ab1af94af9f0b222495595c996479145915f5cc
@@ -16,7 +16,7 @@ docker run -d --name oal-worker-hub --gpus all --network host --restart unless-s
   -e OAL_STORAGE_BACKEND=local -e OAL_STORAGE_DIR=/data/oal \
   -e OAL_TRAIN_WORKDIR=/opt/acestep/training-data -e OAL_TRAIN_MIN_FREE_MB=0 \
   -e OAL_TRAIN_HTTP_TIMEOUT_SECONDS=7200 -e OAL_ENGINE_AUTOSTART=0 \
-  -e OAL_WORKER_ROLE=training_worker,audio_worker -e OAL_WORKER_TIER=baseline \
+  -e OAL_WORKER_ROLE=engine_worker,audio_worker -e OAL_WORKER_TIER=baseline \
   -v /mnt/oal-storage:/data/oal -v oal-acestep-cache:/root/.cache \
   -v /Cold-Archive/oal-train-gpu0:/opt/acestep/training-data \
   "$IMAGE"

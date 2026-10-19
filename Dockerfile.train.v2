@@ -1,0 +1,6 @@
+# Thin overlay on the published training image: updated house-agent entrypoint
+# (robust adapter detection + epoch-checkpoint push). Base layers are cached in
+# the registry and on Vast hosts, so build/pull/push only move this tiny layer.
+FROM stratastack/acestep-train:v1
+COPY docker/house-agent.sh /usr/local/bin/house-agent.sh
+RUN chmod +x /usr/local/bin/house-agent.sh

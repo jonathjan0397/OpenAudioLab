@@ -1,0 +1,91 @@
+[01:20:41] ==== metal ====
+[01:20:42] tensors present, skipping preprocess
+[01:20:48] created instance 56675632 for metal
+[01:21:50] metal: loading
+[02:02:33] ==== punk_alt ====
+[02:02:34] preprocess punk_alt
+[02:14:06] preprocess punk_alt done: PREPROCESS_RESULT {"processed": 197, "failed": 3, "total": 200, "output_dir": "/work/tensors_punk_alt"}
+[02:14:12] created instance 56682192 for punk_alt
+[02:15:14] punk_alt: loading
+[02:16:15] punk_alt: loading
+[02:17:16] punk_alt: loading
+[02:18:17] punk_alt: loading
+[02:19:18] punk_alt: loading
+[02:20:20] punk_alt: loading
+[02:21:21] punk_alt: loading
+[02:22:22] punk_alt: loading
+[02:23:23] punk_alt: loading
+[02:24:24] punk_alt: loading
+[02:25:25] punk_alt: loading
+[02:26:26] punk_alt: loading
+[02:27:27] punk_alt: loading
+[02:28:29] punk_alt: loading
+[02:29:31] punk_alt: loading
+[02:30:33] punk_alt: loading
+[02:31:35] punk_alt: loading
+[02:32:37] punk_alt: loading
+[02:33:39] punk_alt: loading
+[02:34:41] punk_alt: loading
+[02:35:43] punk_alt: loading
+[02:36:45] punk_alt: loading
+[02:37:47] punk_alt: loading
+[02:38:49] punk_alt: loading
+[02:39:51] punk_alt: loading
+[02:43:43] ==== punk_alt ====
+[02:43:44] tensors present, skipping preprocess
+[02:43:50] created instance 56685909 for punk_alt
+[02:44:52] punk_alt: loading
+[02:45:54] punk_alt: loading
+[02:46:56] punk_alt: ep1
+[02:47:57] punk_alt: ep1
+[02:48:59] punk_alt: ep2
+[02:50:01] punk_alt: ep2
+[02:51:02] punk_alt: ep3
+[02:52:04] punk_alt: ep3
+[02:53:06] punk_alt: ep4
+[02:54:08] punk_alt: ep4
+[02:55:09] punk_alt: ep5
+[02:56:11] punk_alt: ep5
+[02:57:13] punk_alt: ep6
+[02:58:14] punk_alt: ep6
+[02:59:16] punk_alt: ep7
+[03:00:18] punk_alt: ep7
+[03:01:19] punk_alt: ep8
+[03:02:21] punk_alt: ep8
+[03:03:23] punk_alt: ep9
+[03:04:25] punk_alt: ep9
+[03:05:26] punk_alt: ep10
+[03:06:28] punk_alt: ep10
+[03:07:30] punk_alt: ep11
+[03:08:31] punk_alt: ep11
+[03:09:33] punk_alt: ep12
+[03:10:35] punk_alt: ep12
+[03:11:36] punk_alt: ep13
+[03:12:38] punk_alt: ep13
+[03:13:40] punk_alt: ep14
+[03:14:41] punk_alt: ep14
+[03:15:43] punk_alt: ep15
+[03:16:45] punk_alt: ep15
+[03:17:46] punk_alt: DONE
+[collect] run=house-v1-punk_alt family=punk_alt -> /Cold-Archive/OpenAudioLab/TrainingData/punk_alt
+<stdin>:21: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+[collect] manifest: {"5": 0.2089, "10": 0.2036, "15": 0.2013}
+[sudo] password for administrator: [collect] inserted lora row for punk_alt
+[collect] done: 2.3G at /Cold-Archive/OpenAudioLab/TrainingData/punk_alt
+[03:18:46] collected punk_alt
+[03:18:46] ==== pop ====
+[03:18:48] preprocess pop
+[03:28:53] preprocess pop done: 
+[03:29:00] created instance 56690885 for pop
+[03:30:02] pop: loading
+[03:31:03] pop: FAIL:export failed
+[03:31:03] NOT DONE (FAIL) for pop — leaving instance, continuing
+[03:31:03] ==== hiphop ====
+[03:31:04] preprocess hiphop
+[03:40:52] preprocess hiphop done: 
+[03:40:58] created instance 56692425 for hiphop
+[03:42:00] hiphop: loading
+[03:43:02] hiphop: FAIL:export failed
+[03:43:02] NOT DONE (FAIL) for hiphop — leaving instance, continuing
+[03:43:02] ==== rnb_soul ====
+[03:43:02] preprocess rnb_soul
