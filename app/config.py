@@ -91,6 +91,7 @@ class Settings(BaseSettings):
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
     stripe_mode: str = "live"
+    billing_mode: str = "production"
     site_url: str = "https://openaudiolab.io"
 
     demucs_python: str = ""

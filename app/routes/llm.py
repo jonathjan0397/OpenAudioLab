@@ -11,7 +11,7 @@ from pydantic import Field
 
 from ..deps import owner_from_request
 from ..errors import ApiError
-from ..llm import LYRICS_SYSTEM, STYLE_SYSTEM, LlmClient
+from ..llm import LYRICS_SYSTEM, STYLE_SYSTEM, TITLE_SYSTEM, LlmClient
 from ..schemas import StrictModel
 
 router = APIRouter(tags=["llm"])
@@ -70,6 +70,20 @@ def llm_lyrics(payload: LyricsRequest, request: Request, owner_id: str = Depends
 def llm_style_prompt(payload: StylePromptRequest, request: Request, owner_id: str = Depends(owner_from_request)) -> JSONResponse:
     text = _ask(request, STYLE_SYSTEM, payload.description, max_tokens=60)
     return JSONResponse({"style_prompt": text})
+
+
+class TitleRequest(StrictModel):
+    prompt: str = Field(default="", max_length=2000)
+    lyrics: str = Field(default="", max_length=4000)
+
+
+@router.post("/llm/title")
+def llm_title(payload: TitleRequest, request: Request, owner_id: str = Depends(owner_from_request)) -> JSONResponse:
+    if not payload.prompt.strip() and not payload.lyrics.strip():
+        raise ApiError(422, "TITLE_INPUT_REQUIRED", "Provide a prompt or lyric excerpt.")
+    user = f"Prompt: {payload.prompt.strip()}\nLyrics excerpt: {payload.lyrics.strip()[:1200]}"
+    text = _ask(request, TITLE_SYSTEM, user, max_tokens=40)
+    return JSONResponse({"title": text.strip().strip('"')[:200]})
 
 
 class DraftRequest(StrictModel):

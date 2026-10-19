@@ -109,7 +109,7 @@ export default function OpenCanvasMain() {
               <strong>{spot.data?.artist?.name || "Luna Waverly"}</strong>
               <div style={{ fontSize: 12, color: "var(--muted)" }}>Producer · Songwriter · Explorer</div>
             </div>
-            <FollowButton slug={spot.data?.artist?.slug ?? artists.data?.artists?.[0]?.slug} />
+            <FollowButton slug={spot.data?.artist?.slug ?? artists.data?.[0]?.slug} />
           </div>
           <div className="spot-thumbs">
             {list.slice(0, 6).map((t) => (

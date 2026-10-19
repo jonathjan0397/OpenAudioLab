@@ -143,6 +143,14 @@ def test_llm_routes_task_locked(client) -> None:
         response = client.post("/api/v1/llm/style-prompt", json={"description": "rainy jazz night"})
         assert response.status_code == 200
         assert response.json()["style_prompt"] == "[Verse]\nfake lyrics line"
+
+        response = client.post("/api/v1/llm/title", json={"prompt": "rainy jazz night", "lyrics": "streetlights hum"})
+        assert response.status_code == 200
+        assert response.json()["title"] == "[Verse]\nfake lyrics line"
+        assert "Lyrics excerpt" in fake.calls[-1][1]
+
+        response = client.post("/api/v1/llm/title", json={})
+        assert response.status_code == 422
     finally:
         del client.app.state.llm
 

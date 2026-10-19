@@ -58,6 +58,25 @@ const QUALITY = [
   { value: 32, label: "Fine (slow)" },
 ];
 
+const DRAFT_KEY = "oal-create-draft-v2";
+
+interface DraftSnapshot {
+  title: string;
+  desc: string;
+  styles: string;
+  lyrics: string;
+  mood: string;
+  drafted: boolean;
+}
+
+function loadDraft(): Partial<DraftSnapshot & Record<string, unknown>> {
+  try {
+    return JSON.parse(localStorage.getItem(DRAFT_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
 const EXAMPLES = [
   "A dreamy indie pop song about chasing a brighter tomorrow",
   "Rainy lo-fi beat for a late-night study session",
@@ -83,30 +102,73 @@ export default function CreateWidget({
   mode?: "create" | "remix" | "extend";
 }) {
   const player = usePlayer();
+  const saved = loadDraft();
   const [easy, setEasy] = useState(() => localStorage.getItem("oal-create-mode") !== "advanced");
-  const [title, setTitle] = useState("");
+  const [title, setTitle] = useState(String(saved.title || ""));
   const [draftTitle, setDraftTitle] = useState("");
-  const [draftOpen, setDraftOpen] = useState(false);
+  const [draftOpen, setDraftOpen] = useState(Boolean(saved.draftOpen ?? false));
   const [sheetOpen, setSheetOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [desc, setDesc] = useState(() => EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)]);
-  const [style, setStyle] = useState("");
-  const [lyrics, setLyrics] = useState("");
-  const [drafted, setDrafted] = useState(false);
+  const [desc, setDesc] = useState(String(saved.desc || EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)]));
+  const [styles, setStyles] = useState(String(saved.styles || ""));
+  const [lyrics, setLyrics] = useState(String(saved.lyrics || ""));
+  const [drafted, setDrafted] = useState(Boolean(saved.drafted ?? false));
   const [duration] = useState(120);
-  const [instrumental, setInstrumental] = useState(false);
-  const [mood, setMood] = useState("");
-  const [gender, setGender] = useState("");
-  const [loraId, setLoraId] = useState("");
-  const [bpm, setBpm] = useState("");
-  const [keyScale, setKeyScale] = useState("");
-  const [language, setLanguage] = useState("");
-  const [shift, setShift] = useState(1);
-  const [quality, setQuality] = useState(8);
-  const [variations, setVariations] = useState(1);
+  const [instrumental, setInstrumental] = useState(Boolean(saved.instrumental ?? false));
+  const [mood, setMood] = useState(String(saved.mood || ""));
+  const [gender, setGender] = useState(String(saved.gender || ""));
+  const [loraId, setLoraId] = useState(String(saved.loraId || ""));
+  const [bpm, setBpm] = useState(String(saved.bpm || ""));
+  const [keyScale, setKeyScale] = useState(String(saved.keyScale || ""));
+  const [language, setLanguage] = useState(String(saved.language || ""));
+  const [shift, setShift] = useState(Number(saved.shift ?? 1));
+  const [quality, setQuality] = useState(Number(saved.quality ?? 8));
+  const [variations, setVariations] = useState(Number(saved.variations ?? 1));
   const [chipSeed, setChipSeed] = useState(() => Math.floor(Math.random() * 1e9));
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [history, setHistory] = useState<DraftSnapshot[]>([]);
+  const [lockTitle, setLockTitle] = useState(false);
+  const [lockLyrics, setLockLyrics] = useState(false);
+  const [lockStyle, setLockStyle] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem(
+      DRAFT_KEY,
+      JSON.stringify({
+        title,
+        desc,
+        styles,
+        lyrics,
+        mood,
+        instrumental,
+        gender,
+        loraId,
+        bpm,
+        keyScale,
+        language,
+        shift,
+        quality,
+        variations,
+        drafted,
+        draftOpen,
+      })
+    );
+  }, [title, desc, styles, lyrics, mood, instrumental, gender, loraId, bpm, keyScale, language, shift, quality, variations, drafted, draftOpen]);
+
+  const snapshot = (): DraftSnapshot => ({ title, desc, styles, lyrics, mood, drafted });
+  const pushHistory = () => setHistory((h) => [...h.slice(-9), snapshot()]);
+  const undoDraft = () => {
+    const prev = history[history.length - 1];
+    if (!prev) return;
+    setTitle(prev.title);
+    setDesc(prev.desc);
+    setStyles(prev.styles);
+    setLyrics(prev.lyrics);
+    setMood(prev.mood);
+    setDrafted(prev.drafted);
+    setHistory((h) => h.slice(0, -1));
+  };
 
   const loras = useQuery({
     queryKey: ["loras"],
@@ -129,8 +191,9 @@ export default function CreateWidget({
         lora_tags: (loras.data?.loras || []).flatMap((l) => [l.name.toLowerCase()]),
       }),
     onSuccess: (d) => {
-      setLyrics(d.lyrics);
-      setStyle(d.style);
+      if (!lockLyrics) setLyrics(d.lyrics);
+      if (!lockStyle) setStyles(d.style);
+      if (!lockTitle && d.title) setTitle(d.title);
       setMood(d.mood || "");
       setDraftTitle(d.title || "");
       setDrafted(true);
@@ -140,7 +203,49 @@ export default function CreateWidget({
     onError: (e: Error) => setError(e.message),
   });
 
+  const rewriteLyrics = useMutation({
+    mutationFn: () =>
+      api.post<{ text: string }>("/api/v1/llm/lyrics", {
+        prompt: [desc, styles].filter(Boolean).join(", "),
+        mode: lyrics.trim() ? "humanize" : "write",
+        lyrics,
+      }),
+    onSuccess: (d) => {
+      if (!lockLyrics) setLyrics(d.text);
+      setDrafted(true);
+      setError("");
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const rewriteStyle = useMutation({
+    mutationFn: () =>
+      api.post<{ style_prompt: string }>("/api/v1/llm/style-prompt", {
+        description: [desc, styles].filter(Boolean).join(" ") || desc,
+      }),
+    onSuccess: (d) => {
+      if (!lockStyle) setStyles(d.style_prompt);
+      setDrafted(true);
+      setError("");
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const rewriteTitle = useMutation({
+    mutationFn: () =>
+      api.post<{ title: string }>("/api/v1/llm/title", {
+        prompt: desc,
+        lyrics,
+      }),
+    onSuccess: (d) => {
+      if (!lockTitle) setTitle(d.title);
+      setError("");
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
   const canDraft = desc.trim().length >= 8;
+  const assistantBusy = draft.isPending || rewriteLyrics.isPending || rewriteStyle.isPending || rewriteTitle.isPending;
 
   const generate = useMutation({
     mutationFn: async () => {
@@ -158,7 +263,7 @@ export default function CreateWidget({
       if (shift !== 1) controls.shift = shift;
       if (quality !== 8) controls.inference_steps = quality;
       if (variations > 1) controls.variations = variations;
-      const parts = [desc, mood ? `${mood.toLowerCase()} mood` : "", style].filter(Boolean);
+      const parts = [desc, mood ? `${mood.toLowerCase()} mood` : "", styles].filter(Boolean);
       return api.post<JobAccepted>(
         "/api/v1/jobs",
         {
@@ -212,7 +317,7 @@ export default function CreateWidget({
   });
 
   const status = job.data?.status;
-  const busy = generate.isPending || draft.isPending || (status ? status !== "succeeded" && status !== "failed" : false);
+  const busy = generate.isPending || assistantBusy || (status ? status !== "succeeded" && status !== "failed" : false);
   const actionLabel = mode === "remix" ? "✦ Remix" : mode === "extend" ? "✦ Extend" : "✦ Generate";
   const results = (artifacts.data?.artifacts || []).filter((a) => a.mime.startsWith("audio/"));
 
@@ -221,8 +326,7 @@ export default function CreateWidget({
       const clean = v.replace(/\s*,?\s*$/, "");
       return clean ? `${clean}, ${tag}` : tag;
     };
-    if (easy) setStyle((v) => append(v));
-    else setDesc((v) => (v.includes(tag) ? v : append(v)));
+    setStyles((v) => (v.includes(tag) ? v : append(v)));
   };
 
   const toggleMode = () => {
@@ -258,12 +362,17 @@ export default function CreateWidget({
             <button
               type="button"
               className="btn btn-ghost ai-assistant-btn"
-              disabled={!canDraft || draft.isPending}
+              disabled={!canDraft || assistantBusy}
               title={canDraft ? "Write lyrics, style & title with AI" : "Describe your song first (8+ characters)"}
-              onClick={() => draft.mutate()}
+              onClick={() => { pushHistory(); draft.mutate(); }}
             >
               {draft.isPending ? "✦ Writing…" : "✦ AI Assistant"}
             </button>
+            {history.length > 0 && (
+              <button type="button" className="btn btn-ghost" title="Undo last AI draft change" onClick={undoDraft}>
+                ↶ Undo
+              </button>
+            )}
             {variant === "wide" && (
               <button className="btn btn-primary btn-lg gen-wide" disabled={!!busy} onClick={() => generate.mutate()}>
                 {busy ? "✦ Generating…" : actionLabel} →
@@ -275,7 +384,7 @@ export default function CreateWidget({
             {drafted && (
               <button type="button" className="draft-summary" onClick={() => setDraftOpen((o) => !o)}>
                 ✦ AI draft {draftOpen ? "▴" : "▾"}
-                {style && <span className="sub" style={{ fontSize: 11 }}> {style.slice(0, 44)}{style.length > 44 ? "…" : ""}</span>}
+                {styles && <span className="sub" style={{ fontSize: 11 }}> {styles.slice(0, 44)}{styles.length > 44 ? "…" : ""}</span>}
               </button>
             )}
             {draft.isPending && <span className="sub" style={{ fontSize: 12 }}>✦ writing…</span>}
@@ -283,17 +392,30 @@ export default function CreateWidget({
           {drafted && draftOpen && (
             <div className="create-review">
               <div className="field">
+                <label>Title</label>
+                <div className="style-inline">
+                  <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Untitled" maxLength={200} />
+                  <button type="button" className="btn btn-ghost" title={lockTitle ? "Unlock title" : "Lock title"} onClick={() => setLockTitle((v) => !v)}>{lockTitle ? "🔒" : "🔓"}</button>
+                  <button type="button" className="btn btn-ghost" title="Rewrite title with AI" disabled={rewriteTitle.isPending} onClick={() => { pushHistory(); rewriteTitle.mutate(); }}>♻</button>
+                </div>
+              </div>
+              <div className="field">
                 <label>Style tags</label>
                 <div className="style-inline">
-                  <input value={style} onChange={(e) => setStyle(e.target.value)} placeholder="lofi, chill, female vocals" />
+                  <input value={styles} onChange={(e) => setStyles(e.target.value)} placeholder="lofi, chill, female vocals" />
+                  <button type="button" className="btn btn-ghost" title={lockStyle ? "Unlock style" : "Lock style"} onClick={() => setLockStyle((v) => !v)}>{lockStyle ? "🔒" : "🔓"}</button>
                   <button type="button" className="btn btn-ghost" title="Style cheat sheet" onClick={() => setSheetOpen(true)}>♬</button>
-                  <button type="button" className="btn btn-ghost" title="Rewrite with AI" disabled={draft.isPending} onClick={() => draft.mutate()}>♻</button>
+                  <button type="button" className="btn btn-ghost" title="Rewrite style with AI" disabled={rewriteStyle.isPending} onClick={() => { pushHistory(); rewriteStyle.mutate(); }}>♻</button>
                 </div>
               </div>
               {!instrumental && (
                 <div className="field">
                   <label>Lyrics</label>
                   <textarea rows={4} value={lyrics} onChange={(e) => setLyrics(e.target.value)} placeholder="[Verse]…" />
+                  <div className="style-inline" style={{ marginTop: 6 }}>
+                    <button type="button" className="btn btn-ghost" title={lockLyrics ? "Unlock lyrics" : "Lock lyrics"} onClick={() => setLockLyrics((v) => !v)}>{lockLyrics ? "🔒 lyrics" : "🔓 lyrics"}</button>
+                    <button type="button" className="btn btn-ghost" title="Rewrite or humanize lyrics" disabled={rewriteLyrics.isPending} onClick={() => { pushHistory(); rewriteLyrics.mutate(); }}>♻ lyrics</button>
+                  </div>
                 </div>
               )}
             </div>
@@ -328,19 +450,36 @@ export default function CreateWidget({
             <div className="field create-gap">
               <label>Lyrics</label>
               <textarea rows={4} value={lyrics} onChange={(e) => setLyrics(e.target.value)} placeholder="[Verse]…[Chorus]… — leave empty and AI will write them" />
+              <div className="style-inline" style={{ marginTop: 6 }}>
+                <button type="button" className="btn btn-ghost" title={lockLyrics ? "Unlock lyrics" : "Lock lyrics"} onClick={() => setLockLyrics((v) => !v)}>{lockLyrics ? "🔒 lyrics" : "🔓 lyrics"}</button>
+                <button type="button" className="btn btn-ghost" title="Rewrite or humanize lyrics" disabled={rewriteLyrics.isPending} onClick={() => { pushHistory(); rewriteLyrics.mutate(); }}>♻ lyrics</button>
+                <button type="button" className="btn btn-ghost" title="Rewrite title with AI" disabled={rewriteTitle.isPending} onClick={() => { pushHistory(); rewriteTitle.mutate(); }}>♻ title</button>
+              </div>
             </div>
           )}
+          <div className="field create-gap">
+            <label>Song idea</label>
+            <textarea
+              rows={2}
+              maxLength={500}
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              placeholder="Describe the scene, story, or feeling"
+            />
+          </div>
           <div className="field create-gap">
             <label>Styles of music</label>
             <div className="style-inline">
               <textarea
                 rows={2}
                 maxLength={500}
-                value={desc}
-                onChange={(e) => setDesc(e.target.value)}
+                value={styles}
+                onChange={(e) => setStyles(e.target.value)}
                 placeholder="e.g. dreamy indie pop, warm female vocals, 110 bpm"
               />
+              <button type="button" className="btn btn-ghost" title={lockStyle ? "Unlock style" : "Lock style"} onClick={() => setLockStyle((v) => !v)}>{lockStyle ? "🔒" : "🔓"}</button>
               <button type="button" className="btn btn-ghost" title="Style cheat sheet" onClick={() => setSheetOpen(true)}>♬ cheat sheet</button>
+              <button type="button" className="btn btn-ghost" title="Rewrite style with AI" disabled={rewriteStyle.isPending} onClick={() => { pushHistory(); rewriteStyle.mutate(); }}>♻</button>
             </div>
             <div className="style-chips">
               {(chips.data?.tags || []).map((c) => (

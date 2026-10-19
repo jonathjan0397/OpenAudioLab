@@ -10,7 +10,7 @@ export interface PublicArtist {
 export function usePublicArtists() {
   return useQuery({
     queryKey: ["public-artists"],
-    queryFn: () => api.get<{ artists: PublicArtist[] }>("/api/v1/public/artists"),
+    queryFn: () => api.get<PublicArtist[]>("/api/v1/public/artists"),
     retry: false,
   });
 }

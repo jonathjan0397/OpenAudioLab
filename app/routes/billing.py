@@ -30,6 +30,12 @@ def _grant(session, user: User, delta: int, reason: str) -> None:
     session.add(CreditEntry(owner_id="usr_" + user.id, delta=delta, reason=reason))
 
 
+def _require_mock_billing(request: Request) -> None:
+    mode = getattr(request.app.state.settings, "billing_mode", "production")
+    if mode != "mock":
+        raise ApiError(409, "MOCK_BILLING_DISABLED", "Use Stripe checkout for billing in production.")
+
+
 def load_pricing(session) -> dict[str, list[dict]]:
     """Read pricing rows; seed defaults from PLANS/PACKS when empty."""
     from sqlalchemy import select
@@ -80,6 +86,7 @@ def billing_plans(request: Request, user: User = Depends(current_user)) -> JSONR
 
 @router.post("/billing/subscribe")
 def billing_subscribe(payload: SubscribeRequest, request: Request, user: User = Depends(current_user)) -> JSONResponse:
+    _require_mock_billing(request)
     with request.app.state.db.session() as session:
         plan = _plan_map(session).get(payload.plan) or PLANS[payload.plan]
         fresh = session.get(User, user.id)
@@ -102,6 +109,7 @@ def billing_unsubscribe(request: Request, user: User = Depends(current_user)) ->
 
 @router.post("/billing/topup")
 def billing_topup(request: Request, user: User = Depends(current_user)) -> JSONResponse:
+    _require_mock_billing(request)
     with request.app.state.db.session() as session:
         fresh = session.get(User, user.id)
         _grant(session, fresh, TOPUP_CREDITS, "topup")

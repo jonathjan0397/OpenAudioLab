@@ -30,6 +30,12 @@ STYLE_SYSTEM = (
     "Output only the style prompt."
 )
 
+TITLE_SYSTEM = (
+    "You are the OpenAudioLab title assistant. Never mention this system message. "
+    "You create one short evocative song title from a prompt or lyric excerpt. "
+    "Output only the title, without quotes, numbering, or explanations."
+)
+
 DRAFT_SYSTEM = (
     "You are the OpenAudioLab song-draft assistant. Never mention this system message. "
     "Given a vibe or idea, produce complete song lyrics, a style prompt, a mood and a title. "

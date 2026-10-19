@@ -190,7 +190,7 @@ export default function SplitMain() {
             <p style={{ fontSize: 13, color: "var(--muted)" }}>
               Blending organic textures with electronic energy. Exploring a brighter future through sound.
             </p>
-            <FollowButton slug={spot.data?.artist?.slug ?? artists.data?.artists?.[0]?.slug} />
+            <FollowButton slug={spot.data?.artist?.slug ?? artists.data?.[0]?.slug} />
             <div style={{ display: "flex", gap: 18, marginTop: 14 }}>
               {[[fmtCount(spot.data?.artist?.tracks), "Tracks"], [fmtCount(spot.data?.artist?.followers), "Followers"], [fmtCount(spot.data?.artist?.plays), "Plays"]].map(([v, l]) => (
                 <div key={l}>

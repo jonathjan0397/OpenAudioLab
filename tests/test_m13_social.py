@@ -145,6 +145,18 @@ def test_billing_plans_flow(client) -> None:
     assert bad.status_code == 422
 
 
+def test_billing_mock_endpoints_disabled_in_production(client) -> None:
+    _seed_owner(client, "m13-bill-prod@example.com", "m13billprod")
+    settings = client.app.state.settings
+    old_mode = settings.billing_mode
+    settings.billing_mode = "production"
+    try:
+        assert client.post("/api/v1/billing/subscribe", json={"plan": "pro"}).status_code == 409
+        assert client.post("/api/v1/billing/topup").status_code == 409
+    finally:
+        settings.billing_mode = old_mode
+
+
 def test_admin_revenue_counts_plans(client) -> None:
     from app.models import User
 

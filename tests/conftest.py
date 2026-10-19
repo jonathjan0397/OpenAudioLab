@@ -16,6 +16,7 @@ os.environ["OAL_WORKER_BRPOP_TIMEOUT_SECONDS"] = "1"
 os.environ["OAL_ENGINE_POLL_SECONDS"] = "0.05"
 os.environ["OAL_TRAIN_MIN_FREE_MB"] = "0"
 os.environ["OAL_AUDIO_ANALYSIS_ENABLED"] = "0"
+os.environ["OAL_BILLING_MODE"] = "mock"
 
 import pytest  # noqa: E402
 from alembic import command  # noqa: E402
