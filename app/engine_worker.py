@@ -381,7 +381,7 @@ class EngineWorker:
 
         set_job_stage(self.db, claimed_job, "generating audio")
         try:
-            return self._run_generation(claimed_job, attempt_id, lease_token, submit)
+            return self._run_generation(claimed_job, attempt_id, lease_token, submit, payload)
         finally:
             if profile_path:
                 try:
@@ -389,7 +389,9 @@ class EngineWorker:
                 except EngineError:
                     log.warning("failed to unload profile adapter after job %s", claimed_job)
 
-    def _run_generation(self, claimed_job: str, attempt_id: str, lease_token: str, submit) -> bool:
+    def _run_generation(
+        self, claimed_job: str, attempt_id: str, lease_token: str, submit, payload: dict
+    ) -> bool:
         deadline = time.monotonic() + self.settings.engine_timeout_seconds
         poll_interval = self.settings.engine_poll_seconds
         while True:
@@ -441,7 +443,8 @@ class EngineWorker:
             fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token, code, str(exc))
             return True
 
-        engine_version = f"ace-step-1.5/{(results[0] or {}).get('dit_model', self.adapter.model)}"
+        first_result = results[0] or {}
+        engine_version = f"ace-step-1.5/{first_result.get('dit_model', self.adapter.model)}"
         complete_attempt(
             self.db,
             self.storage,
@@ -452,6 +455,8 @@ class EngineWorker:
             artifacts,
             synthetic=False,
             engine_version=engine_version,
+            engine_payload=payload,
+            engine_result={**first_result, "task_id": submit.task_id},
         )
         return True
 

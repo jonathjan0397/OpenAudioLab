@@ -17,16 +17,17 @@ Status legend:
 |---|---|---|---|
 | Text-to-song generation | Prompt becomes a full song with vocals or instrumental | `done` | Keep ACE-Step path stable and improve defaults. |
 | Simple creator | One prompt box with optional title and minimal controls | `done` | Keep draft persistence and AI actions stable across themes. |
-| Advanced creator | Lyrics, style, title, instrumental, duration, seed, variations | `partial` | Add user-controlled duration and expose seed controls where useful. |
+| Advanced creator | Lyrics, style, title, instrumental, duration, seed, variations | `partial` | Structured sections and full-song assistant validation remain pending. |
 | AI songwriting assistant | Draft, rewrite, humanize, title, style suggestions | `done` | Monitor LLM latency and keep locked fields respected. |
 | Approved lyrics path | User-approved lyrics reach generation unchanged | `done` | Preserve lyrics hash and origin in job records. |
+| Generation manifest | Durable requested/resolved/effective recipe per take | `partial` | Server-side manifest and Details view exist; reproduction UX remains pending. |
 | Artist profiles | Named public/private creator identity | `done` | Add delete/rename polish and profile validation. |
-| Artist pages | Public page with avatar, bio, tracks, follows, stats | `done` | Improve personalized presentation and discovery links. |
-| Discovery | Randomized or personalized community feed | `partial` | Add discovery mode and remove static fallback tiles. |
+| Artist pages | Public page with avatar, bio, tracks, follows, stats | `partial` | Only shared curated songs appear; Studio artist workflow remains pending. |
+| Discovery | Randomized or personalized community feed | `partial` | Explore random song discovery exists; homepage artist discovery remains pending. |
 | Style models | Trained style adapters selectable or auto-applied | `done` | Continue admin LoRA pipeline and tag matching. |
 | Custom voices | Artist-specific voice identity, not only style | `research` | Document capability gap until real voice hardware evidence exists. |
 | Stems | Export separated stems for a generated track | `partial` | Expose stem status and mixer progress in Studio. |
-| Credits and billing | Verified payments, top-ups, subscriptions, ledger | `done` | Monitor Stripe webhook coverage and reconcile refunds manually when needed. |
+| Credits and billing | Verified payments, top-ups, subscriptions, ledger | `partial` | Event audit trail exists; recurring credits, refunds, and ledger reconciliation remain pending. |
 | Admin accountability | Jobs, workers, credits, errors, pricing, audit | `partial` | Fix pagination, raw fetch handling, and billing truthfulness. |
 | Themes | Multiple visual identities with shared business logic | `done` | Preserve Neon Studio, Open Canvas, Analog Soul, Signal Lab. |
 | Voice training evidence | Hardware run proves voice identity | `research` | Run a dedicated voice dataset after style batch completes. |
@@ -37,3 +38,10 @@ Status legend:
 3. Make discovery feel real: randomized or personalized public feed, fewer static placeholders.
 4. Done: make billing/admin trustworthy: production mock-grant guard, payment/invoice/refund event records, admin billing mode, and admin pagination are in place.
 5. Keep voice training honest: current LoRAs are style adapters unless a real voice run proves otherwise.
+
+## Immediate Milestone 3 Priorities
+1. Done: remove account-wide public artist fallback; public artist pages show only shared curated songs.
+2. Done: store a durable generation manifest per asset and expose it through `/artifacts/{id}/manifest` and Studio Details.
+3. Implement structured lyric sections and full-song assistant validation before promoting creator parity to `done`.
+4. Build reproduction/reuse controls from the generation manifest, preserving exact lyrics and actual seed.
+5. Continue billing ledger work: recurring credits, refund reconciliation, and one transactional credit service.

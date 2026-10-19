@@ -140,6 +140,67 @@ def test_admin_user_soft_delete(client) -> None:
     assert victim_id not in [u["id"] for u in users]
 
 
+def test_public_artist_only_shows_shared_curated_songs(client) -> None:
+    import hashlib
+    import uuid
+
+    from app.models import Asset, utcnow
+    from conftest import TOKEN_A, auth
+
+    owner = "tok_" + hashlib.sha256(TOKEN_A[7:].encode("utf-8")).hexdigest()[:32]
+
+    def seed_asset(title: str, shared: bool) -> str:
+        asset_id = str(uuid.uuid4())
+        key = f"owners/{owner}/jobs/j1/{asset_id}/mix_wav.wav"
+        client.app.state.storage.put(key, b"RIFFfake")
+        with client.app.state.db.session() as session:
+            session.add(
+                Asset(
+                    id=asset_id,
+                    owner_id=owner,
+                    job_id="j1",
+                    storage_key=key,
+                    role="mix_wav",
+                    mime="audio/wav",
+                    bytes=8,
+                    sha256="x",
+                    synthetic=False,
+                    title=title,
+                    shared=shared,
+                    tags_json=[],
+                    finalized_at=utcnow(),
+                    expires_at=utcnow() + __import__("datetime").timedelta(days=7),
+                )
+            )
+            session.commit()
+        return asset_id
+
+    created = client.post("/api/v1/artist-profiles", json={"name": "Privacy Artist"}, headers=auth(TOKEN_A))
+    assert created.status_code == 201
+    pid = created.json()["profile_id"]
+    patched = client.patch(
+        f"/api/v1/artist-profiles/{pid}",
+        json={"sharing": "public"},
+        headers=auth(TOKEN_A, **{"If-Match": created.json()["etag"]}),
+    )
+    assert patched.status_code == 200
+
+    shared = seed_asset("Public Curated", True)
+    private = seed_asset("Private Curated", False)
+    seed_asset("Unshared Uncurated", False)
+
+    for asset_id in (shared, private):
+        added = client.post(
+            f"/api/v1/artist-profiles/{pid}/songs",
+            json={"asset_id": asset_id},
+            headers=auth(TOKEN_A),
+        )
+        assert added.status_code == 201
+
+    body = client.get("/api/v1/public/artists/privacy-artist").json()
+    assert [t["asset_id"] for t in body["tracks"]] == [shared]
+
+
 def test_artist_bio_and_songs(client) -> None:
     created = client.post("/api/v1/artist-profiles", json={"name": "Curator", "bio": "Hello world"}, headers=auth(TOKEN_A))
     assert created.status_code == 201

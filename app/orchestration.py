@@ -247,6 +247,61 @@ def _finish_attempt(session: Session, attempt_id: str, lease_token: str, status:
     return result.rowcount > 0
 
 
+def _generation_manifest(
+    job: Job,
+    attempt_id: str,
+    engine_payload: dict | None,
+    engine_result: dict | None,
+    engine_version: str | None,
+    synthetic: bool,
+) -> dict:
+    request = dict(job.request_json or {})
+    controls = dict(request.get("controls") or {})
+    engine_payload = dict(engine_payload or {})
+    engine_result = dict(engine_result or {})
+    seed = engine_result.get("seed") or engine_payload.get("seed") or request.get("seed")
+    return {
+        "schema_version": "oal.generation.v1",
+        "job_id": job.id,
+        "attempt_id": attempt_id,
+        "created_at": utcnow().isoformat(),
+        "requested": {
+            "operation": job.operation,
+            "model_id": job.model_id,
+            "model_revision": job.model_revision,
+            "music_description": request.get("music_description"),
+            "title": request.get("title"),
+            "lyrics_sha256": job.lyrics_sha256,
+            "lyrics_origin": job.lyrics_origin,
+            "instrumental": request.get("instrumental"),
+            "duration_seconds": request.get("duration_seconds"),
+            "seed": request.get("seed"),
+            "controls": controls,
+            "outputs": request.get("outputs") or [],
+            "artist_profile_version_id": request.get("artist_profile_version_id"),
+            "lora_id": request.get("lora_id"),
+            "client_reference": job.client_reference,
+        },
+        "resolved": {
+            "lyrics": job.lyrics,
+            "lyrics_sha256": job.lyrics_sha256,
+            "seed": seed,
+            "controls": controls,
+            "engine_payload": engine_payload,
+        },
+        "effective": {
+            "engine_version": engine_version,
+            "seed": seed,
+            "synthetic": synthetic,
+            "upstream": {
+                "task_id": engine_result.get("task_id"),
+                "dit_model": engine_result.get("dit_model"),
+                "duration_seconds": engine_result.get("duration_seconds"),
+            },
+        },
+    }
+
+
 def complete_attempt(
     db: Db,
     storage: Storage,
@@ -258,6 +313,8 @@ def complete_attempt(
     audio_meta: tuple[int, int, float] | None = None,
     synthetic: bool = True,
     engine_version: str | None = None,
+    engine_payload: dict | None = None,
+    engine_result: dict | None = None,
 ) -> str:
     """Complete a running attempt with one artifact (role, body).
 
@@ -298,6 +355,7 @@ def complete_attempt(
             return "discarded"
         job = get_job_by_id(session, job_id)
         expires_at = utcnow() + timedelta(days=settings.asset_retention_days)
+        base_manifest = _generation_manifest(job, attempt_id, engine_payload, engine_result, engine_version, synthetic)
         controls = dict(job.request_json.get("controls") or {})
         mood = controls.get("mood")
         gender = {"male": "male vocals", "female": "female vocals"}.get(controls.get("gender"))
@@ -324,6 +382,20 @@ def complete_attempt(
                 sha256=checksum,
                 synthetic=synthetic,
                 tags_json=list(tags),
+                manifest_json={
+                    **base_manifest,
+                    "artifact": {
+                        "role": role_name,
+                        "index": index,
+                        "storage_key": key,
+                        "sha256": checksum,
+                        "bytes": len(data),
+                        "mime": "audio/wav",
+                        "sample_rate": meta[0] if meta else None,
+                        "channels": meta[1] if meta else None,
+                        "duration_seconds": round(meta[2], 3) if meta else None,
+                    },
+                },
                 title=(
                     (req_title if len(artifacts) == 1 else f"{req_title} (Take {index + 1})")
                     if req_title

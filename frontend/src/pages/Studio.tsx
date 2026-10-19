@@ -97,12 +97,18 @@ export default function StudioPage() {
   const [renameValue, setRenameValue] = useState("");
   const [filter, setFilter] = useState("all");
   const [stemsFor, setStemsFor] = useState<string | null>(null);
+  const [detailsFor, setDetailsFor] = useState<string | null>(null);
   const [wsActive, setWsActive] = useState<string | null>(null);
   const [wsNewName, setWsNewName] = useState("");
   const stemsQuery = useQuery<{ asset_id: string; stems: { category: string | null; asset_id: string; url: string }[] }>({
     queryKey: ["stems", stemsFor],
     queryFn: () => api.get(`/api/v1/artifacts/${stemsFor}/stems`),
     enabled: !!stemsFor,
+  });
+  const manifestQuery = useQuery<{ asset_id: string; manifest: Record<string, any> }>({
+    queryKey: ["generation-manifest", detailsFor],
+    queryFn: () => api.get(`/api/v1/artifacts/${detailsFor}/manifest`),
+    enabled: !!detailsFor,
   });
   const workspaces = useQuery({
     queryKey: ["workspaces"],
@@ -372,6 +378,16 @@ export default function StudioPage() {
                     >
                       ≋ Stems
                     </button>
+                    <button
+                      className="btn"
+                      style={detailsFor === t.asset_id ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
+                      onClick={() => {
+                        setDetailsFor(detailsFor === t.asset_id ? null : t.asset_id);
+                        qc.invalidateQueries({ queryKey: ["generation-manifest", t.asset_id] });
+                      }}
+                    >
+                      ⓘ Details
+                    </button>
                   </div>
                 </div>
                 {stemsFor === t.asset_id && (
@@ -391,6 +407,23 @@ export default function StudioPage() {
                           </a>
                         ))}
                       </span>
+                    )}
+                  </div>
+                )}
+                {detailsFor === t.asset_id && (
+                  <div className="card" style={{ padding: "10px 14px", margin: "-6px 0 10px", background: "color-mix(in srgb, var(--surface) 70%, transparent)" }}>
+                    {(manifestQuery.isLoading || manifestQuery.isFetching) && <span style={{ color: "var(--muted)", fontSize: 12 }}>Loading generation details…</span>}
+                    {manifestQuery.data && (
+                      <div style={{ display: "grid", gap: 8, fontSize: 12 }}>
+                        <div className="sub">
+                          seed {manifestQuery.data.manifest?.effective?.seed ?? "unknown"} ·
+                          engine {manifestQuery.data.manifest?.effective?.engine_version ?? "unknown"} ·
+                          lyrics {manifestQuery.data.manifest?.requested?.lyrics_sha256?.slice(0, 12) ?? "none"}
+                        </div>
+                        <pre className="mono" style={{ margin: 0, whiteSpace: "pre-wrap", color: "var(--muted)" }}>
+                          {JSON.stringify(manifestQuery.data.manifest?.requested?.controls || {}, null, 2)}
+                        </pre>
+                      </div>
                     )}
                   </div>
                 )}

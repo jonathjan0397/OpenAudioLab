@@ -144,6 +144,7 @@ class Asset(Base):
     title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     shared: Mapped[bool] = mapped_column(default=False)
     tags_json: Mapped[list] = mapped_column(JSON, default=list)
+    manifest_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -489,6 +489,7 @@ def job_artifacts(
                 "duration_seconds": asset.duration_seconds,
                 "synthetic_test_audio": asset.synthetic,
                 "expires_at": asset.expires_at.isoformat() if asset.expires_at else None,
+                "manifest": asset.manifest_json or {},
             }
             for asset in assets
         ],
@@ -659,6 +660,19 @@ def artifact_waveform(
             pass
         return Response(content=body, media_type="application/json")
     return Response(content=stored.body, media_type="application/json")
+
+
+@router.get("/artifacts/{asset_id}/manifest")
+def artifact_manifest(
+    asset_id: str,
+    request: Request,
+    owner_id: str = Depends(owner_from_request),
+) -> JSONResponse:
+    with request.app.state.db.session() as session:
+        asset = session.execute(select(Asset).where(Asset.id == asset_id)).scalar_one_or_none()
+        if asset is None or asset.owner_id != owner_id:
+            raise ApiError(404, "ASSET_NOT_FOUND", "Asset not found.")
+    return JSONResponse({"asset_id": asset.id, "manifest": asset.manifest_json or {}})
 
 
 class ArtifactPatch(BaseModel):

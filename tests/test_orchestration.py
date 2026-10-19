@@ -70,6 +70,24 @@ def test_happy_path_pipeline(client, orch) -> None:
     assert content.headers["accept-ranges"] == "bytes"
 
 
+def test_generation_manifest_is_durable(client, orch) -> None:
+    job_id = _run_pipeline(client, orch, key="manifest-1", seed=123)
+    artifacts = client.get(f"/api/v1/jobs/{job_id}/artifacts", headers=auth(TOKEN_A)).json()["artifacts"]
+    artifact = artifacts[0]
+    manifest = artifact["manifest"]
+
+    assert manifest["schema_version"] == "oal.generation.v1"
+    assert manifest["job_id"] == job_id
+    assert manifest["requested"]["seed"] == 123
+    assert manifest["effective"]["seed"] == 123
+    assert manifest["requested"]["lyrics_sha256"] == manifest["resolved"]["lyrics_sha256"]
+    assert manifest["artifact"]["sha256"] == artifact["sha256"]
+
+    fetched = client.get(f"/api/v1/artifacts/{artifact['asset_id']}/manifest", headers=auth(TOKEN_A)).json()
+    assert fetched["asset_id"] == artifact["asset_id"]
+    assert fetched["manifest"]["requested"]["seed"] == 123
+
+
 def test_download_token_required_and_range(client, orch) -> None:
     job_id = _run_pipeline(client, orch)
     asset_id = client.get(f"/api/v1/jobs/{job_id}/artifacts", headers=auth(TOKEN_A)).json()["artifacts"][0]["asset_id"]

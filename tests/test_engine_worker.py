@@ -61,6 +61,9 @@ def test_engine_worker_happy_path(client, orch) -> None:
         assert asset.role == "mix_wav"
     artifacts = client.get(f"/api/v1/jobs/{job_id}/artifacts", headers=auth(TOKEN_A)).json()["artifacts"]
     assert artifacts[0]["synthetic_test_audio"] is False
+    manifest = artifacts[0]["manifest"]
+    assert manifest["effective"]["engine_version"].startswith("ace-step-1.5/")
+    assert manifest["effective"]["upstream"]["task_id"] == "fake-task"
 
 
 def test_engine_busy_requeues_without_failure(client, orch) -> None:

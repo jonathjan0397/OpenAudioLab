@@ -697,27 +697,14 @@ def public_artist(slug: str, request: Request) -> JSONResponse:
                 .join(Asset, Asset.id == ArtistSong.asset_id)
                 .where(
                     ArtistSong.profile_id == profile.id,
+                    ArtistSong.owner_id == profile.owner_id,
+                    Asset.shared.is_(True),
                     Asset.deleted_at.is_(None),
                     Asset.mime.like("audio/%"),
                 )
                 .order_by(ArtistSong.position, ArtistSong.created_at)
             ).all()
         )
-        if not tracks:
-            tracks = [
-                (None, a)
-                for a in session.execute(
-                    select(Asset)
-                    .where(
-                        Asset.owner_id == profile.owner_id,
-                        Asset.shared.is_(True),
-                        Asset.deleted_at.is_(None),
-                        Asset.mime.like("audio/%"),
-                    )
-                    .order_by(Asset.created_at.desc())
-                    .limit(20)
-                ).scalars()
-            ]
     from datetime import timedelta
 
     from ..models import utcnow

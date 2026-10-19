@@ -256,6 +256,8 @@ export default function CreateWidget({
         finalLyrics = r.text;
       }
       const controls: Record<string, unknown> = {};
+      if (desc.trim()) controls.description = desc.trim();
+      if (styles.trim()) controls.styles = styles.trim();
       if (mood) controls.mood = mood.toLowerCase();
       if (!instrumental && gender) controls.gender = gender;
       if (bpm) controls.bpm = Number(bpm);

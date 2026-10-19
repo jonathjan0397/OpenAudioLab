@@ -54,6 +54,7 @@ def _clean(_migrate) -> None:
             "project_versions",
             "upload_sessions",
             "artist_profiles",
+            "artist_songs",
             "rights_records",
             "datasets",
             "dataset_tracks",
