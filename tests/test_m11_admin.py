@@ -49,7 +49,7 @@ def test_api_key_lifecycle(client) -> None:
 def test_api_key_unknown_token_falls_back(client) -> None:
     _seed_admin(client, "m11-fb@example.com")
     response = client.get("/api/v1/artist-profiles", headers={"Authorization": "Bearer not-a-real-key"})
-    assert response.status_code == 200
+    assert response.status_code == 401
 
 
 def test_environment_setting(client) -> None:

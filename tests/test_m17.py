@@ -83,7 +83,7 @@ def test_admin_pricing_seed_and_update(client) -> None:
     _seed_admin(client, "price-admin@example.com")
 
     pricing = client.get("/api/v1/admin/pricing").json()
-    assert {p["id"] for p in pricing["plan"]} == {"free", "pro", "premier"}
+    assert {p["id"] for p in pricing["plan"]} == {"free", "beginner", "pro", "premier"}
     assert {p["id"] for p in pricing["pack"]} == {"small", "medium", "large"}
 
     items = pricing["plan"] + pricing["pack"]

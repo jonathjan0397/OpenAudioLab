@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, Float, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -359,7 +359,11 @@ class User(Base):
     plan: Mapped[str] = mapped_column(String(20), default="free")
     stripe_customer_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    credits_balance: Mapped[int] = mapped_column(Integer, default=1000)
+    subscription_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False)
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    credits_balance: Mapped[int] = mapped_column(Integer, default=0)
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     avatar_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
     bio: Mapped[str | None] = mapped_column(String(500), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -452,6 +456,7 @@ class CreditEntry(Base):
     reason: Mapped[str] = mapped_column(String(60))
     note: Mapped[str | None] = mapped_column(String(200), nullable=True)
     job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(160), nullable=True, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -472,6 +477,8 @@ class BillingEvent(Base):
     item_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     amount_usd: Mapped[int] = mapped_column(Integer, default=0)
     credits: Mapped[int] = mapped_column(Integer, default=0)
+    period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(40), default="recorded")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
@@ -555,3 +562,136 @@ class Pricing(Base):
     price_usd: Mapped[int] = mapped_column(Integer, default=0)
     credits: Mapped[int] = mapped_column(Integer, default=0)
     position: Mapped[int] = mapped_column(Integer, default=0)
+    visible: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class GuestSession(Base):
+    __tablename__ = "guest_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    token_sha256: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    policy_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    policy_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    marketing_consent: Mapped[bool] = mapped_column(Boolean, default=False)
+    claimed_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ip_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
+class GuestQuotaCounter(Base):
+    __tablename__ = "guest_quota_counters"
+    __table_args__ = (UniqueConstraint("guest_id", "day"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    guest_id: Mapped[str] = mapped_column(String(36), index=True)
+    day: Mapped[object] = mapped_column(Date)
+    used: Mapped[int] = mapped_column(Integer, default=0)
+    limit: Mapped[int] = mapped_column(Integer, default=4)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class GuestQuotaReservation(Base):
+    __tablename__ = "guest_quota_reservations"
+    __table_args__ = (UniqueConstraint("guest_id", "job_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    guest_id: Mapped[str] = mapped_column(String(36), index=True)
+    job_id: Mapped[str] = mapped_column(String(36), index=True)
+    day: Mapped[object] = mapped_column(Date)
+    takes: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(20), default="reserved", index=True)
+    reason: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PolicyDocument(Base):
+    __tablename__ = "policy_documents"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    version: Mapped[str] = mapped_column(String(80))
+    effective_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class PolicyAcceptance(Base):
+    __tablename__ = "policy_acceptances"
+    __table_args__ = (UniqueConstraint("subject_type", "subject_id", "policy_version"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    subject_type: Mapped[str] = mapped_column(String(20), index=True)
+    subject_id: Mapped[str] = mapped_column(String(80), index=True)
+    policy_version: Mapped[str] = mapped_column(String(80), index=True)
+    documents_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    marketing_consent: Mapped[bool] = mapped_column(Boolean, default=False)
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ip_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
+class AuthToken(Base):
+    __tablename__ = "auth_tokens"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    purpose: Mapped[str] = mapped_column(String(40), index=True)
+    token_sha256: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SubscriptionPeriod(Base):
+    __tablename__ = "subscription_periods"
+    __table_args__ = (UniqueConstraint("stripe_subscription_id", "period_start"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    plan: Mapped[str] = mapped_column(String(40))
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    stripe_invoice_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(40), default="recorded", index=True)
+    credits: Mapped[int] = mapped_column(Integer, default=0)
+    amount_usd: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class AbuseReport(Base):
+    __tablename__ = "abuse_reports"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    reporter_owner_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    subject_type: Mapped[str] = mapped_column(String(40), default="asset")
+    subject_id: Mapped[str] = mapped_column(String(80), index=True)
+    reason: Mapped[str] = mapped_column(String(120))
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(40), default="open", index=True)
+    decision: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    appeal_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class AdminAudit(Base):
+    __tablename__ = "admin_audits"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    admin_id: Mapped[str] = mapped_column(String(80), index=True)
+    action: Mapped[str] = mapped_column(String(120), index=True)
+    target_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    target_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    context_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)

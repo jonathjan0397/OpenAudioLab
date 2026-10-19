@@ -69,8 +69,38 @@ def _clean(_migrate) -> None:
             "favorites",
             "credit_entries",
             "billing_events",
+            "api_keys",
+            "guest_sessions",
+            "guest_quota_counters",
+            "guest_quota_reservations",
+            "policy_acceptances",
+            "auth_tokens",
+            "subscription_periods",
+            "abuse_reports",
+            "admin_audits",
         ):
             session.execute(text(f"DELETE FROM {table}"))
+        session.commit()
+
+
+@pytest.fixture(autouse=True)
+def _seed_api_keys(_clean) -> None:
+    from app.auth import token_sha256
+    from app.db import Db
+    from app.models import ApiKey
+
+    db = Db(os.environ["OAL_DATABASE_URL"])
+    with db.session() as session:
+        for token in (TOKEN_A.removeprefix("Bearer "), TOKEN_B.removeprefix("Bearer ")):
+            digest = token_sha256(token)
+            session.add(
+                ApiKey(
+                    owner_id="tok_" + digest[:32],
+                    name=f"test-{token[-8:]}",
+                    key_sha256=digest,
+                    key_prefix=token[:8],
+                )
+            )
         session.commit()
 
 

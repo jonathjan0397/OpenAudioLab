@@ -165,6 +165,7 @@ interface PricingRow {
   price_usd: number;
   credits: number;
   position: number;
+  visible?: boolean;
 }
 interface CreditRow {
   id: string;
@@ -217,6 +218,8 @@ const SIDEBAR = [
   { to: "/admin/loras", label: "Style Models", icon: "♪" },
   { to: "/admin/storage", label: "Storage", icon: "▤" },
   { to: "/admin/billing", label: "Billing", icon: "▥" },
+  { to: "/admin/guests", label: "Guests", icon: "☺" },
+  { to: "/admin/policies", label: "Policies", icon: "§" },
   { to: "/admin/api", label: "API Access", icon: "</>" },
   { to: "/admin/errors", label: "Errors", icon: "⚠" },
   { to: "/admin/pricing", label: "Pricing", icon: "$" },
@@ -576,6 +579,47 @@ export default function AdminPage() {
       qc.invalidateQueries({ queryKey: ["admin-pricing"] });
     },
   });
+  const guests = useQuery({
+    queryKey: ["admin-guests"],
+    queryFn: () =>
+      api.get<{
+        guests: {
+          id: string;
+          created_at: string | null;
+          expires_at: string | null;
+          policy_accepted: boolean;
+          policy_version: string | null;
+          marketing_consent: boolean;
+          claimed_user_id: string | null;
+          claimed_username: string | null;
+          jobs_count: number;
+          quota_used_today: number;
+          quota_limit: number;
+        }[];
+        total: number;
+        date: string;
+      }>("/api/v1/admin/guests"),
+    enabled: enabled && section === "guests",
+  });
+  const policyInfo = useQuery({
+    queryKey: ["admin-policies"],
+    queryFn: () =>
+      api.get<{
+        version: string;
+        operator: string;
+        support_url: string;
+        documents: { id: string; name: string; version: string }[];
+        acceptances: {
+          subject_type: string;
+          subject_id: string;
+          policy_version: string;
+          marketing_consent: boolean;
+          accepted_at: string | null;
+        }[];
+      }>("/api/v1/admin/policies"),
+    enabled: enabled && section === "policies",
+  });
+
   const createKey = useMutation({
     mutationFn: () => api.post<KeyRow>("/api/v1/api-keys", { name: keyName || "default" }),
     onSuccess: (k) => {
@@ -1333,6 +1377,88 @@ export default function AdminPage() {
           </>
         )}
 
+        {section === "guests" && (
+          <div className="card">
+            <div className="card-header">
+              <h2>Guest Sessions ({guests.data?.total ?? 0})</h2>
+              <span className="spacer" />
+              <span className="pill">{guests.data?.date || "UTC"}</span>
+            </div>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Guest</th>
+                  <th>Created</th>
+                  <th>Policy</th>
+                  <th>Marketing</th>
+                  <th>Claimed</th>
+                  <th>Jobs</th>
+                  <th>Today</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(guests.data?.guests || []).map((g) => (
+                  <tr key={g.id}>
+                    <td className="mono">{g.id.slice(0, 8)}</td>
+                    <td className="mono">{g.created_at?.slice(5, 16).replace("T", " ") || "—"}</td>
+                    <td>{g.policy_accepted ? g.policy_version || "accepted" : "pending"}</td>
+                    <td>{g.marketing_consent ? "yes" : "no"}</td>
+                    <td>{g.claimed_username || g.claimed_user_id?.slice(0, 8) || "—"}</td>
+                    <td>{g.jobs_count}</td>
+                    <td>{g.quota_used_today}/{g.quota_limit}</td>
+                  </tr>
+                ))}
+                {(guests.data?.guests || []).length === 0 && (
+                  <tr><td colSpan={7} style={{ color: "var(--muted)" }}>No guest sessions recorded yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {section === "policies" && (
+          <div className="card">
+            <div className="card-header">
+              <h2>Policies</h2>
+              <span className="spacer" />
+              <span className="pill">{policyInfo.data?.version || "…"}</span>
+            </div>
+            <p style={{ color: "var(--muted)", fontSize: 13 }}>
+              Operator: {policyInfo.data?.operator || "—"} · Support: {policyInfo.data?.support_url || "—"}
+            </p>
+            <table className="table">
+              <thead><tr><th>Document</th><th>Version</th></tr></thead>
+              <tbody>
+                {(policyInfo.data?.documents || []).map((d) => (
+                  <tr key={d.id}>
+                    <td>{d.name}</td>
+                    <td className="mono">{d.version}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="card-header" style={{ marginTop: 18 }}>
+              <h2>Recent Acceptances</h2>
+            </div>
+            <table className="table">
+              <thead><tr><th>Subject</th><th>Version</th><th>Marketing</th><th>Accepted</th></tr></thead>
+              <tbody>
+                {(policyInfo.data?.acceptances || []).map((a, i) => (
+                  <tr key={`${a.subject_type}-${a.subject_id}-${i}`}>
+                    <td className="mono">{a.subject_type}:{a.subject_id.slice(0, 8)}</td>
+                    <td className="mono">{a.policy_version}</td>
+                    <td>{a.marketing_consent ? "yes" : "no"}</td>
+                    <td className="mono">{a.accepted_at?.slice(5, 16).replace("T", " ") || "—"}</td>
+                  </tr>
+                ))}
+                {(policyInfo.data?.acceptances || []).length === 0 && (
+                  <tr><td colSpan={4} style={{ color: "var(--muted)" }}>No policy acceptances recorded yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         {section === "api" && (
           <div className="card">
             <div className="card-header"><h2>API Access</h2></div>
@@ -1436,7 +1562,7 @@ export default function AdminPage() {
               <div key={kind}>
                 <div className="label" style={{ color: "var(--muted)", fontSize: 12, margin: "10px 0 6px", textTransform: "capitalize" }}>{kind}s</div>
                 <table className="table">
-                  <thead><tr><th>Name</th><th>Price USD</th><th>Credits</th></tr></thead>
+                  <thead><tr><th>Name</th><th>Price USD</th><th>Credits</th><th>Visible</th></tr></thead>
                   <tbody>
                     {(kind === "plan" ? pricing.data?.plan : pricing.data?.pack)?.map((row) => {
                       const draft = pricingDraft?.find((p) => p.id === row.id) || row;
@@ -1450,6 +1576,9 @@ export default function AdminPage() {
                           </td>
                           <td>
                             <input style={{ width: 110 }} type="number" min={0} value={draft.credits} onChange={(e) => set({ credits: Number(e.target.value) })} />
+                          </td>
+                          <td>
+                            <input type="checkbox" checked={draft.visible ?? true} onChange={(e) => set({ visible: e.target.checked })} />
                           </td>
                         </tr>
                       );

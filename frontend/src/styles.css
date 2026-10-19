@@ -48,6 +48,16 @@ a { color: var(--accent); }
 }
 .site-header nav a.active { border-bottom-color: var(--accent); font-weight: 600; }
 .site-header .spacer { flex: 1; }
+.site-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  padding: 18px 28px 96px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.site-footer .link { color: var(--muted); }
 .header-search {
   width: 260px; flex: none; display: flex; align-items: center; gap: 8px;
   background: var(--surface); border: 1px solid var(--border);
@@ -619,6 +629,9 @@ img.avatar { padding: 0; }
 }
 .auth-menu-item:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
 .auth-menu input { width: 100%; margin-bottom: 8px; }
+.auth-policy { display: flex; gap: 8px; align-items: flex-start; color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+.auth-policy input { width: auto; margin: 2px 0 0; }
+.guest-access-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 8px 0 12px; }
 .auth-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
 .auth-tabs button {
   flex: 1; background: none; border: 1px solid var(--border); border-radius: 8px;

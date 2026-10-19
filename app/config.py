@@ -93,6 +93,28 @@ class Settings(BaseSettings):
     stripe_mode: str = "live"
     billing_mode: str = "production"
     site_url: str = "https://openaudiolab.io"
+    operator_name: str = "OpenAudioLab"
+    support_url: str = ""
+    stripe_price_beginner: str = ""
+    stripe_price_pro: str = ""
+    stripe_price_premier: str = ""
+    signup_credits: int = 1000
+
+    # Guest access and policy acceptance.
+    guest_cookie_name: str = "oal_guest"
+    guest_session_ttl_days: int = 30
+    guest_daily_song_limit: int = 4
+    guest_max_duration_seconds: int = 120
+    guest_reservation_ttl_hours: int = 24
+    policy_version: str = "2026-10-19.1"
+
+    # Transactional email. Empty SMTP host leaves delivery pending.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    auth_token_ttl_minutes: int = 60
 
     demucs_python: str = ""
     demucs_model: str = "htdemucs_6s"

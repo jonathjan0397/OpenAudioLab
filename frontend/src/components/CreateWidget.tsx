@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { api } from "../api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, AuthUser, GuestAllowance, PolicyPayload } from "../api";
 import ArtworkTile from "./ArtworkTile";
 import Waveform from "./Waveform";
 import { usePlayer } from "./PlayerContext";
@@ -102,6 +102,28 @@ export default function CreateWidget({
   mode?: "create" | "remix" | "extend";
 }) {
   const player = usePlayer();
+  const qc = useQueryClient();
+  const me = useQuery({
+    queryKey: ["me"],
+    queryFn: () => api.get<{ user: AuthUser }>("/api/v1/auth/me"),
+    retry: false,
+  });
+  const guest = useQuery({
+    queryKey: ["guest"],
+    queryFn: () => api.post<GuestAllowance>("/api/v1/auth/guest"),
+    enabled: me.isFetched && !me.data,
+    staleTime: 15000,
+  });
+  const policies = useQuery({
+    queryKey: ["policies"],
+    queryFn: () => api.get<PolicyPayload>("/api/v1/policies"),
+    staleTime: 300000,
+  });
+  const isGuest = me.isFetched && !me.data;
+  const guestPolicyAccepted = Boolean(guest.data?.policy_accepted);
+  const [policyAccepted, setPolicyAccepted] = useState(false);
+  const guestQuotaExhausted = isGuest && (guest.data?.remaining ?? 1) <= 0;
+  const guestPolicyMissing = isGuest && !guestPolicyAccepted && !policyAccepted;
   const saved = loadDraft();
   const [easy, setEasy] = useState(() => localStorage.getItem("oal-create-mode") !== "advanced");
   const [title, setTitle] = useState(String(saved.title || ""));
@@ -131,6 +153,11 @@ export default function CreateWidget({
   const [lockTitle, setLockTitle] = useState(false);
   const [lockLyrics, setLockLyrics] = useState(false);
   const [lockStyle, setLockStyle] = useState(false);
+
+  useEffect(() => {
+    const max = guest.data?.max_duration_seconds;
+    if (isGuest && max && duration > max) setDuration(max);
+  }, [duration, guest.data?.max_duration_seconds, isGuest]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -280,6 +307,7 @@ export default function CreateWidget({
           ...(mode === "remix" ? { seed: Math.floor(Math.random() * 1_000_000_000) } : {}),
           instrumental,
           ...(loraId ? { lora_id: loraId } : {}),
+          ...(isGuest ? { policy_accepted: guestPolicyAccepted || policyAccepted, policy_version: policies.data?.version } : {}),
           outputs: ["mix_wav"],
         },
         { "Idempotency-Key": crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}` }
@@ -288,8 +316,12 @@ export default function CreateWidget({
     onSuccess: (d) => {
       setError("");
       setJobId(d.job_id);
+      qc.invalidateQueries({ queryKey: ["guest"] });
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => {
+      setError(e.message);
+      qc.invalidateQueries({ queryKey: ["guest"] });
+    },
   });
 
   const job = useQuery({
@@ -350,6 +382,24 @@ export default function CreateWidget({
         </span>
       </div>
 
+      {isGuest && (
+        <div className="guest-access-row">
+          <span className="sub" style={{ fontSize: 12 }}>
+            Guest: {guest.data ? `${guest.data.remaining}/${guest.data.limit} songs left today` : "checking allowance…"}
+            {guest.data ? ` · max ${Math.round(guest.data.max_duration_seconds / 60)} min` : ""}
+          </span>
+          {guestPolicyMissing && (
+            <label className="auth-policy" style={{ margin: 0 }}>
+              <input type="checkbox" checked={policyAccepted} onChange={(e) => setPolicyAccepted(e.target.checked)} />
+              <span>
+                I accept the <a className="link" href="/policies">Terms, Abuse Policy, and Privacy Notice</a>.
+              </span>
+            </label>
+          )}
+          {guestQuotaExhausted && <span className="pill err">Daily guest limit reached. Sign in or wait for UTC midnight.</span>}
+        </div>
+      )}
+
       {easy ? (
         <>
           <div className="create-input-row">
@@ -377,7 +427,7 @@ export default function CreateWidget({
               </button>
             )}
             {variant === "wide" && (
-              <button className="btn btn-primary btn-lg gen-wide" disabled={!!busy} onClick={() => generate.mutate()}>
+              <button className="btn btn-primary btn-lg gen-wide" disabled={!!busy || guestQuotaExhausted || guestPolicyMissing} onClick={() => generate.mutate()}>
                 {busy ? "✦ Generating…" : actionLabel} →
               </button>
             )}
@@ -502,7 +552,7 @@ export default function CreateWidget({
           <div className="create-bottom-row">
             <button type="button" className="more-toggle" onClick={() => setMoreOpen((o) => !o)}>More controls {moreOpen ? "▴" : "▾"}</button>
             <span className="spacer" />
-            <button className="btn btn-primary" disabled={!!busy} onClick={() => generate.mutate()}>
+            <button className="btn btn-primary" disabled={!!busy || guestQuotaExhausted || guestPolicyMissing} onClick={() => generate.mutate()}>
               {busy ? "✦ Generating…" : actionLabel} →
             </button>
           </div>
@@ -623,7 +673,7 @@ export default function CreateWidget({
             </div>
           )}
           {variant !== "wide" && (
-            <button className="btn btn-primary btn-lg" disabled={!!busy} onClick={() => generate.mutate()}>
+            <button className="btn btn-primary btn-lg" disabled={!!busy || guestQuotaExhausted || guestPolicyMissing} onClick={() => generate.mutate()}>
               {busy ? "✦ Generating…" : actionLabel} →
             </button>
           )}

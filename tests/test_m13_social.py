@@ -136,7 +136,7 @@ def test_billing_plans_flow(client) -> None:
     plans = client.get("/api/v1/billing/plans")
     assert plans.status_code == 200
     body = plans.json()
-    assert [p["id"] for p in body["plans"]] == ["free", "pro", "premier"]
+    assert [p["id"] for p in body["plans"]] == ["beginner", "pro", "premier"]
     assert body["current"] == "free"
     start = body["credits_balance"]
 

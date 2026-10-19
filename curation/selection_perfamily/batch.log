@@ -571,3 +571,80 @@ rm: cannot remove '/Cold-Archive/OpenAudioLab/curation/selection_perfamily/tenso
 [12:08:54] blues: ep15
 [12:09:56] blues: DONE
 [collect] run=house-v1-blues family=blues -> /Cold-Archive/OpenAudioLab/TrainingData/blues
+<stdin>:21: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+[collect] manifest: {"5": 0.2066, "10": 0.2053, "15": 0.2043}
+[sudo] password for administrator: [collect] inserted lora row for blues
+[collect] done: 2.3G at /Cold-Archive/OpenAudioLab/TrainingData/blues
+[12:10:56] collected blues
+[12:10:56] ==== electronic ====
+[12:10:58] preprocess electronic
+[12:21:55] preprocess electronic done: PREPROCESS_RESULT {"processed": 195, "failed": 5, "total": 200, "output_dir": "/work/tensors_electronic"}
+[12:22:03] created instance 56755323 for electronic
+[12:23:05] electronic: loading
+[12:24:07] electronic: ep1
+[12:25:09] electronic: ep1
+[12:26:10] electronic: ep2
+[12:27:12] electronic: ep2
+[12:28:14] electronic: ep3
+[12:29:15] electronic: ep3
+[12:30:17] electronic: ep4
+[12:31:19] electronic: ep4
+[12:32:20] electronic: ep5
+[12:33:22] electronic: ep5
+[12:34:24] electronic: ep6
+[12:35:25] electronic: ep6
+[12:36:27] electronic: ep7
+[12:37:29] electronic: ep7
+[12:38:30] electronic: ep8
+[12:39:32] electronic: ep8
+[12:40:34] electronic: ep9
+[12:41:35] electronic: ep9
+[12:42:37] electronic: ep10
+[12:43:39] electronic: ep10
+[12:44:40] electronic: ep11
+[12:45:42] electronic: ep11
+[12:46:44] electronic: ep12
+[12:47:45] electronic: ep12
+[12:48:47] electronic: ep13
+[12:49:49] electronic: ep13
+[12:50:50] electronic: ep14
+[12:51:52] electronic: ep14
+[12:52:54] electronic: ep15
+[12:53:56] electronic: ep15
+[12:54:57] electronic: DONE
+[collect] run=house-v1-electronic family=electronic -> /Cold-Archive/OpenAudioLab/TrainingData/electronic
+<stdin>:21: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+[collect] manifest: {"5": 0.2009, "10": 0.1956, "15": 0.1967}
+[sudo] password for administrator: [collect] inserted lora row for electronic
+[collect] done: 2.3G at /Cold-Archive/OpenAudioLab/TrainingData/electronic
+[12:56:00] collected electronic
+[12:56:00] ==== score ====
+[12:56:01] preprocess score
+[13:02:54] preprocess score done: PREPROCESS_RESULT {"processed": 112, "failed": 7, "total": 119, "output_dir": "/work/tensors_score"}
+[13:03:03] created instance 56759860 for score
+[13:04:04] score: loading
+[13:05:06] score: loading
+[13:06:08] score: ep2
+[13:07:09] score: ep2
+[13:08:11] score: ep3
+[13:09:13] score: ep4
+[13:10:14] score: ep5
+[13:11:16] score: ep6
+[13:12:18] score: ep7
+[13:13:19] score: ep8
+[13:14:21] score: ep9
+[13:15:23] score: ep9
+[13:16:24] score: ep10
+[13:17:26] score: ep11
+[13:18:28] score: ep12
+[13:19:30] score: ep13
+[13:20:31] score: ep14
+[13:21:33] score: ep15
+[13:22:35] score: DONE
+[collect] run=house-v1-score family=score -> /Cold-Archive/OpenAudioLab/TrainingData/score
+<stdin>:21: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+[collect] manifest: {"5": 0.2085, "10": 0.1991, "15": 0.1987}
+[sudo] password for administrator: [collect] inserted lora row for score
+[collect] done: 2.0G at /Cold-Archive/OpenAudioLab/TrainingData/score
+[13:23:41] collected score
+[13:23:41] batch complete

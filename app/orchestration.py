@@ -139,15 +139,19 @@ class Dispatcher:
                 job = get_job_by_id(session, attempt.job_id)
                 if job is None or job.status not in ("running", "cancelling"):
                     continue
+                from .quota import release_guest_reservation
+
                 if job.cancel_requested_at is not None:
                     job.status = "cancelled"
                     job.finished_at = utcnow()
+                    release_guest_reservation(session, job, "worker_cancelled")
                     append_event(session, job.id, "cancelled", "cancelled", attempt_id=attempt.id)
                 elif job.attempt_number >= self.settings.max_attempts:
                     job.status = "failed"
                     job.finished_at = utcnow()
                     job.error_code = "MAX_ATTEMPTS"
                     job.error_message = "Attempt budget exhausted after worker interruption."
+                    release_guest_reservation(session, job, "worker_failed")
                     append_event(session, job.id, "failed", "failed", message="MAX_ATTEMPTS", attempt_id=attempt.id)
                 else:
                     job.attempt_number += 1
@@ -409,6 +413,9 @@ def complete_attempt(
             )
             session.add(asset)
         job.assets_expired_at = expires_at
+        from .quota import commit_guest_reservation
+
+        commit_guest_reservation(session, job)
         append_event(session, job.id, "succeeded", "succeeded", stage="done", progress=1.0, attempt_id=attempt_id)
         session.commit()
         return "succeeded"
@@ -446,6 +453,10 @@ def fail_attempt(
                 job.error_code = error_code
                 job.error_message = error_message
             job.finished_at = utcnow()
+        from .quota import release_guest_reservation
+
+        if job is not None and job.status in TERMINAL_JOB_STATUSES:
+            release_guest_reservation(session, job, "job_failed")
         append_event(session, job_id, "failed", job.status if job else "unknown", message=error_code, attempt_id=attempt_id)
         session.commit()
         return "failed"
@@ -461,6 +472,10 @@ def cancel_attempt(db: Db, job_id: str, attempt_id: str, lease_token: str) -> st
         if job is not None and job.status in ("running", "cancelling"):
             job.status = "cancelled"
             job.finished_at = utcnow()
+        from .quota import release_guest_reservation
+
+        if job is not None and job.status in TERMINAL_JOB_STATUSES:
+            release_guest_reservation(session, job, "job_cancelled")
         append_event(session, job_id, "cancelled", "cancelled", attempt_id=attempt_id)
         session.commit()
         return "cancelled"

@@ -2,32 +2,41 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from ..errors import ApiError
-from ..models import BillingEvent, CreditEntry, User
+from ..models import BillingEvent, CreditEntry, SubscriptionPeriod, User, utcnow
 from ..routes.auth import current_user
 
 router = APIRouter(tags=["billing"])
 
 PLANS: dict[str, dict] = {
-    "free": {"id": "free", "name": "Free", "price_usd": 0, "monthly_credits": 0},
-    "pro": {"id": "pro", "name": "Pro", "price_usd": 8, "monthly_credits": 2500},
-    "premier": {"id": "premier", "name": "Premier", "price_usd": 24, "monthly_credits": 10000},
+    "free": {"id": "free", "name": "Free account", "price_usd": 0, "monthly_credits": 0, "visible": False},
+    "beginner": {"id": "beginner", "name": "Beginner", "price_usd": 5, "monthly_credits": 1000, "visible": True},
+    "pro": {"id": "pro", "name": "Pro", "price_usd": 8, "monthly_credits": 2500, "visible": True},
+    "premier": {"id": "premier", "name": "Premier", "price_usd": 24, "monthly_credits": 10000, "visible": True},
 }
 TOPUP_CREDITS = 500
 
 
 class SubscribeRequest(BaseModel):
-    plan: str = Field(pattern=r"^(pro|premier)$")
+    plan: str = Field(pattern=r"^(beginner|pro|premier)$")
 
 
-def _grant(session, user: User, delta: int, reason: str) -> None:
+def _grant(session, user: User, delta: int, reason: str, external_id: str | None = None) -> None:
+    if external_id:
+        existing = session.execute(
+            select(CreditEntry).where(CreditEntry.external_id == external_id)
+        ).scalar_one_or_none()
+        if existing is not None:
+            return
     user.credits_balance += delta
-    session.add(CreditEntry(owner_id="usr_" + user.id, delta=delta, reason=reason))
+    session.add(CreditEntry(owner_id="usr_" + user.id, delta=delta, reason=reason, external_id=external_id))
 
 
 def _require_mock_billing(request: Request) -> None:
@@ -63,7 +72,15 @@ def load_pricing(session) -> dict[str, list[dict]]:
     rows = list(session.execute(select(Pricing).order_by(Pricing.position)).scalars())
     if not rows:
         defaults = [
-            Pricing(id=k, kind="plan", name=v["name"], price_usd=v["price_usd"], credits=v["monthly_credits"], position=i)
+            Pricing(
+                id=k,
+                kind="plan",
+                name=v["name"],
+                price_usd=v["price_usd"],
+                credits=v["monthly_credits"],
+                position=i,
+                visible=v.get("visible", True),
+            )
             for i, (k, v) in enumerate(PLANS.items())
         ] + [
             Pricing(id=k, kind="pack", name=v["name"], price_usd=v["price_usd"], credits=v["credits"], position=10 + i)
@@ -75,7 +92,15 @@ def load_pricing(session) -> dict[str, list[dict]]:
     out: dict[str, list[dict]] = {"plan": [], "pack": []}
     for p in rows:
         out.setdefault(p.kind, []).append(
-            {"id": p.id, "kind": p.kind, "name": p.name, "price_usd": p.price_usd, "credits": p.credits, "position": p.position}
+            {
+                "id": p.id,
+                "kind": p.kind,
+                "name": p.name,
+                "price_usd": p.price_usd,
+                "credits": p.credits,
+                "position": p.position,
+                "visible": bool(getattr(p, "visible", True)),
+            }
         )
     return out
 
@@ -83,20 +108,48 @@ def load_pricing(session) -> dict[str, list[dict]]:
 def _plan_map(session) -> dict[str, dict]:
     data = load_pricing(session)
     return {
-        p["id"]: {"id": p["id"], "name": p["name"], "price_usd": p["price_usd"], "monthly_credits": p["credits"]}
+        p["id"]: {
+            "id": p["id"],
+            "name": p["name"],
+            "price_usd": p["price_usd"],
+            "monthly_credits": p["credits"],
+            "visible": p.get("visible", True),
+        }
         for p in data["plan"]
     }
+
+
+@router.get("/billing/pricing")
+def billing_pricing(request: Request) -> JSONResponse:
+    settings = request.app.state.settings
+    with request.app.state.db.session() as session:
+        data = load_pricing(session)
+    return JSONResponse(
+        {
+            "plans": [p for p in data["plan"] if p.get("visible", True)],
+            "packs": [p for p in data["pack"] if p.get("visible", True)],
+            "guest": {
+                "daily_song_limit": settings.guest_daily_song_limit,
+                "max_duration_seconds": settings.guest_max_duration_seconds,
+                "session_ttl_days": settings.guest_session_ttl_days,
+            },
+            "policy_version": settings.policy_version,
+        }
+    )
 
 
 @router.get("/billing/plans")
 def billing_plans(request: Request, user: User = Depends(current_user)) -> JSONResponse:
     with request.app.state.db.session() as session:
-        plans = list(_plan_map(session).values())
+        plans = [p for p in _plan_map(session).values() if p.get("visible", True)]
     return JSONResponse(
         {
             "plans": plans,
             "current": user.plan,
             "credits_balance": user.credits_balance,
+            "subscription_status": user.subscription_status,
+            "cancel_at_period_end": user.cancel_at_period_end,
+            "current_period_end": user.current_period_end.isoformat() if user.current_period_end else None,
             "topup_credits": TOPUP_CREDITS,
         }
     )
@@ -110,6 +163,9 @@ def billing_subscribe(payload: SubscribeRequest, request: Request, user: User = 
         fresh = session.get(User, user.id)
         _grant(session, fresh, plan["monthly_credits"], "subscription")
         fresh.plan = payload.plan
+        fresh.subscription_status = "active"
+        fresh.cancel_at_period_end = False
+        fresh.current_period_end = utcnow() + timedelta(days=30)
         session.commit()
         balance = fresh.credits_balance
         current = fresh.plan
@@ -121,8 +177,30 @@ def billing_unsubscribe(request: Request, user: User = Depends(current_user)) ->
     with request.app.state.db.session() as session:
         fresh = session.get(User, user.id)
         fresh.plan = "free"
+        fresh.subscription_status = None
+        fresh.cancel_at_period_end = False
+        fresh.current_period_end = None
         session.commit()
     return JSONResponse({"plan": "free", "credits_balance": user.credits_balance})
+
+
+@router.post("/billing/cancel")
+def billing_cancel(request: Request, user: User = Depends(current_user)) -> JSONResponse:
+    with request.app.state.db.session() as session:
+        fresh = session.get(User, user.id)
+        if fresh.plan == "free" or not fresh.stripe_subscription_id:
+            raise ApiError(409, "NO_ACTIVE_SUBSCRIPTION", "There is no active subscription to cancel.")
+        fresh.cancel_at_period_end = True
+        fresh.subscription_status = "canceling"
+        session.commit()
+    return JSONResponse(
+        {
+            "plan": user.plan,
+            "cancel_at_period_end": True,
+            "subscription_status": "canceling",
+            "current_period_end": user.current_period_end.isoformat() if user.current_period_end else None,
+        }
+    )
 
 
 @router.post("/billing/topup")
@@ -156,7 +234,7 @@ PACKS: dict[str, dict] = {
 
 class CheckoutRequest(BaseModel):
     kind: str = Field(pattern=r"^(plan|pack)$")
-    plan: str | None = Field(default=None, pattern=r"^(pro|premier)$")
+    plan: str | None = Field(default=None, pattern=r"^(beginner|pro|premier)$")
     pack: str | None = Field(default=None, pattern=r"^(small|medium|large)$")
 
 
@@ -186,15 +264,20 @@ def billing_checkout(
     if payload.kind == "plan":
         item = next((p for p in pricing["plan"] if p["id"] == payload.plan), None) or PLANS[payload.plan]
         name, unit, credits = item["name"], item["price_usd"] * 100, item.get("monthly_credits", item.get("credits", 0))
-        line = {
-            "price_data": {
-                "currency": "usd",
-                "product_data": {"name": f"OpenAudioLab {item['name']}"},
-                "unit_amount": unit,
-                "recurring": {"interval": "month"},
-            },
-            "quantity": 1,
-        }
+        price_id = getattr(settings, f"stripe_price_{payload.plan}", "")
+        line = (
+            {"price": price_id, "quantity": 1}
+            if price_id
+            else {
+                "price_data": {
+                    "currency": "usd",
+                    "product_data": {"name": f"OpenAudioLab {item['name']}"},
+                    "unit_amount": unit,
+                    "recurring": {"interval": "month"},
+                },
+                "quantity": 1,
+            }
+        )
         mode = "subscription"
     else:
         item = next((p for p in pricing["pack"] if p["id"] == payload.pack), None) or PACKS[payload.pack]
@@ -226,6 +309,42 @@ def billing_checkout(
         status_code=201,
         content={"url": session.url, "session_id": session.id},
     )
+
+
+def _ts_to_datetime(value) -> datetime | None:
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+    return None
+
+
+def _subscription_period_end(subscription: dict | None) -> datetime | None:
+    if not subscription:
+        return None
+    items = subscription.get("items", {}).get("data") or []
+    if items:
+        return _ts_to_datetime(items[0].get("current_period_end"))
+    return _ts_to_datetime(subscription.get("current_period_end"))
+
+
+def _user_for_subscription(session, subscription_id: str | None) -> User | None:
+    if not subscription_id:
+        return None
+    return session.execute(select(User).where(User.stripe_subscription_id == subscription_id)).scalars().first()
+
+
+def _invoice_period(obj: dict) -> tuple[datetime | None, datetime | None]:
+    lines = (obj.get("lines") or {}).get("data") or []
+    if lines:
+        return _ts_to_datetime(lines[0].get("period", {}).get("start")), _ts_to_datetime(
+            lines[0].get("period", {}).get("end")
+        )
+    return _ts_to_datetime(obj.get("period_start")), _ts_to_datetime(obj.get("period_end"))
+
+
+def _plan_credits(session, plan: str | None) -> int:
+    if not plan:
+        return 0
+    return int(_plan_map(session).get(plan, {}).get("monthly_credits") or PLANS.get(plan, {}).get("monthly_credits") or 0)
 
 
 @router.post("/billing/webhook")
@@ -260,6 +379,9 @@ async def billing_webhook(request: Request) -> JSONResponse:
         ).scalar_one_or_none():
             return JSONResponse({"received": True, "duplicate": True})
 
+        period_start = _ts_to_datetime(obj.get("period_start"))
+        period_end = _ts_to_datetime(obj.get("period_end"))
+
         if event_type == "checkout.session.completed":
             fresh = session.get(User, owner_user_id) if owner_user_id else None
             if fresh is None:
@@ -268,12 +390,42 @@ async def billing_webhook(request: Request) -> JSONResponse:
                 owner_user_id = fresh.id
                 if meta.get("kind") == "plan" and meta.get("plan"):
                     fresh.plan = meta["plan"]
+                    fresh.subscription_status = "active"
+                    fresh.cancel_at_period_end = False
                     if obj.get("subscription"):
                         fresh.stripe_subscription_id = str(obj["subscription"])
-                    _grant(session, fresh, credits, "subscription")
+                    period_end = _ts_to_datetime((obj.get("subscription_details") or {}).get("current_period_end")) or period_end
+                    fresh.current_period_end = period_end
+                    _grant(session, fresh, credits, "subscription", external_id=obj.get("id") or event_id)
+                    if obj.get("id"):
+                        session.add(
+                            SubscriptionPeriod(
+                                user_id=fresh.id,
+                                plan=fresh.plan,
+                                stripe_subscription_id=obj.get("subscription"),
+                                stripe_invoice_id=obj.get("invoice"),
+                                period_start=utcnow(),
+                                period_end=period_end,
+                                status="active",
+                                credits=credits,
+                                amount_usd=_event_amount(obj),
+                            )
+                        )
                 elif meta.get("kind") == "pack":
-                    _grant(session, fresh, credits, "topup")
+                    _grant(session, fresh, credits, "topup", external_id=obj.get("id") or event_id)
                 status = "credited"
+        elif event_type == "customer.subscription.updated":
+            fresh = _user_for_subscription(session, obj.get("id"))
+            if fresh is not None:
+                owner_user_id = fresh.id
+                fresh.subscription_status = obj.get("status") or fresh.subscription_status
+                fresh.cancel_at_period_end = bool(obj.get("cancel_at_period_end"))
+                fresh.current_period_end = _subscription_period_end(obj) or fresh.current_period_end
+                if fresh.subscription_status in ("canceled", "unpaid", "incomplete_expired"):
+                    fresh.plan = "free"
+                    fresh.stripe_subscription_id = None
+                    fresh.cancel_at_period_end = False
+            status = "updated"
         elif event_type == "customer.subscription.deleted":
             rows = list(
                 session.execute(
@@ -283,6 +435,9 @@ async def billing_webhook(request: Request) -> JSONResponse:
             for fresh in rows:
                 fresh.plan = "free"
                 fresh.stripe_subscription_id = None
+                fresh.subscription_status = "canceled"
+                fresh.cancel_at_period_end = False
+                fresh.current_period_end = _subscription_period_end(obj)
             if rows:
                 owner_user_id = rows[0].id
             status = "cancelled"
@@ -291,6 +446,35 @@ async def billing_webhook(request: Request) -> JSONResponse:
             if fresh is not None:
                 owner_user_id = fresh.id
             status = "refunded"
+        elif event_type == "invoice.paid":
+            fresh = _user_for_customer(session, obj.get("customer")) or _user_for_subscription(session, obj.get("subscription"))
+            if fresh is not None:
+                owner_user_id = fresh.id
+                period_start, period_end = _invoice_period(obj)
+                fresh.current_period_end = period_end or fresh.current_period_end
+                fresh.subscription_status = "active"
+                fresh.cancel_at_period_end = False
+                billing_reason = obj.get("billing_reason")
+                invoice_id = obj.get("id")
+                if billing_reason == "subscription_cycle":
+                    renewal_credits = credits or _plan_credits(session, fresh.plan)
+                    _grant(session, fresh, renewal_credits, "subscription", external_id=invoice_id)
+                    credits = renewal_credits
+                if invoice_id:
+                    session.add(
+                        SubscriptionPeriod(
+                            user_id=fresh.id,
+                            plan=fresh.plan,
+                            stripe_subscription_id=obj.get("subscription"),
+                            stripe_invoice_id=invoice_id,
+                            period_start=period_start or utcnow(),
+                            period_end=period_end,
+                            status="active",
+                            credits=credits,
+                            amount_usd=_event_amount(obj),
+                        )
+                    )
+            status = "invoice"
         elif event_type.startswith("invoice."):
             fresh = _user_for_customer(session, obj.get("customer"))
             if fresh is not None:
@@ -311,6 +495,8 @@ async def billing_webhook(request: Request) -> JSONResponse:
                 amount_usd=_event_amount(obj),
                 credits=credits,
                 status=status,
+                period_start=period_start,
+                period_end=period_end,
             )
         )
         session.commit()

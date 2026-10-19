@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, AuthUser } from "../api";
+import { api, AuthUser, PolicyPayload } from "../api";
 
 export default function AuthMenu() {
   const qc = useQueryClient();
@@ -10,11 +10,19 @@ export default function AuthMenu() {
     queryFn: () => api.get<{ user: AuthUser }>("/api/v1/auth/me"),
     retry: false,
   });
+  const policies = useQuery({
+    queryKey: ["policies"],
+    queryFn: () => api.get<PolicyPayload>("/api/v1/policies"),
+    staleTime: 300000,
+  });
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [policyAccepted, setPolicyAccepted] = useState(false);
+  const [marketingConsent, setMarketingConsent] = useState(false);
   const [error, setError] = useState("");
   const wrapRef = useRef<HTMLSpanElement>(null);
   const user = me.data?.user;
@@ -29,15 +37,33 @@ export default function AuthMenu() {
   }, [open]);
 
   const submit = useMutation({
-    mutationFn: () =>
-      mode === "register"
-        ? api.post<{ user: AuthUser }>("/api/v1/auth/register", { email, username, password })
-        : api.post<{ user: AuthUser }>("/api/v1/auth/login", { email, password }),
+    mutationFn: async () => {
+      if (mode === "register") {
+        const r = await api.post<{ user: AuthUser }>("/api/v1/auth/register", {
+          email,
+          username,
+          password,
+          confirm_password: confirmPassword,
+          policy_accepted: policyAccepted,
+          policy_version: policies.data?.version,
+          marketing_consent: marketingConsent,
+        });
+        await api.post("/api/v1/auth/claim-guest-songs").catch(() => null);
+        return r;
+      }
+      const r = await api.post<{ user: AuthUser }>("/api/v1/auth/login", { email, password });
+      await api.post("/api/v1/auth/claim-guest-songs").catch(() => null);
+      return r;
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["me"] });
+      qc.invalidateQueries({ queryKey: ["guest"] });
       setOpen(false);
       setError("");
       setPassword("");
+      setConfirmPassword("");
+      setPolicyAccepted(false);
+      setMarketingConsent(false);
     },
     onError: (e: Error) => setError(e.message),
   });
@@ -95,8 +121,33 @@ export default function AuthMenu() {
             onChange={(e) => setPassword(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submit.mutate()}
           />
+          {mode === "register" && (
+            <>
+              <input
+                type="password"
+                placeholder="confirm password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submit.mutate()}
+              />
+              <label className="auth-policy">
+                <input type="checkbox" checked={policyAccepted} onChange={(e) => setPolicyAccepted(e.target.checked)} />
+                <span>
+                  I accept the <Link to="/policies" onClick={() => setOpen(false)}>Terms, Abuse Policy, and Privacy Notice</Link>.
+                </span>
+              </label>
+              <label className="auth-policy">
+                <input type="checkbox" checked={marketingConsent} onChange={(e) => setMarketingConsent(e.target.checked)} />
+                <span>Email me product updates.</span>
+              </label>
+            </>
+          )}
           {error && <span className="auth-error">{error}</span>}
-          <button className="btn btn-primary" onClick={() => submit.mutate()} disabled={submit.isPending}>
+          <button
+            className="btn btn-primary"
+            onClick={() => submit.mutate()}
+            disabled={submit.isPending || (mode === "register" && !policyAccepted)}
+          >
             {submit.isPending ? "..." : mode === "register" ? "Join" : "Sign In"}
           </button>
         </div>

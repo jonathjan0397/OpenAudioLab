@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from ..deps import owner_from_request
 from ..errors import ApiError
-from ..models import Asset, Job, JobEvent, IdempotencyRecord, new_uuid, utcnow
+from ..models import Asset, GuestSession, Job, JobEvent, IdempotencyRecord, new_uuid, utcnow
 from ..orchestration import append_event, as_utc, enqueue
 from ..registry import MODEL_RELEASES, SUPPORTED_OPERATIONS
 from ..storage import parse_range
@@ -198,8 +198,23 @@ def create_job(
     request: Request,
     owner_id: str = Depends(owner_from_request),
 ) -> JSONResponse:
+    from ..deps import guest_session_from_request
+    from ..policies import current_policy_payload, record_policy_acceptance
+    from ..quota import GENERATION_OPERATIONS, guest_id_from_owner, is_guest_owner, requested_takes, reserve_guest_quota
+
     settings = request.app.state.settings
     _validate_request(payload, settings.max_lyrics_chars)
+    guest = is_guest_owner(owner_id) and payload.operation in GENERATION_OPERATIONS
+    if guest:
+        if payload.duration_seconds is not None and payload.duration_seconds > settings.guest_max_duration_seconds:
+            raise ApiError(
+                422,
+                "GUEST_DURATION_EXCEEDED",
+                "Guest songs are limited to two minutes.",
+                {"max_duration_seconds": settings.guest_max_duration_seconds},
+            )
+        if payload.duration_seconds is None:
+            payload.duration_seconds = settings.guest_max_duration_seconds
     key = _idempotency_key(request, settings.max_idempotency_key_length)
     request_hash = payload.request_hash()
     status_url, events_url = None, None
@@ -292,6 +307,34 @@ def create_job(
             )
             session.add(job)
             session.add(record)
+            if guest:
+                guest_id = guest_id_from_owner(owner_id)
+                guest_row = session.get(GuestSession, guest_id)
+                if guest_row is None:
+                    raise ApiError(401, "GUEST_NOT_FOUND", "Guest session is missing or expired.")
+                if guest_row.policy_accepted_at is None:
+                    current_version = current_policy_payload(session, settings)["version"]
+                    if not payload.policy_accepted:
+                        raise ApiError(
+                            403,
+                            "POLICY_ACCEPTANCE_REQUIRED",
+                            "Guests must accept the Terms, Abuse Policy, and Privacy Notice before generating.",
+                        )
+                    if payload.policy_version and payload.policy_version != current_version:
+                        raise ApiError(422, "POLICY_VERSION_STALE", "Policy terms changed; reload and accept the current terms.")
+                    guest_row.policy_version = current_version
+                    guest_row.policy_accepted_at = utcnow()
+                    guest_row.marketing_consent = payload.marketing_consent
+                    record_policy_acceptance(
+                        session,
+                        "guest",
+                        guest_row.id,
+                        current_version,
+                        marketing_consent=payload.marketing_consent,
+                        ip_hash=guest_row.ip_hash,
+                        user_agent=guest_row.user_agent,
+                    )
+                reserve_guest_quota(session, guest_id, job.id, requested_takes(payload.controls), settings)
             if owner_id.startswith("usr_"):
                 from ..models import CreditEntry, User
 
@@ -415,6 +458,10 @@ def cancel_job(
                 {"status": job.status},
             )
         if transitioned:
+            if job.status == "cancelled":
+                from ..quota import release_guest_reservation
+
+                release_guest_reservation(session, job, "job_cancelled")
             append_event(session, job.id, job.status, job.status)
         session.commit()
         return CancelResponse(
@@ -448,6 +495,16 @@ def retry_job(
         job.cancel_requested_at = None
         job.stage = None
         job.progress = None
+        from ..quota import GENERATION_OPERATIONS, guest_id_from_owner, is_guest_owner, requested_takes, reserve_guest_quota
+
+        if is_guest_owner(owner_id) and job.operation in GENERATION_OPERATIONS:
+            reserve_guest_quota(
+                session,
+                guest_id_from_owner(owner_id),
+                job.id,
+                requested_takes(job.request_json.get("controls")),
+                request.app.state.settings,
+            )
         enqueue(session, job, request.app.state.settings)
         append_event(session, job.id, "requeued", "queued", message="Explicit retry.")
         session.commit()

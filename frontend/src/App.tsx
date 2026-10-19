@@ -16,6 +16,9 @@ import SettingsPage from "./pages/Settings";
 import TrainingPage from "./pages/Training";
 import TrackPage from "./pages/Track";
 import StylesPage from "./pages/Styles";
+import PoliciesPage from "./pages/Policies";
+import RecoverPage from "./pages/Recover";
+import VerifyPage from "./pages/Verify";
 
 export default function App() {
   const site = useQuery({
@@ -112,7 +115,17 @@ export default function App() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/training" element={<TrainingPage />} />
         <Route path="/track/:assetId" element={<TrackPage />} />
+        <Route path="/policies" element={<PoliciesPage />} />
+        <Route path="/verify" element={<VerifyPage />} />
+        <Route path="/recover" element={<RecoverPage />} />
       </Routes>
+      <footer className="site-footer">
+        <span>{site.data?.operator || "OpenAudioLab"}</span>
+        <a className="link" href="/policies">Terms</a>
+        <a className="link" href="/policies">Abuse Policy</a>
+        <a className="link" href="/policies">Privacy</a>
+        <a className="link" href={site.data?.support_url || "/pricing"}>Support</a>
+      </footer>
       <PlayerBar />
       <Toaster />
     </PlayerProvider>

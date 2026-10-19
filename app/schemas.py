@@ -32,6 +32,10 @@ class GenerateJobRequest(StrictModel):
     artist_profile_version_id: str | None = None
     lora_id: str | None = None
     client_reference: str | None = Field(default=None, max_length=200)
+    policy_version: str | None = Field(default=None, max_length=80)
+    policy_accepted: bool = False
+    marketing_consent: bool = False
+
     @field_validator("outputs")
     @classmethod
     def _dedupe_outputs(cls, value: list[str]) -> list[str]:

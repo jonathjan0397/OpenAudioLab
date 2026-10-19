@@ -30,11 +30,22 @@ def health_ready(request: Request) -> JSONResponse:
 @router.get("/site")
 def site_info(request: Request) -> JSONResponse:
     from ..models import SiteSetting
+    from ..policies import current_policy_payload
     from ..routes.admin import DEFAULT_TEMPLATE
 
+    settings = request.app.state.settings
     template = DEFAULT_TEMPLATE
     with request.app.state.db.session() as session:
         row = session.get(SiteSetting, "template")
         if row is not None:
             template = row.value
-    return JSONResponse({"site_name": "OpenAudioLab", "template": template})
+        policy = current_policy_payload(session, settings)
+    return JSONResponse(
+        {
+            "site_name": "OpenAudioLab",
+            "template": template,
+            "operator": settings.operator_name,
+            "support_url": settings.support_url or settings.site_url,
+            "policy_version": policy["version"],
+        }
+    )

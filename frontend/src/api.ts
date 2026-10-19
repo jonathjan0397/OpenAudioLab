@@ -29,6 +29,9 @@ export const api = {
 export interface SiteInfo {
   site_name: string;
   template: string;
+  operator?: string;
+  support_url?: string;
+  policy_version?: string;
 }
 
 export interface AuthUser {
@@ -39,6 +42,32 @@ export interface AuthUser {
   state: string;
   plan: string;
   credits_balance: number;
+  stripe_customer_id?: string | null;
+  stripe_subscription_id?: string | null;
+  subscription_status?: string | null;
+  cancel_at_period_end?: boolean;
+  current_period_end?: string | null;
+  email_verified_at?: string | null;
   avatar_key?: string | null;
   bio?: string | null;
+}
+
+export interface GuestAllowance {
+  guest_id: string;
+  date: string;
+  used: number;
+  limit: number;
+  remaining: number;
+  reset_at: string;
+  policy_accepted: boolean;
+  policy_version: string | null;
+  max_duration_seconds: number;
+  claimed: boolean;
+}
+
+export interface PolicyPayload {
+  version: string;
+  operator: string;
+  support_url: string;
+  documents: { id: string; name: string; version: string }[];
 }

@@ -7,7 +7,9 @@ interface Plan {
   id: string;
   name: string;
   price_usd: number;
-  monthly_credits: number;
+  credits: number;
+  monthly_credits?: number;
+  visible?: boolean;
 }
 interface Pack {
   id: string;
@@ -19,20 +21,43 @@ interface PlansResp {
   plans: Plan[];
   current: string;
   credits_balance: number;
+  subscription_status?: string | null;
+  cancel_at_period_end?: boolean;
+  current_period_end?: string | null;
   topup_credits: number;
+}
+interface PricingResp {
+  plans: Plan[];
+  packs: Pack[];
+  guest: {
+    daily_song_limit: number;
+    max_duration_seconds: number;
+    session_ttl_days: number;
+  };
+  policy_version: string;
 }
 
 const PERKS: Record<string, string[]> = {
-  free: ["1,000 signup credits", "10 credits per generation", "WAV downloads", "Community sharing"],
+  beginner: ["1,000 credits / month", "Guest allowance upgrade", "MP3 + WAV exports", "Private outputs"],
   pro: ["2,500 credits / month", "MP3 + WAV exports", "Artist profiles", "Mood presets & LLM lyrics"],
   premier: ["10,000 credits / month", "6-stem separation", "Priority queue", "Custom artist training"],
 };
 
 export default function PricingPage() {
   const qc = useQueryClient();
-  const plans = useQuery({ queryKey: ["billing-plans"], queryFn: () => api.get<PlansResp>("/api/v1/billing/plans") });
-  const packs = useQuery({ queryKey: ["billing-packs"], queryFn: () => api.get<{ packs: Pack[] }>("/api/v1/billing/packs") });
+  const pricing = useQuery({ queryKey: ["billing-pricing"], queryFn: () => api.get<PricingResp>("/api/v1/billing/pricing") });
   const me = useQuery({ queryKey: ["me"], queryFn: () => api.get<{ user: AuthUser }>("/api/v1/auth/me"), retry: false });
+  const signedIn = !!me.data?.user;
+  const plans = useQuery({
+    queryKey: ["billing-plans"],
+    queryFn: () => api.get<PlansResp>("/api/v1/billing/plans"),
+    enabled: signedIn,
+  });
+  const packs = useQuery({
+    queryKey: ["billing-packs"],
+    queryFn: () => api.get<{ packs: Pack[] }>("/api/v1/billing/packs"),
+    enabled: signedIn,
+  });
 
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
@@ -60,7 +85,10 @@ export default function PricingPage() {
     }
     const data = await res.json();
     if (!res.ok) toast(data?.error?.message || "Something went wrong");
-    else toast(path === "unsubscribe" ? "Back on the Free plan" : path === "topup" ? `+${data.added} credits added` : `${data.plan} plan active`);
+    else if (path === "unsubscribe") toast("Back on the Free plan");
+    else if (path === "cancel") toast("Cancellation scheduled for period end");
+    else if (path === "topup") toast(`+${data.added} credits added`);
+    else toast(`${data.plan} plan active`);
     qc.invalidateQueries({ queryKey: ["billing-plans"] });
     qc.invalidateQueries({ queryKey: ["me"] });
   };
@@ -84,8 +112,7 @@ export default function PricingPage() {
     window.location.href = data.url;
   };
 
-  const signedIn = !!me.data?.user;
-  const current = plans.data?.current || "free";
+  const current = plans.data?.current || me.data?.user?.plan || "free";
 
   return (
     <main className="page">
@@ -95,8 +122,14 @@ export default function PricingPage() {
           Simple credits, no surprises{signedIn ? ` · balance ${plans.data?.credits_balance?.toLocaleString() ?? "…"}` : ""}
         </span>
       </div>
+      {pricing.data && (
+        <p className="sub" style={{ marginTop: -4 }}>
+          Guests can create {pricing.data.guest.daily_song_limit} songs per UTC day up to{" "}
+          {Math.round(pricing.data.guest.max_duration_seconds / 60)} minutes. Beginner is $5/month for 1,000 credits.
+        </p>
+      )}
       <div className="stat-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
-        {(plans.data?.plans || []).map((p) => {
+        {(pricing.data?.plans || []).map((p) => {
           const isCurrent = p.id === current;
           return (
             <div key={p.id} className="card stat-card" style={p.id === "pro" ? { borderColor: "var(--accent)" } : undefined}>
@@ -108,21 +141,29 @@ export default function PricingPage() {
                     <li key={perk}>{perk}</li>
                   ))}
                 </ul>
-                {signedIn &&
-                  (isCurrent ? (
+                {signedIn ? (
+                  isCurrent ? (
                     p.id === "free" ? (
                       <button className="btn" disabled>Current plan</button>
                     ) : (
                       <span style={{ display: "inline-flex", gap: 8 }}>
                         <button className="btn" disabled>Current plan</button>
-                        <button className="btn btn-ghost" onClick={() => act("unsubscribe")}>Cancel</button>
+                        <button
+                          className="btn btn-ghost"
+                          onClick={() => act(me.data?.user?.stripe_subscription_id ? "cancel" : "unsubscribe")}
+                        >
+                          {me.data?.user?.stripe_subscription_id ? "Cancel at period end" : "Cancel"}
+                        </button>
                       </span>
                     )
                   ) : (
                     <button className="btn btn-primary" onClick={() => checkout({ kind: "plan", plan: p.id }, () => act("subscribe", { plan: p.id }))}>
                       Subscribe
                     </button>
-                  ))}
+                  )
+                ) : (
+                  <button className="btn" disabled>Sign in to subscribe</button>
+                )}
               </div>
             </div>
           );

@@ -28,7 +28,7 @@ class AdminPatchUser(BaseModel):
     role: str | None = Field(default=None, pattern=r"^(user|admin)$")
     state: str | None = Field(default=None, pattern=r"^(active|disabled)$")
     credits_balance: int | None = Field(default=None, ge=0)
-    plan: str | None = Field(default=None, pattern=r"^(free|pro|premier)$")
+    plan: str | None = Field(default=None, pattern=r"^(free|beginner|pro|premier)$")
 
 
 class AdminCreditAdjust(BaseModel):
@@ -105,11 +105,19 @@ def admin_create_user(payload: AdminCreateUser, request: Request) -> JSONRespons
 
 
 @router.patch("/admin/users/{user_id}")
-def admin_patch_user(user_id: str, payload: AdminPatchUser, request: Request) -> JSONResponse:
+def admin_patch_user(
+    user_id: str,
+    payload: AdminPatchUser,
+    request: Request,
+    admin: User = Depends(require_admin),
+) -> JSONResponse:
+    from ..audit import record_admin_audit
+
     with request.app.state.db.session() as session:
         user = session.get(User, user_id)
         if user is None:
             raise ApiError(404, "USER_NOT_FOUND", "User not found.")
+        changes = payload.model_dump(exclude_none=True)
         if payload.role is not None:
             user.role = payload.role
         if payload.state is not None:
@@ -119,6 +127,7 @@ def admin_patch_user(user_id: str, payload: AdminPatchUser, request: Request) ->
         if payload.plan is not None:
             user.plan = payload.plan
         user.updated_at = utcnow()
+        record_admin_audit(session, admin.id, "user.patch", "user", user.id, context_json=changes)
         session.commit()
         session.refresh(user)
     return JSONResponse(content={"user": user_payload(user)})
@@ -1311,6 +1320,7 @@ class AdminPricingItem(BaseModel):
     price_usd: int = Field(default=0, ge=0)
     credits: int = Field(default=0, ge=0)
     position: int = Field(default=0)
+    visible: bool = True
 
 
 class AdminPricingUpdate(BaseModel):
@@ -1325,8 +1335,19 @@ def admin_get_pricing(request: Request) -> JSONResponse:
         return JSONResponse(load_pricing(session))
 
 
+class AdminAbusePatch(BaseModel):
+    status: str = Field(pattern=r"^(open|reviewing|resolved|rejected)$")
+    decision: str | None = Field(default=None, max_length=200)
+    appeal_status: str | None = Field(default=None, max_length=40)
+
+
 @router.put("/admin/pricing")
-def admin_put_pricing(payload: AdminPricingUpdate, request: Request) -> JSONResponse:
+def admin_put_pricing(
+    payload: AdminPricingUpdate,
+    request: Request,
+    admin: User = Depends(require_admin),
+) -> JSONResponse:
+    from ..audit import record_admin_audit
     from ..models import Pricing
     from .billing import load_pricing
 
@@ -1341,5 +1362,191 @@ def admin_put_pricing(payload: AdminPricingUpdate, request: Request) -> JSONResp
             row.price_usd = item.price_usd
             row.credits = item.credits
             row.position = item.position
+            row.visible = item.visible
+        record_admin_audit(session, admin.id, "pricing.update", "pricing", None, context_json={"items": len(payload.items)})
         session.commit()
         return JSONResponse(load_pricing(session))
+
+
+@router.get("/admin/guests")
+def admin_list_guests(
+    request: Request,
+    q: str | None = Query(default=None, max_length=120),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> JSONResponse:
+    from datetime import date
+
+    from ..models import GuestQuotaCounter, GuestSession, Job
+
+    today = utcnow().date()
+    with request.app.state.db.session() as session:
+        stmt = select(GuestSession)
+        if q:
+            like = f"%{q.strip()}%"
+            stmt = stmt.where(or_(GuestSession.id.like(like), GuestSession.claimed_user_id.like(like)))
+        total = session.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
+        rows = list(session.execute(stmt.order_by(GuestSession.created_at.desc()).limit(limit).offset(offset)).scalars())
+        guest_ids = [g.id for g in rows]
+        counters = {}
+        jobs = {}
+        if guest_ids:
+            for gid, used in session.execute(
+                select(GuestQuotaCounter.guest_id, GuestQuotaCounter.used).where(
+                    GuestQuotaCounter.guest_id.in_(guest_ids), GuestQuotaCounter.day == today
+                )
+            ).all():
+                counters[gid] = int(used)
+            for gid, cnt in session.execute(
+                select(func.replace(Job.owner_id, "g_", ""), func.count())
+                .where(Job.owner_id.in_([f"g_{gid}" for gid in guest_ids]))
+                .group_by(Job.owner_id)
+            ).all():
+                jobs[gid] = int(cnt)
+        users = {}
+        claimed_ids = [g.claimed_user_id for g in rows if g.claimed_user_id]
+        if claimed_ids:
+            for uid, username in session.execute(select(User.id, User.username).where(User.id.in_(claimed_ids))).all():
+                users[uid] = username
+    return JSONResponse(
+        {
+            "guests": [
+                {
+                    "id": g.id,
+                    "created_at": g.created_at.isoformat() if g.created_at else None,
+                    "expires_at": g.expires_at.isoformat() if g.expires_at else None,
+                    "policy_accepted": g.policy_accepted_at is not None,
+                    "policy_version": g.policy_version,
+                    "marketing_consent": g.marketing_consent,
+                    "claimed_user_id": g.claimed_user_id,
+                    "claimed_username": users.get(g.claimed_user_id),
+                    "jobs_count": jobs.get(g.id, 0),
+                    "quota_used_today": counters.get(g.id, 0),
+                    "quota_limit": request.app.state.settings.guest_daily_song_limit,
+                }
+                for g in rows
+            ],
+            "total": total,
+            "date": today.isoformat(),
+        }
+    )
+
+
+@router.get("/admin/policies")
+def admin_policies(request: Request) -> JSONResponse:
+    from ..models import PolicyAcceptance
+    from ..policies import current_policy_payload
+
+    with request.app.state.db.session() as session:
+        payload = current_policy_payload(session, request.app.state.settings)
+        acceptances = list(
+            session.execute(
+                select(PolicyAcceptance).order_by(PolicyAcceptance.accepted_at.desc()).limit(50)
+            ).scalars()
+        )
+    return JSONResponse(
+        {
+            **payload,
+            "acceptances": [
+                {
+                    "subject_type": a.subject_type,
+                    "subject_id": a.subject_id,
+                    "policy_version": a.policy_version,
+                    "marketing_consent": a.marketing_consent,
+                    "accepted_at": a.accepted_at.isoformat() if a.accepted_at else None,
+                }
+                for a in acceptances
+            ],
+        }
+    )
+
+
+@router.get("/admin/audits")
+def admin_audits(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> JSONResponse:
+    from ..models import AdminAudit
+
+    with request.app.state.db.session() as session:
+        rows = list(session.execute(select(AdminAudit).order_by(AdminAudit.created_at.desc()).limit(limit).offset(offset)).scalars())
+    return JSONResponse(
+        {
+            "audits": [
+                {
+                    "id": a.id,
+                    "admin_id": a.admin_id,
+                    "action": a.action,
+                    "target_type": a.target_type,
+                    "target_id": a.target_id,
+                    "reason": a.reason,
+                    "context_json": a.context_json,
+                    "created_at": a.created_at.isoformat() if a.created_at else None,
+                }
+                for a in rows
+            ]
+        }
+    )
+
+
+@router.get("/admin/abuse-reports")
+def admin_abuse_reports(
+    request: Request,
+    status: str | None = Query(default=None, max_length=40),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> JSONResponse:
+    from ..models import AbuseReport
+
+    with request.app.state.db.session() as session:
+        stmt = select(AbuseReport)
+        if status:
+            stmt = stmt.where(AbuseReport.status == status)
+        rows = list(session.execute(stmt.order_by(AbuseReport.created_at.desc()).limit(limit).offset(offset)).scalars())
+    return JSONResponse(
+        {
+            "reports": [
+                {
+                    "id": r.id,
+                    "reporter_owner_id": r.reporter_owner_id,
+                    "subject_type": r.subject_type,
+                    "subject_id": r.subject_id,
+                    "reason": r.reason,
+                    "details": r.details,
+                    "status": r.status,
+                    "decision": r.decision,
+                    "appeal_status": r.appeal_status,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+                for r in rows
+            ]
+        }
+    )
+
+
+@router.patch("/admin/abuse-reports/{report_id}")
+def admin_patch_abuse_report(
+    report_id: str,
+    payload: AdminAbusePatch,
+    request: Request,
+    admin: User = Depends(require_admin),
+) -> JSONResponse:
+    from ..audit import record_admin_audit
+    from ..models import AbuseReport
+
+    with request.app.state.db.session() as session:
+        report = session.get(AbuseReport, report_id)
+        if report is None:
+            raise ApiError(404, "REPORT_NOT_FOUND", "Abuse report not found.")
+        report.status = payload.status
+        if payload.decision is not None:
+            report.decision = payload.decision
+        if payload.appeal_status is not None:
+            report.appeal_status = payload.appeal_status
+        report.decided_by = admin.id
+        report.decided_at = utcnow()
+        report.updated_at = utcnow()
+        record_admin_audit(session, admin.id, "abuse.update", "abuse_report", report.id, reason=payload.status)
+        session.commit()
+    return JSONResponse({"id": report.id, "status": report.status, "decision": report.decision})
