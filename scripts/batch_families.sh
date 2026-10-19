@@ -18,14 +18,20 @@ log(){ echo "[$(date +%H:%M:%S)] $*"; }
 hub_vast(){ $SSH "$HUB" "export VAST_API_KEY=\$(grep -E '^OAL_VAST_API_KEY=' ~/oal-backend/.env.backend | cut -d= -f2-); $*"; }
 
 preprocess(){  # $1=family
-    local f="$1"
+    local f="$1" rc=0
     log "preprocess $f"
+    rm -rf "$SP/tensors_${f}" "$SP/tensors-${f}.tar.zst"
     sudo -n docker run --rm --gpus device=0 -v /mnt/truenas:/mnt/truenas:ro -v "$SP":/work \
         -e DJ=/work/${f}_dataset.json -e OUT=/work/tensors_${f} --entrypoint sh house-train:ep5 \
         -c "cd /opt/acestep && (apt-get update -qq && apt-get install -y -qq ffmpeg >/dev/null 2>&1 || true) && uv run --frozen --no-sync python /work/run_preprocess.py" \
-        > "$SP/preproc_${f}.log" 2>&1
-    ( cd "$SP" && tar --transform "s,^tensors_${f},tensors," -cf - tensors_${f} | zstd -q -T0 -f -o "tensors-${f}.tar.zst" )
-    sshpass -p "$HUBPW" rsync -a -e "ssh -o StrictHostKeyChecking=no" "$SP/tensors-${f}.tar.zst" "$HUB:$HUBST/"
+        > "$SP/preproc_${f}.log" 2>&1 || rc=$?
+    if [ "$rc" -ne 0 ] || ! grep -q PREPROCESS_RESULT "$SP/preproc_${f}.log"; then
+        log "preprocess $f FAILED (rc=$rc)"
+        rm -f "$SP/tensors-${f}.tar.zst"
+        return 1
+    fi
+    ( cd "$SP" && tar --transform "s,^tensors_${f},tensors," -cf - tensors_${f} | zstd -q -T0 -f -o "tensors-${f}.tar.zst" ) || return 1
+    sshpass -p "$HUBPW" rsync -a -e "ssh -o StrictHostKeyChecking=no" "$SP/tensors-${f}.tar.zst" "$HUB:$HUBST/" || return 1
     log "preprocess $f done: $(grep PREPROCESS_RESULT "$SP/preproc_${f}.log" | tail -1)"
 }
 
@@ -42,6 +48,9 @@ for f in "$@"; do
     if [ -f "$CIDF" ]; then
         old=$(cat "$CIDF"); [ -n "$old" ] && hub_vast "$HOME/OpenAudioLab/.venv/bin/vastai destroy instance $old -y >/dev/null 2>&1"
     fi
+
+    # clear stale markers so a new run is not judged by the previous attempt
+    $SSH "$HUB" "rm -f $HUBST/$RUN/DONE $HUBST/$RUN/FAIL $HUBST/$RUN/status.json" >/dev/null 2>&1 || true
 
     # create new instance for this family (env built on the hub; key read there)
     raw=$($SSH "$HUB" bash -s "$f" "$RUN" "$HUBST" "$OFFER" "$IMAGE" "$DISK" <<'REMOTE'

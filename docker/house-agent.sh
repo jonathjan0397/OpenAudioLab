@@ -113,8 +113,11 @@ try:
     d = json.load(open("/tmp/status.json"))["data"] or {}
 except Exception:
     print("WAIT -"); raise SystemExit
+status = str(d.get("status") or "")
 if d.get("error"):
     print("ERROR " + str(d["error"])[:200].replace("\n", " "))
+elif "Training failed" in status:
+    print("ERROR " + status[:200].replace("\n", " "))
 elif not d.get("is_training"):
     print("DONE -")
 else:
