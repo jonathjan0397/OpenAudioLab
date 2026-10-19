@@ -8,10 +8,10 @@ style. LoRA tags and trending track tags are merged in at request time.
 
 CHEATSHEET: dict[str, list[str]] = {
     "Genres": [
-        "pop", "indie pop", "rock", "alternative rock", "punk rock", "metal",
-        "hip hop", "rap", "trap", "R&B", "soul", "funk", "jazz", "blues",
+        "pop", "indie pop", "rock", "alternative rock", "punk rock", "punk", "metal",
+        "hip hop", "rap", "trap", "R&B", "soul", "gospel", "funk", "jazz", "blues",
         "lo-fi", "electronic", "EDM", "house", "techno", "synthwave",
-        "ambient", "classical", "orchestral", "folk", "country", "reggae",
+        "ambient", "classical", "orchestral", "film score", "folk", "country", "reggae",
         "K-pop", "J-pop", "Afrobeat", "dream pop", "shoegaze", "bossa nova",
     ],
     "Moods": [

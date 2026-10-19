@@ -104,13 +104,14 @@ def llm_draft(payload: DraftRequest, request: Request, owner_id: str = Depends(o
         user += " Instrumental (no lead vocals)."
     user += f"\nAvailable style tags (prefer these): {vocab}."
     text = _ask(request, DRAFT_SYSTEM, user, max_tokens=700)
-    lyrics, style, title = text.strip(), "", ""
+    lyrics, style, mood, title = text.strip(), "", "", ""
     try:
         start, end = text.index("{"), text.rindex("}") + 1
         parsed = json.loads(text[start:end])
         lyrics = str(parsed.get("lyrics", "")).strip() or text.strip()
         style = str(parsed.get("style", "")).strip()
+        mood = str(parsed.get("mood", "")).strip().lower()
         title = str(parsed.get("title", "")).strip()[:200]
     except (ValueError, json.JSONDecodeError):
         pass
-    return JSONResponse({"lyrics": lyrics, "style": style, "title": title})
+    return JSONResponse({"lyrics": lyrics, "style": style, "mood": mood, "title": title})

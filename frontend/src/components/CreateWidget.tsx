@@ -34,16 +34,6 @@ interface SuggestResp {
   tags: { tag: string; source: string }[];
 }
 
-const DURATIONS = [
-  { value: 30, label: "~30 seconds" },
-  { value: 60, label: "~1 minute" },
-  { value: 120, label: "~2 minutes" },
-  { value: 180, label: "~3 minutes" },
-  { value: 240, label: "~4 minutes" },
-];
-
-const MOODS = ["Hopeful", "Melancholic", "Energetic", "Calm", "Dreamy", "Dark"];
-
 const KEYS = [
   "C Major", "G Major", "D Major", "A Major", "E Major", "F Major", "Bb Major",
   "Am", "Em", "Bm", "F#m", "Dm", "Cm", "Gm",
@@ -103,9 +93,9 @@ export default function CreateWidget({
   const [style, setStyle] = useState("");
   const [lyrics, setLyrics] = useState("");
   const [drafted, setDrafted] = useState(false);
-  const [duration, setDuration] = useState(60);
+  const [duration] = useState(120);
   const [instrumental, setInstrumental] = useState(false);
-  const [mood, setMood] = useState("Hopeful");
+  const [mood, setMood] = useState("");
   const [gender, setGender] = useState("");
   const [loraId, setLoraId] = useState("");
   const [bpm, setBpm] = useState("");
@@ -132,7 +122,7 @@ export default function CreateWidget({
 
   const draft = useMutation({
     mutationFn: () =>
-      api.post<{ lyrics: string; style: string; title?: string }>("/api/v1/llm/draft", {
+      api.post<{ lyrics: string; style: string; mood?: string; title?: string }>("/api/v1/llm/draft", {
         prompt: desc,
         duration_seconds: duration,
         instrumental,
@@ -141,6 +131,7 @@ export default function CreateWidget({
     onSuccess: (d) => {
       setLyrics(d.lyrics);
       setStyle(d.style);
+      setMood(d.mood || "");
       setDraftTitle(d.title || "");
       setDrafted(true);
       setDraftOpen(true);
@@ -158,7 +149,8 @@ export default function CreateWidget({
         const r = await api.post<{ text: string }>("/api/v1/llm/lyrics", { prompt: desc, mode: "write" });
         finalLyrics = r.text;
       }
-      const controls: Record<string, unknown> = { mood: mood.toLowerCase() };
+      const controls: Record<string, unknown> = {};
+      if (mood) controls.mood = mood.toLowerCase();
       if (!instrumental && gender) controls.gender = gender;
       if (bpm) controls.bpm = Number(bpm);
       if (keyScale) controls.key_scale = keyScale;
@@ -176,7 +168,7 @@ export default function CreateWidget({
           ...((title.trim() || draftTitle) ? { title: (title.trim() || draftTitle).slice(0, 200) } : {}),
           ...(finalLyrics && !instrumental ? { lyrics: finalLyrics, lyrics_origin: "frontend_llm" } : {}),
           controls,
-          duration_seconds: mode === "extend" ? Math.min(duration + 60, 600) : duration,
+          duration_seconds: mode === "create" ? undefined : mode === "extend" ? Math.min(duration + 60, 600) : duration,
           ...(mode === "remix" ? { seed: Math.floor(Math.random() * 1_000_000_000) } : {}),
           instrumental,
           ...(loraId ? { lora_id: loraId } : {}),
@@ -421,24 +413,6 @@ export default function CreateWidget({
                   </div>
                 </div>
               </div>
-              <div className="field ctrl">
-                <div className="field">
-                  <label>Mood</label>
-                  <select value={mood} onChange={(e) => setMood(e.target.value)}>
-                    {MOODS.map((m) => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="field ctrl">
-                <div className="field">
-                  <label>Duration</label>
-                  <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-                    {DURATIONS.map((d) => (
-                      <option key={d.value} value={d.value}>{d.label}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
               {showStyle && (
                 <div className="field ctrl">
                   <div className="field">
@@ -461,16 +435,6 @@ export default function CreateWidget({
         <div className="create-controls">
           <div className="field ctrl">
             <div className="field">
-              <label>Mood</label>
-              <select value={mood} onChange={(e) => setMood(e.target.value)}>
-                {MOODS.map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="field ctrl">
-            <div className="field">
               <label>Vocals</label>
               <div className="segmented">
                 <button type="button" className={!instrumental ? "active" : ""} onClick={() => setInstrumental(false)}>Vocal</button>
@@ -490,18 +454,6 @@ export default function CreateWidget({
               </div>
             </div>
           )}
-          <div className="field ctrl">
-            <div className="field">
-              <label>Duration</label>
-              <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-                {DURATIONS.map((d) => (
-                  <option key={d.value} value={d.value}>
-                    {d.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
           {showStyle && (
             <div className="field ctrl">
               <div className="field">
