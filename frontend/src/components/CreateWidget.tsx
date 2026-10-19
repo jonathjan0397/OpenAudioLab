@@ -58,7 +58,7 @@ const QUALITY = [
   { value: 32, label: "Fine (slow)" },
 ];
 
-const DRAFT_KEY = "oal-create-draft-v2";
+export const DRAFT_KEY = "oal-create-draft-v2";
 
 interface DraftSnapshot {
   title: string;

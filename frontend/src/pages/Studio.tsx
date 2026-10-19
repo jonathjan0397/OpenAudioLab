@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, AuthUser } from "../api";
-import CreateWidget from "../components/CreateWidget";
+import CreateWidget, { DRAFT_KEY } from "../components/CreateWidget";
 import ArtworkTile from "../components/ArtworkTile";
 import Waveform from "../components/Waveform";
 import { usePlayer } from "../components/PlayerContext";
@@ -72,6 +72,7 @@ function tokenOf(url: string): string | undefined {
 export default function StudioPage() {
   const qc = useQueryClient();
   const player = usePlayer();
+  const navigate = useNavigate();
   const me = useQuery({
     queryKey: ["me"],
     queryFn: () => api.get<{ user: AuthUser }>("/api/v1/auth/me"),
@@ -178,6 +179,36 @@ export default function StudioPage() {
       api.patch(`/api/v1/artist-profiles/${id}`, body, { "If-Match": etag }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["artist-profiles"] }),
   });
+
+  const reuseFromManifest = (m: Record<string, any> | undefined) => {
+    if (!m) return;
+    const req = m.requested || {};
+    const res = m.resolved || {};
+    const controls = req.controls || {};
+    localStorage.setItem(
+      DRAFT_KEY,
+      JSON.stringify({
+        title: req.title || "",
+        desc: controls.description || req.music_description || "",
+        styles: controls.styles || "",
+        lyrics: res.lyrics || "",
+        mood: controls.mood || "",
+        instrumental: !!req.instrumental,
+        gender: controls.gender || "",
+        loraId: req.lora_id || "",
+        bpm: controls.bpm || "",
+        keyScale: controls.key_scale || "",
+        language: controls.vocal_language || "",
+        shift: controls.shift ?? 1,
+        quality: controls.inference_steps ?? 8,
+        variations: controls.variations ?? 1,
+        duration: req.duration_seconds ?? 120,
+        drafted: !!res.lyrics,
+        draftOpen: true,
+      })
+    );
+    navigate("/");
+  };
 
   const rerollSong = (s: WorkspaceSong, sameSeed: boolean) => {
     const parts = [s.description || "", ...(s.style_tags || [])].filter(Boolean);
@@ -423,6 +454,9 @@ export default function StudioPage() {
                         <pre className="mono" style={{ margin: 0, whiteSpace: "pre-wrap", color: "var(--muted)" }}>
                           {JSON.stringify(manifestQuery.data.manifest?.requested?.controls || {}, null, 2)}
                         </pre>
+                        <div>
+                          <button className="btn" onClick={() => reuseFromManifest(manifestQuery.data.manifest)}>Reuse recipe</button>
+                        </div>
                       </div>
                     )}
                   </div>
