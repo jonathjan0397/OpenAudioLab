@@ -81,6 +81,18 @@ Statuses:
 | `lm_repetition_penalty` | float 1.0 | not-wired | 5Hz planning |
 | `lm_negative_prompt` | str "NO USER INPUT" | not-wired | 5Hz planning |
 
+## Source conditioning (Phase 2 — implemented + engine-verified)
+
+`src_audio_path` / `reference_audio_path` are now forwarded by the adapter. The pinned
+engine's `release_task_audio_paths.validate_audio_path` **rejects absolute paths outside
+the system temp dir** (and any `..` traversal), so the worker stages owned source audio
+under `OAL_ASSET_STAGE_DIR` (default `/tmp/oal-asset-stage`) — a content-hashed file the
+co-located ACE-Step server can read — and passes that absolute temp path. Browser clients
+only ever send owned `asset_id`s; ownership is checked at admission and re-checked at
+staging. Verified end-to-end at ca1e85f on the deployed Turbo model: a `cover` job with
+`task_type=cover` + a real staged `src_audio_path` produced a real 15 s WAV (the source was
+honored); `extract/lego/complete` remain base-model-only and are not offered.
+
 ## Controls named in the spec but NOT present in the `/release_task` REST model
 
 These live only at `GenerationParams`/Gradio level and therefore require a **reviewed typed

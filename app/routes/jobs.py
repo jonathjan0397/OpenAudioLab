@@ -82,6 +82,52 @@ def _get_owned_job(session: Session, job_id: str, owner_id: str) -> Job:
     return job
 
 
+def _validate_owned_audio_asset(session: Session, owner_id: str, asset_id: str, role: str) -> None:
+    from ..models import Asset
+
+    asset = session.get(Asset, asset_id)
+    if asset is None or asset.owner_id != owner_id or asset.deleted_at is not None:
+        raise ApiError(404, "SOURCE_NOT_FOUND", f"Owned {role} audio asset not found.")
+    if not (asset.mime or "").startswith("audio/"):
+        raise ApiError(422, "SOURCE_INVALID", f"The {role} asset is not an audio recording.")
+
+
+def _validate_source_task(session: Session, owner_id: str, payload: GenerateJobRequest, release) -> None:
+    """Validate the selected task and any referenced source/reference audio.
+
+    Public task names map to verified upstream tasks; ownership is enforced at every
+    referenced asset before the job is admitted (browser never supplies engine paths).
+    """
+    task_type = payload.task_type or "text2music"
+    if task_type not in release.supported_task_types:
+        raise ApiError(
+            422,
+            "TASK_UNSUPPORTED",
+            f"Task '{task_type}' is not supported by this model.",
+            {"requested_task": task_type, "supported_task_types": list(release.supported_task_types)},
+        )
+    if task_type in {"cover", "cover-nofsq", "repaint"} and not payload.src_asset_id:
+        raise ApiError(
+            422,
+            "SOURCE_REQUIRED",
+            f"Task '{task_type}' requires an owned source audio asset.",
+            {"task_type": task_type},
+        )
+    if payload.src_asset_id:
+        _validate_owned_audio_asset(session, owner_id, payload.src_asset_id, "source")
+    if payload.reference_asset_id:
+        _validate_owned_audio_asset(session, owner_id, payload.reference_asset_id, "reference")
+    if payload.repainting_end is not None:
+        start = payload.repainting_start or 0.0
+        if payload.repainting_end <= start:
+            raise ApiError(
+                422,
+                "SOURCE_REGION_INVALID",
+                "Repaint region must satisfy 0 <= start < end.",
+                {"repainting_start": start, "repainting_end": payload.repainting_end},
+            )
+
+
 def _validate_request(payload: GenerateJobRequest, max_lyrics_chars: int) -> None:
     if payload.operation not in SUPPORTED_OPERATIONS:
         raise ApiError(
@@ -265,6 +311,7 @@ def create_job(
                     "The registry LoRA was trained for a different base model.",
                     {"lora_base_model_id": lora.base_model_id, "model_id": payload.model_id},
                 )
+        _validate_source_task(session, owner_id, payload, MODEL_RELEASES[payload.model_id])
         existing = session.execute(
             select(IdempotencyRecord).where(
                 IdempotencyRecord.owner_id == owner_id,

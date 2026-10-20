@@ -111,6 +111,24 @@ owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_
 - Added a real frontend test runner (`vitest`) with 9 serializer tests across modes.
 - Tests: backend 212 passed; frontend `vitest` 9 passed; `tsc -b && vite build` clean.
 
+### Roadmap Phase 2 — source-conditioned cover/repaint (backend) (2026-10-20)
+- `GenerateJobRequest` gains typed `task_type`, `src_asset_id`, `reference_asset_id`,
+  `audio_cover_strength`, `cover_noise_strength`, and repaint fields (bounds/mode/strength/chunk_mask).
+- `jobs.py` validates task support against the model release (`TASK_UNSUPPORTED`), requires an
+  owned source for cover/cover-nofsq/repaint (`SOURCE_REQUIRED`), enforces asset ownership
+  (`SOURCE_NOT_FOUND` / `SOURCE_INVALID`), and repaint region bounds (`SOURCE_REGION_INVALID`) —
+  no reservation on rejection.
+- `engine_worker` stages the owner's source audio to a content-hashed file under the engine-allowed
+  temp dir (`OAL_ASSET_STAGE_DIR`, default `/tmp/oal-asset-stage`) and forwards `src_audio_path` /
+  `reference_audio_path` / `task_type` / cover + repaint fields via `build_payload`.
+- Durable manifest captures task_type/src/reference/cover/repaint lineage.
+- Engine-verified on the deployed Turbo model at ca1e85f: a real cover with a staged source produced
+  source-honored audio (the engine only accepts temp-dir or relative source paths — not absolute
+  paths elsewhere).
+- Tests: backend 221 passed (new `tests/test_source_conditioned.py`). extract/lego/complete remain
+  base-family only (out of scope for the Turbo worker); Studio source-picker UI + repaint audition
+  are the next Phase 2 step.
+
 ## [Milestone 5] - 2026-10-15
 
 Artist profiles and real LoRA fine-tuning on hardware. Branch

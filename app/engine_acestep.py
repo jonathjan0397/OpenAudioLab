@@ -126,6 +126,7 @@ class AceStepAdapter:
         seed: int | None,
         duration_seconds: int | None,
         controls: dict[str, Any] | None = None,
+        source: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         controls = controls or {}
         payload: dict[str, Any] = {
@@ -162,6 +163,23 @@ class AceStepAdapter:
             payload["use_random_seed"] = True
         if duration_seconds is not None:
             payload["audio_duration"] = float(duration_seconds)
+        # Source-conditioned fields (Phase 2): explicit mapping of OAL request
+        # names onto the pinned ACE-Step REST GenerateMusicRequest fields.
+        for key in (
+            "task_type",
+            "src_audio_path",
+            "reference_audio_path",
+            "audio_code_string",
+            "audio_cover_strength",
+            "cover_noise_strength",
+            "repainting_start",
+            "repainting_end",
+            "repaint_mode",
+            "repaint_strength",
+            "chunk_mask_mode",
+        ):
+            if source and source.get(key) is not None:
+                payload[key] = source[key]
         if not self.thinking:
             # Avoid implicit 5Hz LM metadata calls when running DiT-only.
             payload["use_cot_caption"] = False

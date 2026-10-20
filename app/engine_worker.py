@@ -120,6 +120,17 @@ class AceStepProcess:
                 pass
 
 
+def _asset_ext(mime: str) -> str:
+    return {
+        "audio/wav": ".wav",
+        "audio/mpeg": ".mp3",
+        "audio/mp3": ".mp3",
+        "audio/flac": ".flac",
+        "audio/ogg": ".ogg",
+        "audio/opus": ".opus",
+    }.get((mime or "").lower(), ".wav")
+
+
 def _is_oom_message(message: str | None) -> bool:
     text = (message or "").lower()
     return "out of memory" in text or "oom" in text or "cuda oom" in text
@@ -298,7 +309,63 @@ class EngineWorker:
             seed=request.get("seed"),
             duration_seconds=request.get("duration_seconds"),
             controls=request.get("controls"),
+            source=self._source_for(job, request),
         )
+
+    def _source_for(self, job: Job, request: dict) -> dict | None:
+        """Map owner-validated source/task fields onto upstream REST names.
+
+        Returns None for a plain text2music request so the payload is byte-for-byte
+        the pre-Phase-2 shape.
+        """
+        task_type = request.get("task_type") or "text2music"
+        source: dict = {"task_type": task_type}
+        src_id = request.get("src_asset_id")
+        if src_id:
+            path = self._stage_asset(job.owner_id, src_id, "src")
+            if path:
+                source["src_audio_path"] = path
+        ref_id = request.get("reference_asset_id")
+        if ref_id:
+            path = self._stage_asset(job.owner_id, ref_id, "reference")
+            if path:
+                source["reference_audio_path"] = path
+        for key in (
+            "audio_cover_strength",
+            "cover_noise_strength",
+            "repainting_start",
+            "repainting_end",
+            "repaint_mode",
+            "repaint_strength",
+            "chunk_mask_mode",
+        ):
+            if request.get(key) is not None:
+                source[key] = request[key]
+        meaningful = task_type != "text2music" or {
+            "src_audio_path", "reference_audio_path", "audio_cover_strength",
+            "cover_noise_strength", "repainting_start", "repainting_end",
+            "repaint_mode", "repaint_strength", "chunk_mask_mode",
+        } & source.keys()
+        return source if meaningful else None
+
+    def _stage_asset(self, owner_id: str, asset_id: str, role: str) -> str | None:
+        """Resolve an owned asset to a node-local path the co-located server can read.
+
+        Ownership is re-checked here (defense in depth); content-hash filename makes
+        the staged file immutable + cache-friendly, mirroring _materialize_adapter.
+        """
+        from .models import Asset
+
+        with self.db.session() as session:
+            asset = session.get(Asset, asset_id)
+        if asset is None or asset.owner_id != owner_id or asset.deleted_at is not None:
+            return None
+        target_dir = Path(self.settings.asset_stage_dir)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / f"{role}-{asset.sha256}{_asset_ext(asset.mime)}"
+        if not target.is_file():
+            target.write_bytes(self.storage.get(asset.storage_key).body)
+        return str(target)
 
     def _draining(self) -> bool:
         """Admin drain flag: stop claiming new jobs (re-checked every 5s)."""

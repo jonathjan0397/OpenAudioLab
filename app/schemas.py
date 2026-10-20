@@ -30,6 +30,18 @@ class GenerateJobRequest(StrictModel):
     duration_seconds: int | None = Field(default=None, ge=1, le=600)
     seed: int | None = Field(default=None, ge=0, le=2**63 - 1)
     controls: dict[str, Any] = Field(default_factory=dict)
+    # Source-conditioned generation (Phase 2). Public OAL names map explicitly to
+    # the pinned ACE-Step REST fields (see docs/ACE_STEP_CONTROL_PARITY.md).
+    task_type: str | None = None
+    src_asset_id: str | None = None
+    reference_asset_id: str | None = None
+    audio_cover_strength: float | None = Field(default=None, ge=0.0, le=1.0)
+    cover_noise_strength: float | None = Field(default=None, ge=0.0, le=1.0)
+    repainting_start: float | None = Field(default=None, ge=0.0)
+    repainting_end: float | None = Field(default=None, ge=0.0)
+    repaint_mode: str | None = Field(default=None, max_length=20)
+    repaint_strength: float | None = Field(default=None, ge=0.0, le=1.0)
+    chunk_mask_mode: str | None = Field(default=None, max_length=20)
     outputs: list[OutputOption] = Field(default_factory=lambda: ["mix_wav", "mix_mp3"])
     artist_profile_version_id: str | None = None
     lora_id: str | None = None

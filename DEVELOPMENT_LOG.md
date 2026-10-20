@@ -379,3 +379,37 @@ caption fallback, seed omission). `tsc -b && vite build` clean.
 Scope: Phase 1 only; not merged to `master`, not deployed. Next per plan: Phase 2 (Turbo-native
 cover/remix/repaint with the `_stage_asset` private-path pattern + real-audio acceptance on the
 baseline GPU).
+
+## 2026-10-20 — Roadmap Phase 2: source-conditioned cover/repaint (backend) (branch `feat/phase2-source-conditioned`)
+
+Stacked on the Phase 1 branch (not deployed; Phase 1 kept on branch per owner).
+
+Schema (`app/schemas.py`): typed `task_type`, `src_asset_id`, `reference_asset_id`,
+`audio_cover_strength`, `cover_noise_strength`, `repainting_start/end`, `repaint_mode`,
+`repaint_strength`, `chunk_mask_mode`.
+
+Admission (`app/routes/jobs.py`): `_validate_source_task` checks task support vs the model
+release, requires an owned source for cover/cover-nofsq/repaint, verifies each referenced
+asset is owned + audio (re-checks on cross-owner/deleted), and enforces region bounds. Strict
+rejections: TASK_UNSUPPORTED / SOURCE_REQUIRED / SOURCE_NOT_FOUND / SOURCE_INVALID /
+SOURCE_REGION_INVALID, all before any reservation.
+
+Worker (`app/engine_worker.py`): `_payload_for` -> `_source_for` builds the upstream source map
+(returns None for plain text2music so the payload is unchanged) and `_stage_asset` resolves an
+owned asset to a content-hashed local path via object storage, re-checking ownership.
+`engine_acestep.build_payload` forwards the mapped fields. `orchestration._generation_manifest`
+records task/source/region lineage.
+
+Key engine finding (verified against the deployed worker at ca1e85f): `release_task_audio_paths.
+validate_audio_path` rejects absolute paths outside the system temp dir and any `..`. So the first
+cover attempt with `/opt/acestep/asset-stage/src.wav` failed with "absolute audio file paths are
+not allowed"; staging under `/tmp` (config default now `OAL_ASSET_STAGE_DIR=/tmp/oal-asset-stage`)
+succeeded. A real `task_type=cover` + temp-staged `src_audio_path` produced a real 15 s source-honored
+WAV from the deployed Turbo/house model — confirming the model+engine path, not just our glue.
+
+Verification: backend `pytest 221 passed` (new tests/test_source_conditioned.py: adapter mapping,
+plain text2music passthrough, TASK_UNSUPPORTED/SOURCE_REQUIRED/SOURCE_NOT_FOUND, owned-source
+admission + manifest lineage, temp staging writes content-hashed file, cross-owner deny).
+
+Next (Phase 2 UI): Studio "Remix/Repaint" source picker + region selection + A/B; then repaint/
+extension real-audio gates. Not merged/deployed.
