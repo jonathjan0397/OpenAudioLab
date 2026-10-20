@@ -258,6 +258,28 @@ class EngineWorker:
             self._touch_heartbeat()
             time.sleep(5)
 
+    def _attempt_heartbeat_thread(
+        self, attempt_id: str, lease_token: str
+    ) -> tuple[threading.Thread, threading.Event]:
+        # Keep the attempt's DB lease AND the container heartbeat file fresh for the
+        # WHOLE attempt, including engine start/swap. XL (4B) checkpoint load + int8
+        # quantization can exceed lease_seconds (30), and the poll loop only beats
+        # AFTER submit -- so without this the reconciler falsely marks a live, loading
+        # attempt "interrupted" and the job dies with MAX_ATTEMPTS. Self-terminates
+        # once the attempt finishes (heartbeat() returns False on a closed lease).
+        stop = threading.Event()
+
+        def loop() -> None:
+            interval = max(1, self.settings.lease_seconds // 3)
+            while not stop.wait(interval):
+                self._touch_heartbeat()
+                if not heartbeat(self.db, attempt_id, lease_token):
+                    return
+
+        thread = threading.Thread(target=loop, daemon=True)
+        thread.start()
+        return thread, stop
+
     def _training_busy(self) -> bool:
         """True when training work is queued or a run is active on the server.
 
@@ -509,6 +531,7 @@ class EngineWorker:
         if claim is None:
             return True
         claimed_job, attempt_id, lease_token = claim
+        hb_thread, hb_stop = self._attempt_heartbeat_thread(attempt_id, lease_token)
         with self.db.session() as session:
             _claimed = get_job_by_id(session, claimed_job)
             target_model = self._target_engine_model(dict(_claimed.request_json or {}))
@@ -519,6 +542,7 @@ class EngineWorker:
                 self.engine_process.ensure_running(model=target_model)
             except EngineError as exc:
                 log.warning("engine start/swap failed for job %s (%s); requeueing", job_id, exc.code)
+                hb_stop.set()
                 self._mark_unhealthy(exc.code, exc.message)
                 self._requeue(claimed_job, attempt_id, lease_token)
                 time.sleep(5)
@@ -568,6 +592,7 @@ class EngineWorker:
         try:
             submit = self.adapter.submit(payload)
         except EngineError as exc:
+            hb_stop.set()
             if exc.code == "ENGINE_BUSY":
                 self._requeue(claimed_job, attempt_id, lease_token)
                 return True
@@ -580,6 +605,7 @@ class EngineWorker:
         try:
             return self._run_generation(claimed_job, attempt_id, lease_token, submit, payload)
         finally:
+            hb_stop.set()
             if profile_path:
                 try:
                     self.adapter.unload_lora()

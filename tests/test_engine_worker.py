@@ -210,3 +210,22 @@ def test_payload_falls_back_to_raw_controls_without_admission(orch) -> None:
     )
     payload = worker._payload_for(job)
     assert payload["controls"] == {"inference_steps": 50}
+
+
+def test_attempt_heartbeat_thread_beats_during_setup(monkeypatch, orch) -> None:
+    # Regression: the XL swap/load happens after claim but BEFORE the poll loop, so a
+    # dedicated heartbeat thread must keep the lease alive across setup (else the
+    # reconciler falsely marks a live loading attempt "interrupted" -> MAX_ATTEMPTS).
+    from app import engine_worker as ew
+    beats: list[str] = []
+    monkeypatch.setattr(ew, "heartbeat", lambda db, aid, tok: (beats.append(aid), True)[1])
+    settings = orch.settings.model_copy(update={"lease_seconds": 1})
+    worker = EngineWorker(orch.db, orch.queue, orch.storage, FakeAdapter([]), settings, worker_id="hb-test")
+    thread, stop = worker._attempt_heartbeat_thread("attempt-1", "tok")
+    try:
+        time.sleep(2.4)  # interval = max(1, 1//3) = 1s -> ~2 beats
+    finally:
+        stop.set()
+    thread.join(timeout=3)
+    assert beats and beats[0] == "attempt-1"
+    assert not thread.is_alive()
