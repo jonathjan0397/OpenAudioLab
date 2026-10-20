@@ -578,3 +578,38 @@ the 2.0x multiplier is a proposed starting value, not a measured tariff.
 remain `unconfigured` (503) -- the pinned engine has no `acestep-v15-xl-sft` repo id
 and the merge lacks an approved checkpoint/license/VRAM profile. Throwaway paid
 test accounts were removed (0 left).
+
+## 2026-10-20 — Entitlement fix: paid TIER (plan) grants premium; higher tiers validated
+
+Reported bug: Pro/Premier accounts got "This model requires an active paid
+subscription (Beginner or higher)" when selecting premium models. Diagnosis on the
+live DB: there were 11 `pro` users with `subscription_status` NULL (plan set, but no
+Stripe subscription row), and the old `has_paid_subscription` *required*
+`subscription_status in {active,trialing,canceling}`, so those (and any similarly
+provisioned higher-tier account) were denied.
+
+Fix (`app/entitlements.py`, master 7ba57cd, deployed as `oal-backend:ent-7ba57cd`):
+the server-set `plan` is the authoritative tier; `subscription_status`/
+`current_period_end` only *revoke* entitlement when the state is terminal
+(canceled/unpaid/incomplete/expired/paused) or the billing period has lapsed. A paid
+tier with a NULL status is now entitled; free/expired/cancelled are not.
+
+Validated: unit matrix (beginner/pro/premier across active/null/canceling/expired/
+canceled/free/disabled); API `tests/test_multimodel.py` (pro/premier run SFT 202;
+premier on un-provisioned xl/merge -> 503 availability, not 403; free/guest premium
+-> 403). LIVE: a fresh `pro` account with NULL subscription_status quoted (200) and
+ran a real SFT job to success (`engine_version=acestep-v15-sft`, reserved 20).
+Throwaway accounts removed. Backend 243 passed.
+
+Premium/experimental provisioning status (honest, not faked):
+- `ace-step-1.5-sft` -> installed + live-validated for all paid tiers.
+- `ace-step-1.5-xl-sft` -> the pinned ca1e85f engine has NO `acestep-v15-xl-sft`
+  mapping; ACE-Step publishes only an `acestep-v15-xl-sft-diffusers` (different
+  format/runtime) and XL+4B-planner exceeds this single 24GB GPU-0 alongside the
+  always-on services -> remains `unconfigured` (503). Enabling needs a dedicated
+  higher-VRAM worker or a validated diffusers runtime path (separate effort).
+- `ace-step-1.5-merge-sft-turbo` -> no approved community checkpoint/license/VRAM
+  profile exists -> remains `unconfigured` (503), never advertised.
+The allowlist (`OAL_PREMIUM_PROFILES_ENABLED`) means enabling either later is a
+config + validated-checkpoint action, with entitlement already correct for every
+paid tier.
