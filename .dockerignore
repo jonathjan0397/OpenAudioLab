@@ -11,3 +11,20 @@ docs
 .env
 .env.*
 !.env.example
+
+# Large local data/artifact trees never needed in the image build context
+house-lora-ab/
+curation/selection_perfamily/tensors-*/
+curation/selection_perfamily/tensors-*.tar.zst
+TrainingData/
+data/
+training-data/
+models/
+artifacts/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.wav
+*.mp3
+*.flac
