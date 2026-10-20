@@ -1,0 +1,10 @@
+FROM stratastack/acestep-train:v2
+
+COPY scripts/house_merge_ab.py /opt/acestep/house-ab/house_merge_ab.py
+COPY scripts/house_merge_ab_agent.sh /usr/local/bin/house-merge-ab-agent.sh
+COPY curation/house_ab_prompts.json /opt/acestep/house-ab/prompts.json
+COPY curation/house_ab_prompts_test.json /opt/acestep/house-ab/prompts_test.json
+
+RUN chmod +x /usr/local/bin/house-merge-ab-agent.sh /opt/acestep/house-ab/house_merge_ab.py
+
+ENTRYPOINT ["/usr/local/bin/house-merge-ab-agent.sh"]

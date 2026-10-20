@@ -96,6 +96,19 @@ TRAIN_MAX_NODES = int(os.environ.get("OAL_TRAIN_MAX_NODES", "1"))
 MAX_DPH = float(os.environ.get("OAL_SCALE_MAX_DPH", "0"))
 PRUNE_SECONDS = float(os.environ.get("OAL_PRUNE_SECONDS", "3600"))
 RETENTION_DAYS = int(os.environ.get("OAL_RETENTION_DAYS", "30"))
+# Baseline fallback: when the always-on dev worker is unhealthy, create one
+# low-cost North-American node that consumes the main queue and serves the LLM.
+BASELINE_WORKER_ID = os.environ.get("OAL_BASELINE_WORKER_ID", "")
+BASELINE_HEALTH_SECONDS = float(os.environ.get("OAL_BASELINE_HEALTH_SECONDS", "60"))
+BASELINE_UNAVAILABLE_GRACE_SECONDS = float(os.environ.get("OAL_BASELINE_UNAVAILABLE_GRACE_SECONDS", "300"))
+BASELINE_RESTORE_GRACE_SECONDS = float(os.environ.get("OAL_BASELINE_RESTORE_GRACE_SECONDS", "300"))
+BASELINE_FALLBACK_MAX_DPH = float(os.environ.get("OAL_BASELINE_FALLBACK_MAX_DPH", "0.15"))
+BASELINE_FALLBACK_MIN_VRAM = os.environ.get("OAL_BASELINE_FALLBACK_MIN_VRAM", "24")
+BASELINE_FALLBACK_MIN_COMPUTE_CAP = float(os.environ.get("OAL_BASELINE_FALLBACK_MIN_COMPUTE_CAP", "7.0"))
+BASELINE_FALLBACK_ROLE = os.environ.get("OAL_BASELINE_FALLBACK_ROLE", "engine_worker,audio_worker")
+BASELINE_FALLBACK_CREATE_GUARD_SECONDS = float(os.environ.get("OAL_BASELINE_FALLBACK_CREATE_GUARD_SECONDS", "120"))
+PRIMARY_LLM_BASE_URL = os.environ.get("OAL_PRIMARY_LLM_BASE_URL", "")
+LLM_PORT = os.environ.get("OAL_LLM_PORT", "8082")
 
 # Offers whose instances repeatedly die during boot ("stuck loading") go here
 # for a few hours so pick_offer stops re-buying the same broken host.
@@ -195,12 +208,106 @@ def registry_remove(cid):
         log(f"registry remove failed: {e}")
 
 
+def baseline_available():
+    """True when the tracked baseline worker is healthy or actively working.
+
+    If no baseline id is configured, or the DB is unavailable, assume the
+    historical behavior: the local baseline exists. This avoids false fallbacks
+    during DB/CLI hiccups.
+    """
+    if not BASELINE_WORKER_ID:
+        return True
+    d = _engine()
+    if d is None:
+        return True
+    try:
+        from sqlalchemy import text
+
+        sql = text(
+            """
+            select exists (
+                select 1
+                from workers w
+                where w.id = :wid
+                  and w.drain = false
+                  and (w.unhealthy_until is null or w.unhealthy_until < now())
+                  and (
+                    w.last_heartbeat > now() - make_interval(secs => :health)
+                    or exists (
+                        select 1
+                        from job_attempts ja
+                        where ja.worker_id = :wid
+                          and ja.status = 'running'
+                          and ja.heartbeat_at > now() - make_interval(secs => :health)
+                    )
+                  )
+            ) as ok
+            """
+        )
+        with d.connect() as conn:
+            return bool(conn.execute(sql, {"wid": BASELINE_WORKER_ID, "health": BASELINE_HEALTH_SECONDS}).scalar())
+    except Exception as e:
+        log(f"baseline health check failed: {e}")
+        return True
+
+
+def set_llm_endpoint(url):
+    d = _engine()
+    if d is None:
+        return
+    try:
+        from sqlalchemy import text
+
+        with d.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO site_settings (key, value, updated_at) VALUES ('llm_base_url', :url, now()) "
+                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
+                ),
+                {"url": url or ""},
+            )
+    except Exception as e:
+        log(f"llm endpoint update failed: {e}")
+
+
+def instance_public_ip(cid):
+    _, out, _ = sh([VASTAI, "show", "instances", "--raw"])
+    try:
+        rows = json.loads(out)
+    except Exception:
+        return None
+    for row in rows:
+        if str(row.get("id")) == str(cid):
+            return row.get("public_ipaddr") or row.get("public_ip") or row.get("ip")
+    return None
+
+
+def instance_public_endpoint(cid, container_port=None):
+    _, out, _ = sh([VASTAI, "show", "instances", "--raw"])
+    try:
+        rows = json.loads(out)
+    except Exception:
+        return None, None
+    container_port = str(container_port or LLM_PORT)
+    for row in rows:
+        if str(row.get("id")) != str(cid):
+            continue
+        ip = row.get("public_ipaddr") or row.get("public_ip") or row.get("ip")
+        port = None
+        for key, bindings in (row.get("ports") or {}).items():
+            if key.split("/", 1)[0] == container_port and bindings:
+                port = bindings[0].get("HostPort")
+                break
+        return ip, port or container_port
+    return None, None
+
+
 def sh(args, stdin=None):
     p = subprocess.run(args, capture_output=True, text=True, input=stdin)
     return p.returncode, p.stdout, p.stderr
 
 
-def worker_env(transport="wg", slot=None, role="engine_worker"):
+def worker_env(transport="wg", slot=None, role="engine_worker", tier=None, llm=False):
     pw = os.environ["OAL_POSTGRES_PASSWORD"]
     secret = os.environ["OAL_SECRET_KEY"]
     base = HUB_TS if transport == "ts" else (HUB_TUNNEL if transport == "wg" else HUB)
@@ -215,6 +322,14 @@ def worker_env(transport="wg", slot=None, role="engine_worker"):
         f"-e OAL_WORKER_ROLE={role}",
         "-e OAL_ACESTEP_BASE_URL=http://127.0.0.1:8001",
     ]
+    if llm:
+        env += [
+            "-e OAL_LLM_AUTOSTART=1",
+            f"-e OAL_LLM_PORT={LLM_PORT}",
+            "-e OAL_LLM_HOST=0.0.0.0",
+            "-e OAL_LLM_MODEL=/opt/llm/qwen3-4b-q4_k_m.gguf",
+            "-e OAL_LLM_MODEL_NAME=qwen3-4b",
+        ]
     if role == "training_worker":
         # Training node: engine runs in external mode (entrypoint starts and
         # health-checks it) so the training worker can rely on it without an
@@ -233,9 +348,11 @@ def worker_env(transport="wg", slot=None, role="engine_worker"):
         ]
     else:
         # Burst tier: Vast nodes drain only the overflow queue, so the always-on
-        # baseline worker keeps first claim on the main queue.
+        # baseline worker keeps first claim on the main queue. Baseline fallback
+        # nodes override this and consume the main queue while the dev worker is
+        # unavailable.
         env += [
-            "-e OAL_WORKER_TIER=burst",
+            f"-e OAL_WORKER_TIER={tier or 'burst'}",
             # Vast burst nodes stay hot (keep the model loaded for their short
             # life); the autoscaler tears them down, so no idle-stop is needed.
             "-e OAL_ENGINE_IDLE_STOP_SECONDS=0",
@@ -297,9 +414,12 @@ def wg_remove_peer(pub):
     sh(WG_SUDO + ["wg", "set", WG_IFACE, "peer", pub, "remove"])
 
 
-def pick_offer():
+def pick_offer(max_dph=None, min_compute=None, min_vram=None):
+    max_dph = MAX_DPH if max_dph is None else max_dph
+    min_compute = MIN_COMPUTE_CAP if min_compute is None else min_compute
+    min_vram = "24" if min_vram is None else str(min_vram)
     _, out, _ = sh([VASTAI, "search", "offers",
-                    "gpu_ram>=24 num_gpus=1 rentable=true cuda_max_good>=12.8 verification=verified",
+                    f"gpu_ram>={min_vram} num_gpus=1 rentable=true cuda_max_good>=12.8 verification=verified",
                     "--raw", "-o", "dph_total", "--limit", "200"])
     try:
         offers = json.loads(out)
@@ -319,9 +439,9 @@ def pick_offer():
         down = o.get("inet_down") or 0
         if not (geo.endswith(", US") or geo.endswith(", CA")):
             continue
-        if rel < MIN_RELIABILITY or cc < MIN_COMPUTE_CAP or dph <= 0 or down <= 0:
+        if rel < MIN_RELIABILITY or cc < min_compute or dph <= 0 or down <= 0:
             continue
-        if MAX_DPH and dph > MAX_DPH:
+        if max_dph and dph > max_dph:
             continue
         # The instance's --disk request must fit on the host disk (with headroom
         # for the image layers and the host's own reservation). Offers whose
@@ -342,17 +462,30 @@ def pick_offer():
     return o.get("id")
 
 
-def create_instance(slot=None, dry_run=False, transport="wg", role="engine_worker"):
-    offer = pick_offer()
+def create_instance(
+    slot=None,
+    dry_run=False,
+    transport="wg",
+    role="engine_worker",
+    tier=None,
+    llm=False,
+    max_dph=None,
+    min_compute=None,
+    min_vram=None,
+):
+    offer = pick_offer(max_dph=max_dph, min_compute=min_compute, min_vram=min_vram)
     if not offer:
         log("no eligible North-American offer; will retry")
         return None
     if dry_run:
         log(f"[dry-run] would create instance on offer {offer}")
         return -1
-    env = ("--privileged " if transport == "wg" else "") + worker_env(transport, slot, role)
-    _, out, _ = sh([VASTAI, "create", "instance", str(offer), "--image", IMAGE,
-                    "--disk", DISK, "--env", env, "--args", "run"])
+    env = ("--privileged " if transport == "wg" else "") + worker_env(transport, slot, role, tier=tier, llm=llm)
+    if llm:
+        env += f" -p {LLM_PORT}:{LLM_PORT}/tcp"
+    cmd = [VASTAI, "create", "instance", str(offer), "--image", IMAGE, "--disk", DISK, "--env", env]
+    cmd += ["--args", "run"]
+    _, out, _ = sh(cmd)
     ok = "'success': True" in out
     m = re.search(r"'new_contract':\s*(\d+)", out)
     log(f"create offer={offer} ok={ok} out={out.strip()[:160]}")
@@ -480,6 +613,24 @@ def reconcile(st):
                 log(f"reconcile: {key} node {cid} evicted from Vast")
                 registry_remove(cid)
         st[key] = kept
+    fb = st.get("fallback_node")
+    if fb:
+        cid = str(fb["contract"])
+        status = statuses.get(cid)
+        if cid in statuses and status in alive:
+            fb.pop("missing_since", None)
+        elif cid not in statuses:
+            fb["missing_since"] = fb.get("missing_since") or now
+            if now - fb["missing_since"] > 300:
+                log(f"reconcile: fallback node {cid} missing from Vast >300s")
+                registry_remove(cid)
+                set_llm_endpoint(PRIMARY_LLM_BASE_URL)
+                st["fallback_node"] = None
+        else:
+            log(f"reconcile: fallback node {cid} gone from Vast ({status})")
+            registry_remove(cid)
+            set_llm_endpoint(PRIMARY_LLM_BASE_URL)
+            st["fallback_node"] = None
 
 
 def load_state():
@@ -504,11 +655,12 @@ def save_state(st):
         json.dump(st, f)
 
 
-def desired_nodes(depth, low_since, now, current):
+def desired_nodes(depth, low_since, now, current, effective_baseline=None):
     """Target number of Vast burst nodes for the current queue state."""
+    effective_baseline = BASELINE if effective_baseline is None else effective_baseline
     if depth >= SCALE_UP:
         total = min(math.ceil(depth / JOBS_PER_NODE), MAX_NODES)
-        return max(0, total - BASELINE)
+        return max(0, total - effective_baseline)
     # Demand has subsided (depth < SCALE_UP): tier down by how long it has been low.
     if low_since is None:
         return current  # just dropped below threshold; hold during grace
@@ -528,7 +680,66 @@ def tick(r, st, dry_run=False):
         st["low_since"] = None
     elif st.get("low_since") is None:
         st["low_since"] = now
-    want = desired_nodes(depth, st.get("low_since"), now, len(nodes))
+
+    baseline_ok = baseline_available()
+    fallback = st.get("fallback_node")
+    if baseline_ok:
+        st["baseline_unavailable_since"] = None
+        if fallback:
+            st["baseline_restored_since"] = st.get("baseline_restored_since") or now
+            if now - st["baseline_restored_since"] >= BASELINE_RESTORE_GRACE_SECONDS:
+                cid = fallback["contract"]
+                destroy_instance(cid, dry_run)
+                if fallback.get("wg_pubkey") and not dry_run:
+                    wg_remove_peer(fallback["wg_pubkey"])
+                registry_remove(cid)
+                set_llm_endpoint(PRIMARY_LLM_BASE_URL)
+                st["fallback_node"] = None
+                st["baseline_restored_since"] = None
+                log(f"baseline restored -> destroyed fallback node {cid}")
+        else:
+            st["baseline_restored_since"] = None
+    else:
+        st["baseline_restored_since"] = None
+        st["baseline_unavailable_since"] = st.get("baseline_unavailable_since") or now
+        if not fallback:
+            unavailable_age = now - st["baseline_unavailable_since"]
+            last_attempt = st.get("fallback_last_attempt") or 0
+            if unavailable_age >= BASELINE_UNAVAILABLE_GRACE_SECONDS and now - last_attempt >= BASELINE_FALLBACK_CREATE_GUARD_SECONDS:
+                st["fallback_last_attempt"] = now
+                transport = VAST_TRANSPORT
+                slot = gen_ts_slot() if transport == "ts" else None
+                cid = create_instance(
+                    slot,
+                    dry_run,
+                    transport,
+                    role=BASELINE_FALLBACK_ROLE,
+                    tier="baseline",
+                    llm=True,
+                    max_dph=BASELINE_FALLBACK_MAX_DPH,
+                    min_compute=BASELINE_FALLBACK_MIN_COMPUTE_CAP,
+                    min_vram=BASELINE_FALLBACK_MIN_VRAM,
+                )
+                if cid:
+                    node = {"contract": cid, "created_at": now, "transport": transport, "llm_endpoint_set": False}
+                    if transport == "ts" and slot:
+                        node["ts_hostname"] = slot["hostname"]
+                    elif transport == "wg" and slot:
+                        node.update({"wg_ip": slot["ip"], "wg_pubkey": slot["pubkey"], "wg_privkey": slot["privkey"]})
+                    st["fallback_node"] = node
+                    log(f"baseline unavailable {int(unavailable_age)}s -> +1 fallback node {cid} via {transport}")
+
+    fallback = st.get("fallback_node")
+    if fallback and not fallback.get("llm_endpoint_set"):
+        ip, port = instance_public_endpoint(fallback["contract"], LLM_PORT)
+        if ip:
+            url = f"http://{ip}:{port}/v1"
+            set_llm_endpoint(url)
+            fallback["llm_endpoint_set"] = True
+            log(f"fallback LLM endpoint -> {url}")
+
+    effective_baseline = 1 if baseline_ok or fallback else 0
+    want = desired_nodes(depth, st.get("low_since"), now, len(nodes), effective_baseline)
 
     if len(nodes) < want:
         restarted = False
@@ -685,8 +896,9 @@ def main():
         if n.get("wg_pubkey") and n.get("wg_ip"):
             wg_add_peer(n["wg_pubkey"], n["wg_ip"])
     log(f"start hub={HUB} queue={QUEUE_KEY} up>={SCALE_UP} jobs/node={JOBS_PER_NODE} "
-        f"max={MAX_NODES} baseline={BASELINE} to_one>{int(TO_ONE_SECONDS)}s "
-        f"down>{int(SCALE_DOWN_SECONDS)}s min_uptime={int(MIN_UPTIME)}s state={st}")
+        f"max={MAX_NODES} baseline={BASELINE} baseline_id={BASELINE_WORKER_ID or '-'} "
+        f"fallback_grace>{int(BASELINE_UNAVAILABLE_GRACE_SECONDS)}s restore>{int(BASELINE_RESTORE_GRACE_SECONDS)}s "
+        f"to_one>{int(TO_ONE_SECONDS)}s down>{int(SCALE_DOWN_SECONDS)}s min_uptime={int(MIN_UPTIME)}s state={st}")
     last_reconcile = 0.0
     last_prune = 0.0
     while True:

@@ -308,3 +308,49 @@ Validated (2026-10-16): enqueuing 20 jobs drove depth to ~20 → the autoscaler
 scaled out to the cap (baseline + 2 Vast nodes), all 20 jobs succeeded with valid
 `mix_wav` artifacts, and the autoscaler tiered the fleet back down (one hot node,
 then teardown) after the cooldown.
+
+## Baseline fallback and standard OAL LLM (2026-10-19)
+
+The autoscaler now treats the dev-host baseline worker as a health-checked
+resource, not just a static count. A baseline is unavailable only when
+`OAL_BASELINE_WORKER_ID` has a stale/missing heartbeat, is drained, is marked
+unhealthy, or its engine start/OOM state prevents work; a busy GPU with active
+job attempts is healthy. If the baseline stays unavailable for
+`OAL_BASELINE_UNAVAILABLE_GRACE_SECONDS` (default 300s), the autoscaler creates
+one fallback node with `OAL_BASELINE_FALLBACK_ROLE` (default
+`engine_worker,audio_worker`) and `OAL_WORKER_TIER=baseline`, so it consumes the
+main queue while the dev worker is down. When the baseline returns, the fallback
+is destroyed after `OAL_BASELINE_RESTORE_GRACE_SECONDS` (default 300s).
+
+Fallback offers are stricter than burst offers: North America only,
+`OAL_BASELINE_FALLBACK_MAX_DPH` (default `$0.15/hr`),
+`OAL_BASELINE_FALLBACK_MIN_VRAM` (default 24 GB), and
+`OAL_BASELINE_FALLBACK_MIN_COMPUTE_CAP` (default 7.0, allowing V100/V100S when
+generation smoke tests pass). The fallback also starts the standard OAL LLM:
+Qwen3-4B Q4_K_M GGUF served by `llama.cpp` on container port 8082. The
+autoscaler maps that port through Vast's public port binding and writes the
+reachable endpoint to `site_settings.llm_base_url`; on restore it resets the
+endpoint to `OAL_PRIMARY_LLM_BASE_URL`.
+
+Validated (2026-10-19): stopping the baseline worker caused the autoscaler to
+create Vast contract `56795630` (Tesla V100, Utah, `$0.148/hr`), register
+`http://67.182.226.160:20680/v1` as the LLM endpoint, complete `/llm/title`,
+`/llm/draft`, `/llm/lyrics`, and `/llm/style-prompt`, and complete generation job
+`e2b1d3fc-7a55-4268-80ae-5f10e9939ceb`. Restarting the baseline worker restored
+`http://10.203.0.2:8082/v1` and destroyed the fallback after the restore grace.
+
+## House LoRA merge A/B nodes (2026-10-20)
+
+House LoRA merge/A-B runs use standalone Vast nodes from
+`stratastack/acestep-train:v5-house-ab`. These nodes are not OAL queue workers;
+they pull adapters from the hub, build merged ACE-Step checkpoints, generate a
+fixed A/B prompt set, and rsync results back to the hub.
+
+The corrected merge procedure is documented in `docs/HOUSE_LORA_TRAINING.md`.
+The important operational lesson is that node-to-hub checkpoint upload can be
+much slower than hub-to-node download, so the agent now pushes audio and metadata
+before merged checkpoints.
+
+Validated (2026-10-20): one-adapter sanity contract `56826462` and corrected
+full A/B contract `56827635` completed successfully. Corrected results were
+rsynced to `/Cold-Archive/OpenAudioLab/house-lora-ab/2026-10-19-v2/`.

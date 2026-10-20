@@ -156,7 +156,11 @@ class AudioWorker:
         self.storage = storage
         self.settings = settings
         self.separator: Separator = separator or NullSeparator()
-        self.worker_id = worker_id or f"audio-{socket.gethostname()}-{os.getpid()}"
+        self.worker_id = worker_id or (
+            f"{settings.worker_id}-audio"
+            if settings.worker_id
+            else f"audio-{socket.gethostname()}-{os.getpid()}"
+        )
         self.queue_name = RedisQueue.queue_name(EXPORT_MODEL_ID)
         self._stop = False
 

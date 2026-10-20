@@ -13,10 +13,11 @@ import tarfile
 from pathlib import Path
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel
 
 from ..errors import ApiError
-from ..models import Asset
+from ..models import Asset, SiteSetting
 
 router = APIRouter()
 
@@ -49,6 +50,26 @@ def worker_bundle(request: Request) -> Response:
             "Content-Disposition": 'attachment; filename="oal-worker-bundle.tar.gz"',
         },
     )
+
+
+class LlmEndpoint(BaseModel):
+    base_url: str = ""
+
+
+@router.put("/settings/llm")
+def internal_put_llm_endpoint(payload: LlmEndpoint, request: Request, x_oal_secret: str = Query(...)) -> JSONResponse:
+    settings = request.app.state.settings
+    if x_oal_secret != settings.secret_key:
+        raise ApiError(401, "INVALID_SECRET", "Shared secret does not match.")
+    value = payload.base_url.strip()
+    with request.app.state.db.session() as session:
+        row = session.get(SiteSetting, "llm_base_url")
+        if row is None:
+            session.add(SiteSetting(key="llm_base_url", value=value))
+        else:
+            row.value = value
+        session.commit()
+    return JSONResponse({"key": "llm_base_url", "value": value})
 
 
 @router.get("/assets/{asset_id}/content")

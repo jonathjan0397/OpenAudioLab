@@ -1,0 +1,16 @@
+[
+  {
+    "id": "pop",
+    "prompt": "polished pop with a catchy hook, bright production, and danceable groove",
+    "duration_seconds": 30,
+    "seed": 42,
+    "instrumental": true
+  },
+  {
+    "id": "score",
+    "prompt": "cinematic orchestral score with emotional strings, brass swells, and wide reverb",
+    "duration_seconds": 30,
+    "seed": 42,
+    "instrumental": true
+  }
+]

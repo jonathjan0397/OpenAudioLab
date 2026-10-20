@@ -207,3 +207,35 @@ Author: opencode. Task type: feature implementation (branch `impl/guest-beginner
 Implemented server-issued guest sessions with cookie identity, UTC daily guest song quota, two-minute guest duration cap, reservation commit/release on terminal job transitions, and guest song claim into a signed-in account. Removed arbitrary bearer fallback: registered API keys, account cookies, and guest cookies are the supported public identities. Added policy documents/acceptances, email verification/password reset tokens, SMTP-backed transactional email with pending fallback, admin guest/policy/abuse/audit read surfaces, public pricing, Beginner `$5/month` for `1,000` credits, visible pricing rows, subscription period state, Stripe checkout price-id support, and webhook handling for checkout completion, subscription updates/cancellation, and `invoice.paid` renewals.
 
 Updated backend config/models/migration `0025`, auth/jobs/billing/admin routes, orchestration terminal transitions, frontend API types, guest allowance/policy UI, signup confirmation, public pricing, policy/verify/recover routes, and admin Guests/Policies panels. Validation: backend pytest **202 passed**; frontend `npm run build` passed. Stripe package was installed into the local `.venv` because the webhook test imports it.
+
+## 2026-10-19 — Baseline worker recovery, Qwen3 fallback LLM, and autoscaler fallback
+
+Author: opencode. Task type: implementation + live deployment validation (branch `impl/milestone-1`, not merged).
+
+Recovered the dev-host baseline worker with stable ids (`oal-baseline-gpu0`, `oal-baseline-gpu0-audio`) and added worker health state (`last_error`, `unhealthy_until`, Alembic `0026`) so OOM/engine-start failures can temporarily mark a worker unhealthy. Extended the autoscaler to health-check the baseline worker and create a low-cost North-American fallback node after 5 minutes of baseline unavailability. The fallback runs `engine_worker,audio_worker` as `OAL_WORKER_TIER=baseline`, consumes the main queue, and is destroyed 5 minutes after baseline restoration.
+
+Baked the standard OAL LLM into the worker image: Qwen3-4B Q4_K_M GGUF served by `llama.cpp` on port 8082 with `--reasoning-budget 512`. Added dynamic LLM endpoint selection through `site_settings.llm_base_url`, with `/llm/draft` and lyrics-write using hybrid thinking and humanize/style/title using non-thinking mode. The autoscaler maps the fallback LLM port through Vast, writes the public endpoint to the backend, and restores `OAL_PRIMARY_LLM_BASE_URL` after baseline recovery.
+
+Updated: `app/config.py`, `app/models.py`, `alembic/versions/0026_worker_health.py`, `app/engine_worker.py`, `app/engine_acestep.py`, `app/audio_worker.py`, `app/training_worker.py`, `app/llm.py`, `app/routes/llm.py`, `app/routes/internal.py`, `scripts/autoscale.py`, `scripts/run_house_workers.sh`, `Dockerfile.worker`, `docker/worker-entrypoint.sh`, tests, `docs/REMOTE_WORKERS.md`, and `CHANGELOG.md`. Deployed backend image `stratastack/oal-backend:baseline-fallback` and worker image `stratastack/oal-worker:45e39a5-torch2.10-cu128-ts8-qwen3`.
+
+Validation: backend pytest **203 passed**. Live fallback test stopped the baseline worker, created Vast contract `56795630` (Tesla V100, Utah, `$0.148/hr`), switched the LLM endpoint to `http://67.182.226.160:20680/v1`, completed `/llm/title`, `/llm/draft`, `/llm/lyrics`, `/llm/style-prompt`, and generation job `e2b1d3fc-7a55-4268-80ae-5f10e9939ceb`. Restarting the baseline worker restored `http://10.203.0.2:8082/v1` and destroyed the fallback after the restore grace.
+
+## 2026-10-20 — House LoRA merge A/B and corrected multi-LoRA merge semantics
+
+Author: opencode. Task type: model merge experiment + live Vast validation (branch `impl/milestone-1`, not merged).
+
+Goal: fold the 13 trained house genre LoRAs into ACE-Step Turbo checkpoints and A/B the merged variants against baseline Turbo. The first full run used PEFT `add_weighted_adapter(..., combination_type="linear")` with raw per-adapter weights `[0.30] * 13`, `[0.50] * 13`, and `[0.70] * 13`. The merged audio was unrecognizable as music.
+
+Research: ACE-Step runtime LoRA strength is a 0–1 multiplier applied to the active PEFT adapter via `set_lora_scale` / `apply_scale_to_adapter`. ACE-Step’s own `merge_lora_weights` simply calls `merge_and_unload()` for the active adapter; it does not define a multi-LoRA merge procedure. PEFT `linear` task arithmetic sums adapter matrices with the supplied weights, so 13 adapters at raw `0.30` produced roughly `3.9x` total LoRA strength. That explained the corrupted first A/B.
+
+Corrected method: use PEFT `combination_type="cat"` and normalize weights by the number of adapters. With 13 adapters, scale `0.30` now means total merge strength `0.30`, with each genre contributing `0.30 / 13`. `cat` preserves the weighted sum of LoRA deltas more directly than `linear`, which sums A and B separately and can introduce cross terms.
+
+Validation runs:
+- One-adapter sanity: `house-v1-pop` only, scale `0.30`, `combination_type=cat`, Vast contract `56826462`, remote `/srv/oal-storage/house-lora/merge-ab-one2-2026-10-19`, local `/Cold-Archive/OpenAudioLab/house-lora-ab/2026-10-19-one-pop/`.
+- Corrected full A/B: all 13 house LoRAs, scales `0.30,0.50,0.70`, `combination_type=cat`, Vast contract `56827635`, remote `/srv/oal-storage/house-lora/merge-ab-v2-2026-10-19`, local `/Cold-Archive/OpenAudioLab/house-lora-ab/2026-10-19-v2/`.
+
+Updated: `scripts/house_merge_ab.py`, `scripts/house_merge_ab_agent.sh`, `Dockerfile.house_merge`, `curation/house_ab_prompts.json`, `curation/house_ab_prompts_test.json`, `CHANGELOG.md`, and `docs/HOUSE_LORA_TRAINING.md`. Built/pushed `stratastack/acestep-train:v3-house-ab`, `v4-house-ab`, and `v5-house-ab`. The final agent defers checkpoint push until after audio/metadata because node-to-hub upload can be slow.
+
+`docs/HOUSE_LORA_TRAINING.md` now fully documents the end-to-end process: curation, tensor preprocessing, Vast training-agent flow, actual house-v1 hyperparameters and final checkpoint losses, ACE-Step LoRA runtime semantics, the failed first merge, the corrected `cat` + normalized-weight merge, sanity/full A/B runs, retention paths, promotion plan, and known pitfalls.
+
+Retention: all 13 trained LoRAs remain on the hub under `/srv/oal-storage/house-lora/house-v1-*/adapter`; corrected merged checkpoints are retained locally under `/Cold-Archive/OpenAudioLab/house-lora-ab/2026-10-19-v2/merged/` and on the hub under `/srv/oal-storage/house-lora/merge-ab-v2-2026-10-19/merged/`.

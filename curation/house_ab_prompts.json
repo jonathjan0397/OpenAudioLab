@@ -1,0 +1,114 @@
+[
+  {
+    "id": "blues",
+    "prompt": "slow electric blues with slide guitar, smoky vocals, and a 12-bar groove",
+    "duration_seconds": 30,
+    "seed": 42,
+    "instrumental": true
+  },
+  {
+    "id": "country",
+    "prompt": "modern country with twangy guitar, fiddle accents, and storytelling phrasing",
+    "duration_seconds": 30,
+    "seed": 42,
+    "instrumental": true
+  },
+  {
+    "id": "electronic",
+    "prompt": "driving electronic synthpop with bright arpeggios, four-on-the-floor drums, and neon atmosphere",
+    "duration_seconds": 30,
+    "seed": 42,
+    "instrumental": true
+  },
+  {
+    "id": "folk",
+    "prompt": "warm acoustic folk with fingerpicked guitar, gentle harmonies, and organic percussion",
+    "duration_seconds": 30,
+    "seed": 42,
+    "instrumental": true
+  },
+  {
+    "id": "gospel",
+    "prompt": "uplifting gospel with choir-like organ, handclaps, and bright major harmony",
+    "duration_seconds": 30,
+    "seed": 42,
+    "instrumental": true
+  },
+  {
+    "id": "hiphop",
+    "prompt": "boom bap hiphop with punchy drums, dusty samples, and rhythmic groove",
+    "duration_seconds": 30,
+    "seed": 42,
+    "instrumental": true
+  },
+  {
+    "id": "jazz",
+    "prompt": "cool jazz with brushed drums, upright bass, piano comping, and relaxed swing",
+    "duration_seconds": 30,
+    "seed": 42,
+    "instrumental": true
+  },
+  {
+    "id": "metal",
+    "prompt": "melodic metal with tight palm-muted riffs, double-bass energy, and aggressive dynamics",
+    "duration_seconds": 30,
+    "seed": 42,
+    "instrumental": true
+  },
+  {
+    "id": "pop",
+    "prompt": "polished pop with a catchy hook, bright production, and danceable groove",
+    "duration_seconds": 30,
+    "seed": 42,
+    "instrumental": true
+  },
+  {
+    "id": "punk_alt",
+    "prompt": "alternative punk with fast power chords, raw drums, and urgent energy",
+    "duration_seconds": 30,
+    "seed": 42,
+    "instrumental": true
+  },
+  {
+    "id": "rnb_soul",
+    "prompt": "smooth rnb soul with lush chords, warm bass, and sensual groove",
+    "duration_seconds": 30,
+    "seed": 42,
+    "instrumental": true
+  },
+  {
+    "id": "rock",
+    "prompt": "classic rock with driving guitars, live drum feel, and anthemic chorus energy",
+    "duration_seconds": 30,
+    "seed": 42,
+    "instrumental": true
+  },
+  {
+    "id": "score",
+    "prompt": "cinematic orchestral score with emotional strings, brass swells, and wide reverb",
+    "duration_seconds": 30,
+    "seed": 42,
+    "instrumental": true
+  },
+  {
+    "id": "neutral_summer",
+    "prompt": "energetic summer anthem with bright melodies and festival-ready drums",
+    "duration_seconds": 30,
+    "seed": 42,
+    "instrumental": true
+  },
+  {
+    "id": "neutral_midnight",
+    "prompt": "midnight road trip mood with steady rhythm, warm synth pads, and forward motion",
+    "duration_seconds": 30,
+    "seed": 42,
+    "instrumental": true
+  },
+  {
+    "id": "neutral_neon",
+    "prompt": "dreamy neon night scene with shimmering textures, soft pulses, and nostalgic atmosphere",
+    "duration_seconds": 30,
+    "seed": 42,
+    "instrumental": true
+  }
+]

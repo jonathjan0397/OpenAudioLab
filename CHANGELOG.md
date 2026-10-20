@@ -28,6 +28,41 @@ owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_
   (200, valid RIFF, 2,304,044 bytes). 6 new tests (99 total). Record:
   `docs/REMOTE_WORKERS.md`.
 
+### Baseline fallback and standard OAL LLM (2026-10-19)
+- Worker health and stable identity: `OAL_WORKER_ID`, `Worker.last_error`,
+  `Worker.unhealthy_until`, Alembic `0026`, OOM/unhealthy marking, and stable
+  baseline/audio/training worker ids.
+- Autoscaler baseline fallback: health-checks `OAL_BASELINE_WORKER_ID`, creates a
+  North-American fallback node after 5 minutes of baseline unavailability, runs
+  it as `OAL_WORKER_TIER=baseline` on the main queue, and destroys it 5 minutes
+  after baseline restoration.
+- Standard OAL LLM: Qwen3-4B Q4_K_M GGUF baked into the worker image and served
+  by `llama.cpp`; `/llm/draft` and lyrics-write use hybrid thinking, while
+  humanize/style/title do not. The autoscaler publishes the active LLM endpoint
+  to `site_settings.llm_base_url` and restores `OAL_PRIMARY_LLM_BASE_URL`.
+- Validation: full pytest suite passes (203 tests). Live fallback test created
+  Vast contract `56795630`, switched LLM endpoint to the fallback node, completed
+  all LLM routes and generation job `e2b1d3fc-7a55-4268-80ae-5f10e9939ceb`, then
+  restored the baseline endpoint and destroyed the fallback.
+
+### House LoRA merge A/B (2026-10-20)
+- Added offline ACE-Step merge/A-B tooling: `scripts/house_merge_ab.py`,
+  `scripts/house_merge_ab_agent.sh`, `Dockerfile.house_merge`,
+  `curation/house_ab_prompts.json`, and `curation/house_ab_prompts_test.json`.
+- Corrected multi-LoRA merge semantics after the first full A/B sounded
+  unrecognizable: ACE-Step runtime LoRA scale is a 0–1 multiplier on the active
+  PEFT adapter, so the first raw `linear` run with 13 adapters at `0.30`
+  effectively applied about `3.9x` total LoRA strength.
+- The corrected merge uses PEFT `combination_type=cat` with normalized weights,
+  so `0.30`, `0.50`, and `0.70` are total merge strengths across all 13 house
+  LoRAs rather than per-LoRA strengths.
+- Ran a one-adapter sanity merge (`house-v1-pop`, scale `0.30`) and a corrected
+  full A/B on Vast RTX 3090 nodes. Results are retained locally under
+  `/Cold-Archive/OpenAudioLab/house-lora-ab/2026-10-19-one-pop/` and
+  `/Cold-Archive/OpenAudioLab/house-lora-ab/2026-10-19-v2/`.
+- Fully documented the LoRA training and model merge processes in
+  `docs/HOUSE_LORA_TRAINING.md`.
+
 ## [Milestone 5] - 2026-10-15
 
 Artist profiles and real LoRA fine-tuning on hardware. Branch

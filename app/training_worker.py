@@ -71,7 +71,11 @@ class TrainingWorker:
         self.settings = settings
         self.adapter = adapter
         self.gen_adapter = gen_adapter
-        self.worker_id = worker_id or f"training-{socket.gethostname()}-{os.getpid()}"
+        self.worker_id = worker_id or (
+            f"{settings.worker_id}-training"
+            if settings.worker_id
+            else f"training-{socket.gethostname()}-{os.getpid()}"
+        )
         self.queues = [
             RedisQueue.queue_name(settings.train_queue_model_id),
             RedisQueue.queue_name(settings.evaluate_queue_model_id),

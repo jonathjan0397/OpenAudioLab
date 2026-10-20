@@ -35,7 +35,7 @@ def test_llm_draft(client) -> None:
     _seed_owner(client, "m14-draft@example.com", "m14draft")
 
     class FakeLlm:
-        def chat(self, system, user, max_tokens=400, temperature=0.8):
+        def chat(self, system, user, max_tokens=400, temperature=0.8, thinking=False):
             self.last_user = user
             return '{"lyrics": "[Verse]\\nfake line", "style": "lofi, chill", "title": "Rainy Page"}'
 

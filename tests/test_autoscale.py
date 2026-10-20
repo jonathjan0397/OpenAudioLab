@@ -1,5 +1,6 @@
 import importlib.util
 import pathlib
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location("autoscale", ROOT / "scripts" / "autoscale.py")
@@ -108,6 +109,49 @@ def test_training_tick_creates_training_node(monkeypatch):
     autoscale.training_tick(r, st, now, dry_run=True)
     assert created == ["training_worker"]
     assert st["train_nodes"][0]["contract"] == 77
+
+
+def test_baseline_fallback_create_and_destroy(monkeypatch):
+    _configure(
+        monkeypatch,
+        SCALE_UP=2,
+        JOBS_PER_NODE=20,
+        MAX_NODES=3,
+        BASELINE=1,
+        TO_ONE_SECONDS=300,
+        SCALE_DOWN_SECONDS=1800,
+        MIN_UPTIME=180,
+        VAST_TRANSPORT="public",
+        REUSE=False,
+        KEEP_STOPPED=2,
+        BASELINE_WORKER_ID="oal-baseline-gpu0",
+        BASELINE_UNAVAILABLE_GRACE_SECONDS=300,
+        BASELINE_RESTORE_GRACE_SECONDS=300,
+        BASELINE_FALLBACK_CREATE_GUARD_SECONDS=120,
+        PRIMARY_LLM_BASE_URL="",
+    )
+    _noop(monkeypatch)
+    created, destroyed, endpoints = [], [], []
+    monkeypatch.setattr(autoscale, "baseline_available", lambda: False)
+    monkeypatch.setattr(autoscale, "create_instance", lambda *a, **k: created.append(k.get("role")) or 88)
+    monkeypatch.setattr(autoscale, "destroy_instance", lambda cid, dry=False: destroyed.append(cid))
+    monkeypatch.setattr(autoscale, "instance_public_endpoint", lambda cid, port=None: ("1.2.3.4", port or "8082"))
+    monkeypatch.setattr(autoscale, "set_llm_endpoint", lambda url: endpoints.append(url))
+    now = time.time()
+    st = {"nodes": [], "low_since": None, "baseline_unavailable_since": now - 301}
+    r = _FakeRedis({autoscale.QUEUE_KEY: 0, autoscale.BURST_KEY: 0, autoscale.TRAIN_QUEUE: 0})
+    autoscale.tick(r, st, dry_run=True)
+    assert created == [autoscale.BASELINE_FALLBACK_ROLE]
+    assert st["fallback_node"]["contract"] == 88
+    assert endpoints == ["http://1.2.3.4:8082/v1"]
+
+    monkeypatch.setattr(autoscale, "baseline_available", lambda: True)
+    st["baseline_unavailable_since"] = None
+    st["baseline_restored_since"] = now - 301
+    autoscale.tick(r, st, dry_run=True)
+    assert destroyed == [88]
+    assert st["fallback_node"] is None
+    assert endpoints[-1] == ""
 
 
 def test_training_tick_stops_idle_training_node(monkeypatch):

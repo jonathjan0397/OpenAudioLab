@@ -122,7 +122,7 @@ def test_llm_routes_task_locked(client) -> None:
         def __init__(self) -> None:
             self.calls = []
 
-        def chat(self, system, user, max_tokens=400, temperature=0.8):
+        def chat(self, system, user, max_tokens=400, temperature=0.8, thinking=False):
             self.calls.append((system, user))
             return "[Verse]\nfake lyrics line"
 

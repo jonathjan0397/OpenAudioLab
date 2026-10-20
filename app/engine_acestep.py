@@ -98,6 +98,7 @@ class AceStepAdapter:
         self.transport = transport
         self.model = model
         self.thinking = thinking
+        self.last_error = ""
 
     # -- capability/discovery -------------------------------------------------
 
@@ -179,6 +180,7 @@ class AceStepAdapter:
 
     def poll(self, task_id: str) -> tuple[str, list[dict[str, Any]] | None]:
         """Return (pending|succeeded|failed, parsed result entries or None)."""
+        self.last_error = ""
         response = self.transport.post_json("/query_result", {"task_id_list": [task_id]})
         entries = response.get("data") or []
         if not entries:
@@ -191,6 +193,7 @@ class AceStepAdapter:
             items = parsed if isinstance(parsed, list) else [parsed]
             return "succeeded", [i for i in items if isinstance(i, dict)]
         if status == 2:
+            self.last_error = str(entry.get("error") or entry.get("message") or "")[:300]
             return "failed", None
         return "pending", None
 

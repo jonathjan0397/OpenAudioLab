@@ -58,22 +58,33 @@ DRAFT_SYSTEM = (
 
 
 class LlmClient:
-    def __init__(self, base_url: str, timeout: float = 120.0) -> None:
+    def __init__(self, base_url: str, timeout: float = 120.0, model: str = "qwen3-4b") -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.model = model
 
-    def chat(self, system: str, user: str, max_tokens: int = 400, temperature: float = 0.8) -> str:
+    def chat(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 400,
+        temperature: float = 0.8,
+        thinking: bool = False,
+    ) -> str:
         response = httpx.post(
             f"{self.base_url}/chat/completions",
             json={
+                "model": self.model,
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
                 ],
                 "max_tokens": max_tokens,
                 "temperature": temperature,
+                "chat_template_kwargs": {"enable_thinking": thinking},
             },
             timeout=self.timeout,
         )
         response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"].strip()
+        message = response.json()["choices"][0]["message"]
+        return (message.get("content") or message.get("reasoning_content") or "").strip()

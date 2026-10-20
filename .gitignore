@@ -27,3 +27,6 @@ frontend/dist/
 TrainingData/
 curation/selection_perfamily/tensors_*
 curation/selection_perfamily/tensors-*.tar.zst
+
+# House LoRA local review artifacts (audio + merged checkpoints; ~28GB; kept on hub/Cold-Archive, not in git)
+house-lora-ab/

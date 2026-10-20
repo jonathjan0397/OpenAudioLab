@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     # M9: task-locked LLM assistant (lyrics + style prompts) via llama.cpp.
     llm_base_url: str = ""
     llm_timeout_seconds: float = 120.0
+    llm_model: str = "qwen3-4b"
+    llm_thinking_draft: bool = True
+    llm_thinking_lyrics_write: bool = True
+    llm_thinking_lyrics_humanize: bool = False
+    llm_thinking_style: bool = False
+    llm_thinking_title: bool = False
     # M10: admin console framework values (billing is illustrative until real plans).
     admin_revenue: float = 0.0
     admin_storage_quota_bytes: int = 5 * 1024**4
@@ -61,6 +67,11 @@ class Settings(BaseSettings):
     # Worker queue tier: "baseline" consumes [main, burst] (the always-on dev
     # worker); "burst" consumes [burst] only (ephemeral Vast nodes, overflow).
     worker_tier: str = "baseline"
+    # Stable worker identity for health checks. Empty keeps the legacy
+    # hostname+pid id, which is fine for ad-hoc workers but not for the
+    # always-on baseline node the autoscaler must track.
+    worker_id: str = ""
+    worker_unhealthy_cooldown_seconds: float = 600.0
     max_artifact_bytes: int = 200 * 1024 * 1024
     fixture_latency_seconds: float = 0.2
     sse_follow_seconds: float = 30.0

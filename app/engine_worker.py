@@ -14,6 +14,7 @@ import subprocess
 import threading
 import time
 import os
+from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -119,6 +120,11 @@ class AceStepProcess:
                 pass
 
 
+def _is_oom_message(message: str | None) -> bool:
+    text = (message or "").lower()
+    return "out of memory" in text or "oom" in text or "cuda oom" in text
+
+
 def _gpu_telemetry() -> tuple[int, int, int] | None:
     """Read (util%, used MB, total MB) for the device this worker uses."""
     import subprocess
@@ -160,7 +166,7 @@ class EngineWorker:
         self.storage = storage
         self.adapter = adapter
         self.settings = settings
-        self.worker_id = worker_id or f"acestep-{socket.gethostname()}-{os.getpid()}"
+        self.worker_id = worker_id or settings.worker_id or f"acestep-{socket.gethostname()}-{os.getpid()}"
         self.queue_name = queue_name or RedisQueue.queue_name("ace-step-1.5")
         # Baseline tier drains the main queue first (then helps burst when idle);
         # burst tier (Vast) only ever drains the overflow queue, so it can never
@@ -185,6 +191,21 @@ class EngineWorker:
             if telemetry is not None:
                 worker.gpu_util, worker.vram_used_mb, worker.vram_total_mb = telemetry
             session.commit()
+
+    def _mark_unhealthy(self, code: str, message: str) -> None:
+        cooldown = max(0.0, float(self.settings.worker_unhealthy_cooldown_seconds))
+        until = utcnow() + timedelta(seconds=cooldown) if cooldown else utcnow()
+        try:
+            with self.db.session() as session:
+                worker = session.get(Worker, self.worker_id)
+                if worker is None:
+                    worker = Worker(id=self.worker_id, kind="acestep")
+                    session.add(worker)
+                worker.last_error = f"{code}: {message}"[:300]
+                worker.unhealthy_until = until
+                session.commit()
+        except Exception:
+            log.exception("could not mark worker %s unhealthy", self.worker_id)
 
     def _touch_heartbeat(self) -> None:
         path = self.settings.worker_heartbeat_file
@@ -314,6 +335,7 @@ class EngineWorker:
                         self.engine_process.ensure_running()
                     except EngineError as exc:
                         log.warning("engine start failed for training (%s)", exc.code)
+                        self._mark_unhealthy(exc.code, exc.message)
             else:
                 self._maybe_stop_engine()
             return False
@@ -323,6 +345,7 @@ class EngineWorker:
                 self.engine_process.ensure_running()
             except EngineError as exc:
                 log.warning("engine start failed for job %s (%s); requeueing", job_id, exc.code)
+                self._mark_unhealthy(exc.code, exc.message)
                 self.queue.publish(self.receive_queues[0], job_id)
                 time.sleep(5)
                 return True
@@ -376,6 +399,8 @@ class EngineWorker:
             if exc.code == "ENGINE_BUSY":
                 self._requeue(claimed_job, attempt_id, lease_token)
                 return True
+            if _is_oom_message(exc.message):
+                self._mark_unhealthy(exc.code, exc.message)
             fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token, exc.code, exc.message)
             return True
 
@@ -407,14 +432,19 @@ class EngineWorker:
                 if exc.code == "ENGINE_BUSY":
                     state, result = "pending", None
                 else:
+                    if _is_oom_message(exc.message):
+                        self._mark_unhealthy(exc.code, exc.message)
                     fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token, exc.code, exc.message)
                     return True
             heartbeat(self.db, attempt_id, lease_token)
             self._touch_heartbeat()
             if state == "failed":
+                message = getattr(self.adapter, "last_error", "") or "Upstream generation failed."
+                if _is_oom_message(message):
+                    self._mark_unhealthy("ENGINE_OOM", message)
                 fail_attempt(
                     self.db, self.settings, claimed_job, attempt_id, lease_token,
-                    "ENGINE_GENERATION_FAILED", "Upstream generation failed.",
+                    "ENGINE_GENERATION_FAILED", message,
                 )
                 return True
             if state == "succeeded":

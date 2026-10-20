@@ -12,6 +12,7 @@ from pydantic import Field
 from ..deps import owner_from_request
 from ..errors import ApiError
 from ..llm import LYRICS_SYSTEM, STYLE_SYSTEM, TITLE_SYSTEM, LlmClient
+from ..models import SiteSetting
 from ..schemas import StrictModel
 
 router = APIRouter(tags=["llm"])
@@ -27,16 +28,31 @@ class StylePromptRequest(StrictModel):
     description: str = Field(min_length=3, max_length=2000)
 
 
+def _llm_base_url(request: Request) -> str:
+    try:
+        with request.app.state.db.session() as session:
+            row = session.get(SiteSetting, "llm_base_url")
+        if row is not None and row.value:
+            return row.value
+    except Exception:
+        pass
+    return request.app.state.settings.llm_base_url
+
+
 def _client(request: Request) -> LlmClient:
+    base_url = _llm_base_url(request)
+    if base_url:
+        settings = request.app.state.settings
+        return LlmClient(base_url, settings.llm_timeout_seconds, settings.llm_model)
     client = getattr(request.app.state, "llm", None)
     if client is None:
         raise ApiError(503, "LLM_DISABLED", "The lyrics assistant is not configured.")
     return client
 
 
-def _ask(request: Request, system: str, user: str, max_tokens: int) -> str:
+def _ask(request: Request, system: str, user: str, max_tokens: int, thinking: bool = False) -> str:
     try:
-        return _client(request).chat(system, user, max_tokens=max_tokens)
+        return _client(request).chat(system, user, max_tokens=max_tokens, thinking=thinking)
     except httpx.HTTPError as exc:
         from ..errorlog import record_error
 
@@ -54,21 +70,31 @@ def _ask(request: Request, system: str, user: str, max_tokens: int) -> str:
 
 @router.post("/llm/lyrics")
 def llm_lyrics(payload: LyricsRequest, request: Request, owner_id: str = Depends(owner_from_request)) -> JSONResponse:
+    settings = request.app.state.settings
     if payload.mode == "humanize":
         if not payload.lyrics.strip():
             raise ApiError(422, "LYRICS_REQUIRED", "Provide the lyrics to humanize.")
         user = f"Humanize these lyrics (keep meaning, make them natural and singable):\n{payload.lyrics}"
+        thinking = settings.llm_thinking_lyrics_humanize
     else:
         if not payload.prompt.strip():
             raise ApiError(422, "PROMPT_REQUIRED", "Provide a prompt to write lyrics from.")
         user = f"Write song lyrics for: {payload.prompt}"
-    text = _ask(request, LYRICS_SYSTEM, user, max_tokens=420)
+        thinking = settings.llm_thinking_lyrics_write
+    text = _ask(request, LYRICS_SYSTEM, user, max_tokens=1800 if thinking else 420, thinking=thinking)
     return JSONResponse({"text": text, "mode": payload.mode})
 
 
 @router.post("/llm/style-prompt")
 def llm_style_prompt(payload: StylePromptRequest, request: Request, owner_id: str = Depends(owner_from_request)) -> JSONResponse:
-    text = _ask(request, STYLE_SYSTEM, payload.description, max_tokens=60)
+    settings = request.app.state.settings
+    text = _ask(
+        request,
+        STYLE_SYSTEM,
+        payload.description,
+        max_tokens=120 if settings.llm_thinking_style else 60,
+        thinking=settings.llm_thinking_style,
+    )
     return JSONResponse({"style_prompt": text})
 
 
@@ -81,8 +107,15 @@ class TitleRequest(StrictModel):
 def llm_title(payload: TitleRequest, request: Request, owner_id: str = Depends(owner_from_request)) -> JSONResponse:
     if not payload.prompt.strip() and not payload.lyrics.strip():
         raise ApiError(422, "TITLE_INPUT_REQUIRED", "Provide a prompt or lyric excerpt.")
+    settings = request.app.state.settings
     user = f"Prompt: {payload.prompt.strip()}\nLyrics excerpt: {payload.lyrics.strip()[:1200]}"
-    text = _ask(request, TITLE_SYSTEM, user, max_tokens=40)
+    text = _ask(
+        request,
+        TITLE_SYSTEM,
+        user,
+        max_tokens=80 if settings.llm_thinking_title else 40,
+        thinking=settings.llm_thinking_title,
+    )
     return JSONResponse({"title": text.strip().strip('"')[:200]})
 
 
@@ -117,7 +150,8 @@ def llm_draft(payload: DraftRequest, request: Request, owner_id: str = Depends(o
     if payload.instrumental:
         user += " Instrumental (no lead vocals)."
     user += f"\nAvailable style tags (prefer these): {vocab}."
-    text = _ask(request, DRAFT_SYSTEM, user, max_tokens=700)
+    thinking = request.app.state.settings.llm_thinking_draft
+    text = _ask(request, DRAFT_SYSTEM, user, max_tokens=2600 if thinking else 700, thinking=thinking)
     lyrics, style, mood, title = text.strip(), "", "", ""
     try:
         start, end = text.index("{"), text.rindex("}") + 1

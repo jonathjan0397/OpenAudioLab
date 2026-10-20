@@ -85,6 +85,28 @@ if [ -n "${OAL_PUSH_TARGET:-}" ]; then
     trap 'kill $PUSH_PID 2>/dev/null; rsync -aq -e "$SSH_RSYNC" "${OAL_STORAGE_DIR:-/data/oal}/" "$OAL_PUSH_TARGET" 2>/dev/null || true' TERM
 fi
 
+# Optional task-locked lyrics LLM (Qwen3-4B via llama.cpp). Started before the
+# code bundle fetch so model load overlaps worker bootstrap.
+if [ "${OAL_LLM_AUTOSTART:-0}" = "1" ]; then
+    LLM_MODEL="${OAL_LLM_MODEL:-/opt/llm/qwen3-4b-q4_k_m.gguf}"
+    if command -v llama-server >/dev/null 2>&1 && [ -f "$LLM_MODEL" ]; then
+        echo "[worker] starting llama-server ($LLM_MODEL)"
+        llama-server \
+            --model "$LLM_MODEL" \
+            --host "${OAL_LLM_HOST:-0.0.0.0}" \
+            --port "${OAL_LLM_PORT:-8082}" \
+            --ctx-size "${OAL_LLM_CTX:-8192}" \
+            --n-gpu-layers "${OAL_LLM_GPU_LAYERS:-99}" \
+            --alias "${OAL_LLM_MODEL_NAME:-qwen3-4b}" \
+            --parallel 1 \
+            --flash-attn auto \
+            --reasoning-budget "${OAL_LLM_REASONING_BUDGET:-512}" \
+            >/tmp/llama-server.log 2>&1 &
+    else
+        echo "[worker] OAL_LLM_AUTOSTART=1 but llama-server/model is unavailable"
+    fi
+fi
+
 BACKEND="${OAL_BACKEND_URL:-http://10.0.0.1:50555}"
 APP_DIR="${OAL_APP_DIR:-/srv/openaudiolab/code}"
 ROLES=$(printf '%s' "${OAL_WORKER_ROLE:-engine_worker}" | tr ',' ' ')
