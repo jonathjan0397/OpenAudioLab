@@ -23,7 +23,7 @@ def _base(**over):
 
 def _paid_token(client, *, plan="beginner", subscription="active") -> str:
     """Create an account with a paid subscription + an API key owned by it; return bearer."""
-    token = "paid-" + token_sha256(plan + subscription + str(utcnow()))[:24]
+    token = "paid-" + token_sha256(plan + (subscription or "") + str(utcnow()))[:24]
     with client.app.state.db.session() as session:
         user = User(
             id=None, email=f"{token}@e.io", username=token[:20], password_hash="x",
@@ -54,6 +54,74 @@ def _post(client, token, body, key):
 
 def _quote(client, token, body):
     return client.post("/api/v1/generation/quote", json=body, headers=auth(token))
+
+
+from app.entitlements import has_paid_subscription
+from app.models import User
+
+
+def _u(plan, status=None, period=None, state="active"):
+    return User(id="x", email="e@e.io", username="u", password_hash="x", state=state,
+                plan=plan, subscription_status=status, current_period_end=period)
+
+
+def test_has_paid_subscription_matrix():
+    from datetime import datetime, timedelta, timezone
+    future = datetime.now(timezone.utc) + timedelta(days=10)
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    # paid tiers, various status/period states -> entitled
+    assert has_paid_subscription(_u("beginner", "active", future)) is True
+    assert has_paid_subscription(_u("pro", "active", future)) is True
+    assert has_paid_subscription(_u("premier", "active", None)) is True
+    assert has_paid_subscription(_u("pro", None, None)) is True          # tier set, no status row (the bug)
+    assert has_paid_subscription(_u("premier", None, future)) is True
+    assert has_paid_subscription(_u("beginner", "canceling", future)) is True
+    # not entitled
+    assert has_paid_subscription(_u("free", "active", future)) is False
+    assert has_paid_subscription(_u("pro", "canceled", None)) is False   # explicit cancellation
+    assert has_paid_subscription(_u("pro", "active", past)) is False     # expired period
+    assert has_paid_subscription(_u("premier", "unpaid", None)) is False
+    assert has_paid_subscription(_u("pro", "active", future, state="disabled")) is False
+    assert has_paid_subscription(None) is False
+
+
+def test_pro_and_premier_can_run_sft(client) -> None:
+    _grant_sft_worker(client)
+    for plan in ("pro", "premier"):
+        tok = _paid_token(client, plan=plan, subscription="active")
+        body = _base(model_selection="ace-step-1.5-sft", controls={"inference_steps": 50, "dcw_enabled": False})
+        q = _quote(client, tok, body)
+        assert q.status_code == 200, (plan, q.text)
+        r = _post(client, tok, dict(body, quote_id=q.json()["quote_id"]), f"mm-tier-{plan}")
+        assert r.status_code == 202, (plan, r.text)
+
+
+def test_pro_null_subscription_status_can_run_sft(client) -> None:
+    # Reproduces the reported failure: paid tier with no populated subscription_status.
+    _grant_sft_worker(client)
+    tok = _paid_token(client, plan="pro", subscription=None)
+    body = _base(model_selection="ace-step-1.5-sft", controls={"inference_steps": 50, "dcw_enabled": False})
+    q = _quote(client, tok, body)
+    assert q.status_code == 200, q.text
+    r = _post(client, tok, dict(body, quote_id=q.json()["quote_id"]), "mm-pro-null")
+    assert r.status_code == 202, r.text
+
+
+def test_premier_unprovisioned_premium_gets_503_not_403(client) -> None:
+    # A higher tier must not be told it lacks a subscription for a model that is
+    # simply not provisioned here; availability (503) is the honest answer.
+    tok = _paid_token(client, plan="premier", subscription="active")
+    for sel in ("ace-step-1.5-xl-sft", "ace-step-1.5-merge-sft-turbo"):
+        r = _post(client, tok, _base(model_selection=sel), f"mm-503-{sel}")
+        assert r.status_code == 503, (sel, r.text)
+        assert r.json()["error"]["code"] == "MODEL_UNAVAILABLE"
+
+
+def test_free_account_premium_still_403(client) -> None:
+    # Free accounts (any tier below paid) remain gated for provisioned premium.
+    _grant_sft_worker(client)
+    r = _post(client, "Bearer user-a-secret-token", _base(model_selection="ace-step-1.5-sft"), "mm-free-sft")
+    assert r.status_code == 403 and r.json()["error"]["code"] == "PREMIUM_MODEL_REQUIRES_PAID_PLAN"
 
 
 def test_turbo_locks_steps_and_cfg(client) -> None:
