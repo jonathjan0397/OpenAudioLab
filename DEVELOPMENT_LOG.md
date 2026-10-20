@@ -493,3 +493,27 @@ quote bind + 2x charge, tamper, expiry, catalog shape, OpenAPI). Frontend build
 Stage F provisioning `acestep-v15-sft` + live SFT audio validation, Stage G UI
 model selector + per-model drafts + quote display. Premium is honestly gated until
 a validated worker runs it. Nothing merged/deployed yet this phase.
+
+## 2026-10-20 — Phase 3 framework DEPLOYED (catalog/entitlements/quotes/capability routing/UI) + live-verified
+
+Merged `feat/phase3-multimodel` -> `master` (`bfb0f87`, FF). Built+pushed
+`stratastack/oal-backend:mm-bfb0f87`; hub `OAL_IMAGE_TAG=mm-bfb0f87`; compose up
+applied migrations 0027 (quotes) + 0028 (worker_capabilities, gpu_leases);
+restarted `oal-worker-hub` to pull the new bundle.
+
+Live verification on the deployed stack:
+- guest TURBO generation -> succeeded, real 2.88 MB/48kHz/15s non-synthetic audio;
+  Creation Card records `model_selection=ace-step-1.5-turbo` and reserved 10
+  credits (unchanged base) -> the serialized routing path did not regress Turbo.
+- guest premium `ace-step-1.5-sft` -> 403 (premium requires paid subscription).
+- `ace-step-1.5-xl-sft` -> 503 MODEL_UNAVAILABLE (unconfigured).
+- `GET /model-selections`: turbo `runnable=True`; sft/xl/merge `runnable=False`.
+- `worker_capabilities` auto-registered by the worker: turbo enabled, sft
+  `enabled=f` (checkpoint not installed). Premium is honestly gated and never
+  silently downgraded to Turbo.
+
+Still remaining for full Phase 3 (NOT done, NOT faked): Stage F provision
+`acestep-v15-sft` into a worker + run the first REAL SFT audio through the
+serialized GPU-0 swap and validate it; measured compute factors / peak-VRAM
+benchmarks; community merge validation. SFT stays capability-gated (503) until its
+checkpoint is provisioned + validated.
