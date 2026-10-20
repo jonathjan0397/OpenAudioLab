@@ -66,7 +66,10 @@ class AceStepProcess:
         self.start_timeout = start_timeout
         self.poll = poll
         self.proc: subprocess.Popen | None = None
-        self.model: str | None = None
+        # The checkpoint the server loads from the environment by default; keeps
+        # model tracking honest so the first premium job actually swaps, and a
+        # turbo job back does not needlessly restart.
+        self.model: str | None = os.environ.get("ACESTEP_CONFIG_PATH")
 
     def is_running(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
@@ -84,7 +87,7 @@ class AceStepProcess:
         # Only one heavy engine is resident at a time: a model change stops the
         # current server (freeing CUDA memory via process exit) before starting
         # the requested checkpoint. Passing None keeps the currently loaded model.
-        if model and self.is_running() and self.model and model != self.model:
+        if model and self.is_running() and self.model != model:
             log.info("engine model swap %s -> %s (stopping current to free GPU/RAM)", self.model, model)
             self.stop()
         if self.is_running() and self._healthy():

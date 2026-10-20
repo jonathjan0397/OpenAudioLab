@@ -113,3 +113,53 @@ def test_premium_job_swaps_engine_to_requested_model(orch) -> None:
     worker.run_once()
     # The engine was asked to ensure the sft model.
     assert "acestep-v15-sft" in proc.calls
+
+
+class _Swapper(AceStepProcess):
+    def __init__(self, model):
+        super().__init__(cwd="/", cmd=["true"], base_url="http://x")
+        self.model = model
+        self._alive = True
+        self.stops = 0
+
+    def is_running(self):
+        return self._alive
+
+    def _healthy(self):
+        return True
+
+    def stop(self):
+        self.stops += 1
+        self._alive = False
+
+
+def test_ensure_running_swaps_when_model_differs(monkeypatch):
+    import app.engine_worker as ew
+
+    started: list = []
+
+    class FakePopen:
+        def __init__(self, cmd, **kw):
+            started.append(cmd)
+
+    monkeypatch.setattr(ew.subprocess, "Popen", FakePopen)
+    proc = _Swapper("acestep-v15-house-turbo")
+    proc.ensure_running(model="acestep-v15-sft")
+    assert proc.stops == 1  # stopped the current engine
+    assert started and proc.model == "acestep-v15-sft"
+
+
+def test_ensure_running_no_restart_when_model_matches(monkeypatch):
+    import app.engine_worker as ew
+
+    started: list = []
+
+    class FakePopen:
+        def __init__(self, cmd, **kw):
+            started.append(cmd)
+
+    monkeypatch.setattr(ew.subprocess, "Popen", FakePopen)
+    proc = _Swapper("acestep-v15-house-turbo")
+    proc.ensure_running(model="acestep-v15-house-turbo")
+    assert proc.stops == 0 and started == [] and proc.model == "acestep-v15-house-turbo"
+
