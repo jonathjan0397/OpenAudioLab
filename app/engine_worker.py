@@ -532,79 +532,82 @@ class EngineWorker:
             return True
         claimed_job, attempt_id, lease_token = claim
         hb_thread, hb_stop = self._attempt_heartbeat_thread(attempt_id, lease_token)
-        with self.db.session() as session:
-            _claimed = get_job_by_id(session, claimed_job)
-            target_model = self._target_engine_model(dict(_claimed.request_json or {}))
-        # Start/swap the engine to the job's model AFTER claiming, so only the
-        # requested checkpoint is ever resident (serialized GPU ownership).
-        if self.engine_process is not None:
+        profile_path = None
+        try:
+            with self.db.session() as session:
+                _claimed = get_job_by_id(session, claimed_job)
+                target_model = self._target_engine_model(dict(_claimed.request_json or {}))
+            # Start/swap the engine to the job's model AFTER claiming, so only the
+            # requested checkpoint is ever resident (serialized GPU ownership).
+            if self.engine_process is not None:
+                try:
+                    self.engine_process.ensure_running(model=target_model)
+                except EngineError as exc:
+                    log.warning("engine start/swap failed for job %s (%s); requeueing", job_id, exc.code)
+                    self._mark_unhealthy(exc.code, exc.message)
+                    self._requeue(claimed_job, attempt_id, lease_token)
+                    time.sleep(5)
+                    return True
+            if target_model:
+                self.adapter.model = target_model
+            with self.db.session() as session:
+                job = get_job_by_id(session, claimed_job)
+                payload = self._payload_for(job)
+                profile_artifacts: dict | None = None
+                profile_version_id = dict(job.request_json).get("artist_profile_version_id")
+                if profile_version_id:
+                    from .models import ArtistProfileVersion
+
+                    version = session.get(ArtistProfileVersion, profile_version_id)
+                    if version is not None:
+                        profile_artifacts = dict(version.artifacts_json or {})
+                lora_artifacts: dict | None = None
+                lora_id = dict(job.request_json).get("lora_id")
+                if lora_id:
+                    from .models import Lora
+
+                    lora = session.get(Lora, lora_id)
+                    if lora is not None and lora.state == "active" and lora.storage_prefix and lora.files_json:
+                        lora_artifacts = {
+                            "adapter_object_prefix": lora.storage_prefix,
+                            "adapter_files": list(lora.files_json),
+                        }
+                        # M14e: the LoRA's tags act as style keywords guiding generation.
+                        extra = ", ".join(t for t in (lora.tags_json or []) if t)
+                        if extra:
+                            payload["prompt"] = f"{payload.get('prompt', '')}, {extra}".strip(", ")
+                append_event(session, claimed_job, "stage", "running", stage="submitting", attempt_id=attempt_id)
+                session.commit()
+            set_job_stage(self.db, claimed_job, "preparing model")
+
+            adapter_artifacts = lora_artifacts or profile_artifacts
+            profile_path = self._materialize_adapter(adapter_artifacts) if adapter_artifacts else None
+            if profile_path:
+                self.adapter.ensure_model()
+                try:
+                    self.adapter.unload_lora()
+                except EngineError:
+                    pass
+                self.adapter.load_lora(profile_path, adapter_name=f"oal-{uuid4().hex[:8]}")
+
             try:
-                self.engine_process.ensure_running(model=target_model)
+                submit = self.adapter.submit(payload)
             except EngineError as exc:
-                log.warning("engine start/swap failed for job %s (%s); requeueing", job_id, exc.code)
-                hb_stop.set()
-                self._mark_unhealthy(exc.code, exc.message)
-                self._requeue(claimed_job, attempt_id, lease_token)
-                time.sleep(5)
+                if exc.code == "ENGINE_BUSY":
+                    self._requeue(claimed_job, attempt_id, lease_token)
+                    return True
+                if _is_oom_message(exc.message):
+                    self._mark_unhealthy(exc.code, exc.message)
+                fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token, exc.code, exc.message)
                 return True
-        if target_model:
-            self.adapter.model = target_model
-        with self.db.session() as session:
-            job = get_job_by_id(session, claimed_job)
-            payload = self._payload_for(job)
-            profile_artifacts: dict | None = None
-            profile_version_id = dict(job.request_json).get("artist_profile_version_id")
-            if profile_version_id:
-                from .models import ArtistProfileVersion
 
-                version = session.get(ArtistProfileVersion, profile_version_id)
-                if version is not None:
-                    profile_artifacts = dict(version.artifacts_json or {})
-            lora_artifacts: dict | None = None
-            lora_id = dict(job.request_json).get("lora_id")
-            if lora_id:
-                from .models import Lora
-
-                lora = session.get(Lora, lora_id)
-                if lora is not None and lora.state == "active" and lora.storage_prefix and lora.files_json:
-                    lora_artifacts = {
-                        "adapter_object_prefix": lora.storage_prefix,
-                        "adapter_files": list(lora.files_json),
-                    }
-                    # M14e: the LoRA's tags act as style keywords guiding generation.
-                    extra = ", ".join(t for t in (lora.tags_json or []) if t)
-                    if extra:
-                        payload["prompt"] = f"{payload.get('prompt', '')}, {extra}".strip(", ")
-            append_event(session, claimed_job, "stage", "running", stage="submitting", attempt_id=attempt_id)
-            session.commit()
-        set_job_stage(self.db, claimed_job, "preparing model")
-
-        adapter_artifacts = lora_artifacts or profile_artifacts
-        profile_path = self._materialize_adapter(adapter_artifacts) if adapter_artifacts else None
-        if profile_path:
-            self.adapter.ensure_model()
-            try:
-                self.adapter.unload_lora()
-            except EngineError:
-                pass
-            self.adapter.load_lora(profile_path, adapter_name=f"oal-{uuid4().hex[:8]}")
-
-        try:
-            submit = self.adapter.submit(payload)
-        except EngineError as exc:
-            hb_stop.set()
-            if exc.code == "ENGINE_BUSY":
-                self._requeue(claimed_job, attempt_id, lease_token)
-                return True
-            if _is_oom_message(exc.message):
-                self._mark_unhealthy(exc.code, exc.message)
-            fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token, exc.code, exc.message)
-            return True
-
-        set_job_stage(self.db, claimed_job, "generating audio")
-        try:
+            set_job_stage(self.db, claimed_job, "generating audio")
             return self._run_generation(claimed_job, attempt_id, lease_token, submit, payload)
         finally:
+            # ALWAYS stop the lease-beating thread: on success, on requeue/fail returns,
+            # AND on any unexpected exception in the setup region. A leaked daemon that
+            # keeps heartbeating an orphaned attempt would otherwise stop the reconciler's
+            # interruption safety-valve and wedge the serialized GPU worker forever.
             hb_stop.set()
             if profile_path:
                 try:
