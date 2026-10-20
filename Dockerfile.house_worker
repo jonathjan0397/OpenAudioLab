@@ -1,0 +1,9 @@
+# Worker image with the promoted House merged checkpoint baked in.
+# Adds /opt/acestep/checkpoints/acestep-v15-house-turbo (from the corrected
+# house_070 merge) on top of the standard combined worker image, so every
+# baseline AND ephemeral Vast node can load the House model without a mount.
+# The original acestep-v15-turbo stays baked for rollback.
+ARG BASE=stratastack/oal-worker:45e39a5-torch2.10-cu128-ts8-qwen3
+FROM ${BASE}
+
+COPY acestep-v15-house-turbo/ /opt/acestep/checkpoints/acestep-v15-house-turbo/

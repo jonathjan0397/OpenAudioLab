@@ -109,6 +109,10 @@ BASELINE_FALLBACK_ROLE = os.environ.get("OAL_BASELINE_FALLBACK_ROLE", "engine_wo
 BASELINE_FALLBACK_CREATE_GUARD_SECONDS = float(os.environ.get("OAL_BASELINE_FALLBACK_CREATE_GUARD_SECONDS", "120"))
 PRIMARY_LLM_BASE_URL = os.environ.get("OAL_PRIMARY_LLM_BASE_URL", "")
 LLM_PORT = os.environ.get("OAL_LLM_PORT", "8082")
+# When set, generation (engine/audio) nodes load this baked checkpoint instead
+# of the image default. Training nodes keep the base DiT so LoRAs train against
+# the unmerged model.
+ACESTEP_MODEL = os.environ.get("OAL_ACESTEP_MODEL", "")
 
 # Offers whose instances repeatedly die during boot ("stuck loading") go here
 # for a few hours so pick_offer stops re-buying the same broken host.
@@ -357,6 +361,11 @@ def worker_env(transport="wg", slot=None, role="engine_worker", tier=None, llm=F
             # life); the autoscaler tears them down, so no idle-stop is needed.
             "-e OAL_ENGINE_IDLE_STOP_SECONDS=0",
         ]
+        if ACESTEP_MODEL:
+            env += [
+                f"-e ACESTEP_CONFIG_PATH={ACESTEP_MODEL}",
+                f"-e OAL_ACESTEP_MODEL={ACESTEP_MODEL}",
+            ]
     if transport in ("ts", "public"):
         # Vast containers cannot mount NFS (no CAP_SYS_ADMIN): write to local
         # disk and rsync-push to the hub over ssh instead.

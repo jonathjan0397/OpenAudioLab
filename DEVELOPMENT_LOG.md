@@ -239,3 +239,32 @@ Updated: `scripts/house_merge_ab.py`, `scripts/house_merge_ab_agent.sh`, `Docker
 `docs/HOUSE_LORA_TRAINING.md` now fully documents the end-to-end process: curation, tensor preprocessing, Vast training-agent flow, actual house-v1 hyperparameters and final checkpoint losses, ACE-Step LoRA runtime semantics, the failed first merge, the corrected `cat` + normalized-weight merge, sanity/full A/B runs, retention paths, promotion plan, and known pitfalls.
 
 Retention: all 13 trained LoRAs remain on the hub under `/srv/oal-storage/house-lora/house-v1-*/adapter`; corrected merged checkpoints are retained locally under `/Cold-Archive/OpenAudioLab/house-lora-ab/2026-10-19-v2/merged/` and on the hub under `/srv/oal-storage/house-lora/merge-ab-v2-2026-10-19/merged/`.
+
+## 2026-10-20 (later) — Promoted house_070 to the production default
+
+Owner chose `house_070` (corrected `cat`-normalized merge, total scale `0.70`)
+as the winner and asked to promote it immediately.
+
+Deployment shape: the combined worker image does **not** bake
+`/opt/acestep/checkpoints`; every node (baseline + Vast burst) materializes the
+base DiT/LM/VAE/embedding from the HuggingFace cache volume on first init. The
+house checkpoint has no HF-repo entry, so it must be baked. Built
+`Dockerfile.house_worker` as a thin layer over
+`stratastack/oal-worker:45e39a5-torch2.10-cu128-ts8-qwen3` that COPYs the house
+checkpoint in as `acestep-v15-house-turbo` (stable name; original
+`acestep-v15-turbo` still materializes for rollback). Pushed
+`stratastack/oal-worker:house-v1-070`.
+
+Config: `scripts/run_house_workers.sh` IMAGE + baseline
+`ACESTEP_CONFIG_PATH/OAL_ACESTEP_MODEL=acestep-v15-house-turbo` (gpu1 training
+worker intentionally left on the base DiT); `scripts/autoscale.py` gained
+`OAL_ACESTEP_MODEL` (applied to generation roles only); hub `.env.backend` set to
+the new image tag + model; `oal-autoscale.service` restarted (picks up env on
+future burst/fallback nodes).
+
+Validation: baseline recreated on the House image, health=healthy; in-container
+`/v1/init` returned `loaded_model: acestep-v15-house-turbo` and auto-restored
+`acestep-v15-turbo`, `acestep-5Hz-lm-1.7B`, `vae`, `Qwen3-Embedding-0.6B`; a real
+10 s instrumental `release_task` produced valid PCM WAV (48 kHz, stereo). Backend
+pytest still 203 passed. `.gitignore` excludes the 28GB `house-lora-ab/` review
+folder.

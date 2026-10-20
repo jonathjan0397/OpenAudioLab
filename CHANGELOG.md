@@ -62,6 +62,12 @@ owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_
   `/Cold-Archive/OpenAudioLab/house-lora-ab/2026-10-19-v2/`.
 - Fully documented the LoRA training and model merge processes in
   `docs/HOUSE_LORA_TRAINING.md`.
+- Promoted the `house_070` merged checkpoint to the production default as
+  `acestep-v15-house-turbo`: baked into worker image
+  `stratastack/oal-worker:house-v1-070` (`Dockerfile.house_worker`), baseline
+  worker recreated on it, and the autoscaler + hub `.env.backend` now pass
+  `ACESTEP_CONFIG_PATH`/`OAL_ACESTEP_MODEL=acestep-v15-house-turbo` to generation
+  nodes. `acestep-v15-turbo` remains available for rollback.
 
 ## [Milestone 5] - 2026-10-15
 
