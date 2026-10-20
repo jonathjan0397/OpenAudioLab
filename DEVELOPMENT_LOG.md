@@ -268,3 +268,50 @@ Validation: baseline recreated on the House image, health=healthy; in-container
 10 s instrumental `release_task` produced valid PCM WAV (48 kHz, stereo). Backend
 pytest still 203 passed. `.gitignore` excludes the 28GB `house-lora-ab/` review
 folder.
+
+## 2026-10-20 — Generation contract repair + ACE-Step control parity audit (branch `feat/generation-contract`)
+
+Author: opencode. Task type: spec milestone 0–2 (contract/identity) + control-parity audit.
+
+Ground truth first. Rechecked remotes/branches/PR instead of assuming: `master` (b878d71)
+already contains the `impl/guest-beginner-billing` snapshot `9d70eaf` plus newer house-promotion
+work, and the CONTROL_UNSUPPORTED bug was still present on it (`CreateWidget.tsx` set
+`controls.description` / `controls.styles`). PR #1 (`origin/fix/generation-controls` @ `1332528e`)
+removes exactly those two lines and was not merged. Chose to branch from `master` (strict
+superset; preserves newest work) and apply the equivalent correction + the surrounding contract
+repair rather than cherry-pick a stale-log commit.
+
+Root-cause beyond the two-line fix: the pinned worker source (`/opt/acestep` @ `ca1e85f`,
+`release_task_models.GenerateMusicRequest`) shows the adapter forwards only
+`bpm,key_scale,vocal_language,inference_steps,guidance_scale,shift,variations,seed,audio_duration,
+model,prompt,lyrics`. `mood` is consumed solely by `_auto_lora_match`; `gender` is consumed by
+nothing; `shift` is documented base-only (a no-op on the deployed Turbo model) yet the UI called it
+"Weirdness"; the widget hardcoded `lyrics_origin="frontend_llm"`, pre-seeded the live idea with a
+random example, and `.trim()`ed approved lyrics.
+
+Changes:
+- `frontend/src/lib/generation.ts`: single canonical serializer for every theme + Studio; emits
+  `song_idea` + `style_prompt` + resolved `music_description` caption (idea, mood, singer, style
+  folded in so the preference is actually effective), preserves exact lyrics, uses real
+  provenance (`human` vs `frontend_llm`), and only emits registry-supported controls.
+- `app/schemas.py`: added `song_idea`/`style_prompt` to `GenerateJobRequest`; auto-persisted in
+  `request_json` (recipe) — no hidden free-text in the control bag.
+- `app/registry.py`: unchanged (mood/gender remain accepted to preserve the tested API contract);
+  parity doc records their real consumption.
+- `frontend/src/api.ts`: typed `ApiError` envelope exposing `unknown_controls`/`supported_controls`
+  + `request_id` and an actionable `controlHint()`; strict backend rejection untouched.
+- `frontend/src/components/CreateWidget.tsx` + `Studio.tsx`: use the serializer; empty idea default
+  with click-to-accept example chips; shift slider relabeled "Timestep Shift", disabled with a
+  Turbo no-op note; Studio hydration reads the independent metadata with legacy fallback.
+
+Verification: backend `pytest 206 passed` (added `tests/test_generation_contract.py`:
+description/styles still rejected with field details + no job/idempotency record created;
+corrected payload with independent metadata admitted and persisted). Frontend `tsc -b && vite
+build` clean. Serializer executed directly against the real code for idea-only/style-only/both/
+instrumental/shift-0/auto-lyrics cases.
+
+Honest scope: this lands milestones 0–2 (contract) + the parity audit. Real source-conditioned
+remix/vocal/melody/repaint and extract/lego/complete (3A), the full advanced-control transport
+bridge (3B), and their real-audio gates (3C) remain not-wired / engine-blocked (Turbo worker, no
+`src_audio_path`/`task_type`/repaint bridge). Branch committed to `origin/feat/generation-contract`;
+not merged, not deployed (per spec).

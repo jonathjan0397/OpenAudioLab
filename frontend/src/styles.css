@@ -321,6 +321,9 @@ img.avatar { padding: 0; }
 /* create widget variants */
 .create-input-row { position: relative; display: flex; gap: 10px; align-items: flex-start; }
 .create-input-row textarea { flex: 1; }
+.create-examples { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
+.example-chip { font-size: 12px; color: var(--muted, #9a9a9a); background: transparent; border: 1px solid var(--border, #2a2a2a); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+.example-chip:hover { color: var(--fg, #eaeaea); border-color: var(--accent, #6a5cff); }
 .input-spark { color: var(--accent); font-size: 16px; padding-top: 9px; }
 .create-wide {
   position: relative; z-index: 1; background: var(--surface); border: 1px solid var(--border);

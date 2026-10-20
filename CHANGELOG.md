@@ -69,6 +69,33 @@ owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_
   `ACESTEP_CONFIG_PATH`/`OAL_ACESTEP_MODEL=acestep-v15-house-turbo` to generation
   nodes. `acestep-v15-turbo` remains available for rollback.
 
+### Generation contract + ACE-Step parity audit (2026-10-20)
+- Fixed the generation-submission blocker (`HTTP 422 CONTROL_UNSUPPORTED`): free-text song
+  idea and style direction are no longer placed in the engine `controls` bag. The shared
+  creator mutation (`frontend/src/components/CreateWidget.tsx`) now uses a canonical
+  serializer (`frontend/src/lib/generation.ts`) that keeps idea, raw style, and the resolved
+  non-lyric caption independent and emits only registry-supported controls. Incorporates the
+  intent of PR #1 (`1332528e`) without reverting newer work.
+- Added first-class typed metadata `song_idea` and `style_prompt` to `GenerateJobRequest`
+  (`app/schemas.py`); persisted in the recipe and read by Studio recreation with a legacy
+  fallback.
+- Corrected lyrics provenance (`human` vs `frontend_llm` instead of always `frontend_llm`)
+  and preserved exact, untrimmed approved lyrics in the frontend payload.
+- Folded the lead-singer preference into the non-lyric caption (the adapter has no gender
+  field) and relabeled the misnamed "Weirdness" slider to "Timestep Shift", disabled for the
+  Turbo model (upstream: shift only affects base checkpoints).
+- Frontend error handling now keeps a typed safe envelope (`ApiError`) exposing
+  `code`, `request_id`, `unknown_controls`, and `supported_controls`, with an actionable
+  hint and no leak of request bodies/paths.
+- Added `docs/ACE_STEP_CONTROL_PARITY.md` (audited against pinned `ca1e85f`
+  `release_task_models.GenerateMusicRequest`) and `docs/CAPABILITY_MATRIX.md`.
+- Tests: `tests/test_generation_contract.py` proves unsupported free-text controls are still
+  rejected with field details and reserve no work, and that the corrected payload with
+  independent metadata is admitted. Backend 206 passed; frontend build green.
+- Scope note: real remix / vocal / melody / repaint / extract / lego / complete (3A) and the
+  full advanced control bridge (3B/3C) remain **not-wired / engine-blocked** and are not
+  claimed complete.
+
 ## [Milestone 5] - 2026-10-15
 
 Artist profiles and real LoRA fine-tuning on hardware. Branch

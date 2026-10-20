@@ -21,6 +21,8 @@ class GenerateJobRequest(StrictModel):
     operation: str
     model_id: str
     music_description: str = Field(min_length=1, max_length=2000)
+    song_idea: str | None = Field(default=None, max_length=2000)
+    style_prompt: str | None = Field(default=None, max_length=2000)
     title: str | None = Field(default=None, max_length=200)
     lyrics: str | None = None
     lyrics_origin: LyricsOrigin | None = None

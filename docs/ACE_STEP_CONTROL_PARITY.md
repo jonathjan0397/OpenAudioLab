@@ -1,0 +1,118 @@
+# ACE-Step Control Parity Audit
+
+Authoritative source: pinned ACE-Step 1.5 commit `ca1e85fe9430179831e6bc6be790c332190a3866`
+(verified live from the deployed worker image, `git -C /opt/acestep rev-parse HEAD`).
+Reference model: `acestep/api/http/release_task_models.py::GenerateMusicRequest` (the
+`/release_task` REST contract the OpenAudioLab adapter actually calls).
+
+Statuses:
+- **forwarded** — OpenAudioLab sends this to the adapter today.
+- **accepted-noop** — accepted by the registry but not forwarded by the adapter.
+- **not-wired** — valid upstream control the adapter does not yet expose (needs a typed bridge).
+- **turbo-noop** — forwarded/valid but documented as having no effect on the deployed Turbo model.
+- **model-blocked** — the deployed Turbo worker cannot run this task; needs a base-family model provisioned.
+
+## Disposition of every `GenerateMusicRequest` field
+
+| Upstream field (aliases) | Type / default / range | OAL status | Notes |
+|---|---|---|---|
+| `prompt` | str "" | forwarded | = resolved `music_description` (non-lyric caption) |
+| `global_caption` | str "" | not-wired | SFT-stems `lego` global context |
+| `lyrics` | str "" | forwarded | exact approved lyrics only |
+| `thinking` | bool false | forwarded | DiT-only path keeps false |
+| `sample_mode` | bool false | not-wired | LM auto caption/lyrics; would violate approved-lyrics invariant if default-on |
+| `sample_query` | str "" | not-wired | paired with `sample_mode` |
+| `use_format` | bool false | not-wired | must never rewrite approved lyrics |
+| `model` | str null | forwarded | pinned `acestep-v15-house-turbo` / `acestep-v15-turbo` |
+| `bpm` | int null | forwarded | |
+| `key_scale` | str "" | forwarded | upstream name `keyscale`/`key_scale` |
+| `time_signature` | str "" | not-wired | musical structure control |
+| `vocal_language` | str "en" | forwarded | |
+| `inference_steps` | int 8 | forwarded | OAL "Quality" preset default 8 == upstream default |
+| `guidance_scale` | float 7.0 | forwarded | only when non-zero from UI |
+| `use_random_seed` | bool true | forwarded | derived from seed presence |
+| `seed` | int/str -1 | forwarded | explicit null-handling preserved for seed 0 |
+| `reference_audio_path` | str null | not-wired | **style/timbre reference** — Section 3A source/reference roles |
+| `src_audio_path` | str null | not-wired | **source audio** for cover/repaint/extract/lego/complete — 3A blocker |
+| `audio_duration` | float null | forwarded | custom duration incl. 185/190/210 (guest cap enforced server-side) |
+| `batch_size` | int null | forwarded | from `variations` (1–4) |
+| `repainting_start` | float 0.0 | not-wired | 3A repaint |
+| `repainting_end` | float null | not-wired | 3A repaint |
+| `instruction` | str DEFAULT_DIT_INSTRUCTION | not-wired | "Fill the audio semantic mask based on the given conditions:" |
+| `audio_cover_strength` | float 1.0 | not-wired | 3B — distinct from cover_noise_strength (must not be merged into a "Weirdness" slider) |
+| `cover_noise_strength` | float 0.0 | not-wired | 3B — 0=pure noise, 1=closest to source |
+| `audio_code_string` | str "" | not-wired | explicit source codes; precedes LM codes |
+| `task_type` | str "text2music" | not-wired | Turbo/SFT support text2music, repaint, cover, cover-nofsq; base adds extract, lego, complete |
+| `chunk_mask_mode` | enum auto {explicit,auto} | not-wired | 3A repaint |
+| `repaint_latent_crossfade_frames` | int 10 | not-wired | 3A boundary blend |
+| `repaint_wav_crossfade_sec` | float 0.0 | not-wired | 3A crossfade |
+| `repaint_mode` | enum balanced {conservative,balanced,aggressive} | not-wired | 3A |
+| `repaint_strength` | float 0.5 (0–1) | not-wired | only in balanced mode; polarity to be resolved via runtime path |
+| `analysis_only` | bool false | not-wired | admin/diagnostic |
+| `full_analysis_only` | bool false | not-wired | admin/diagnostic |
+| `extract_codes_only` | bool false | not-wired | 3A code control |
+| `use_adg` | bool false | not-wired | applicability varies by checkpoint |
+| `cfg_interval_start` | float 0.0 | not-wired | 3B |
+| `cfg_interval_end` | float 1.0 | not-wired | 3B |
+| `infer_method` | str "ode" (ode|sde) | not-wired | 3B |
+| `shift` | float 3.0 (1–5) | turbo-noop | documented "only effective for base models, not turbo"; UI disabled + relabeled off "Weirdness" |
+| `timesteps` | str null | not-wired | overrides inference_steps+shift; precedence to expose |
+| `dcw_enabled` | bool null | not-wired | model-resolved default; forced-on non-turbo distorts (issue #1259) |
+| `dcw_mode` | enum double {low,high,double,pix} | not-wired | expert |
+| `dcw_scaler` | float 0.05 | not-wired | expert |
+| `dcw_high_scaler` | float 0.02 | not-wired | expert |
+| `dcw_wavelet` | str "haar" | not-wired | expert |
+| `audio_format` | str "mp3" | forwarded (fixed "wav") | OAL locks wav mix; mp3 derived from lossless in export path |
+| `use_tiled_decode` | bool true | not-wired | runtime/memory profile |
+| `lm_model_path` | str null | not-wired | runtime profile (5Hz LM selection) |
+| `lm_backend` | enum vllm {vllm,pt,mlx} | not-wired | runtime profile |
+| `constrained_decoding` | bool true | not-wired | planning |
+| `constrained_decoding_debug` | bool false | not-wired | redacted/diagnostic |
+| `use_cot_caption` | bool true | forwarded (off when not thinking) | planning provenance |
+| `use_cot_language` | bool true | forwarded (off when not thinking) | planning provenance |
+| `is_format_caption` | bool false | not-wired | caption action |
+| `allow_lm_batch` | bool true | not-wired | batching |
+| `track_name` | str null | not-wired | model registry list: woodwinds, brass, fx, synth, strings, percussion, keyboard, guitar, bass, drums, backing_vocals, vocals |
+| `track_classes` | list null | not-wired | complete/lego track classes |
+| `lm_temperature` | float 0.85 | not-wired | 5Hz planning |
+| `lm_cfg_scale` | float 2.5 | not-wired | 5Hz planning |
+| `lm_top_k` | int null | not-wired | 5Hz planning |
+| `lm_top_p` | float 0.9 | not-wired | 5Hz planning |
+| `lm_repetition_penalty` | float 1.0 | not-wired | 5Hz planning |
+| `lm_negative_prompt` | str "NO USER INPUT" | not-wired | 5Hz planning |
+
+## Controls named in the spec but NOT present in the `/release_task` REST model
+
+These live only at `GenerationParams`/Gradio level and therefore require a **reviewed typed
+worker bridge**; they cannot be shipped today and are marked **not-wired / needs-bridge**:
+
+- `retake_seed`, `retake_variance` (retake / controlled variation)
+- `flow_edit_morph`, `flow_edit_source_caption`, `flow_edit_source_lyrics`,
+  `flow_edit_n_min`, `flow_edit_n_max`, `flow_edit_n_avg` (source-to-target morph is an
+  overlay, not a native `edit` task)
+- `velocity_norm_threshold`, `velocity_ema_factor`, `latent_shift`, `latent_rescale`
+  (verified absent from this REST model; internal/Gradio only)
+- `cot_bpm`, `cot_keyscale`, `cot_timesignature`, `cot_duration`, `cot_vocal_language`,
+  `cot_caption`, `cot_lyrics` — generated planning metadata; surfaced read-only, never to
+  overwrite approved inputs
+- `seeds`, `lm_batch_chunk_size`, `use_constrained_decoding`, `sample_query` batch variants
+
+## Task / model compatibility (verified at ca1e85f)
+
+- `TASK_TYPES` = text2music, repaint, cover, cover-nofsq, extract, lego, complete
+- `TASK_TYPES_TURBO` = text2music, repaint, cover, cover-nofsq
+- `TASK_TYPES_BASE` adds extract, lego, complete
+- Deployed worker model = `acestep-v15-turbo` (and promoted `acestep-v15-house-turbo`, same
+  Turbo family). **Extract / Lego / Complete are model-blocked** on the current worker and
+  require provisioning a base-family checkpoint, not UI simulation.
+
+## OpenAudioLab control-bag contract (post-repair)
+
+The public `controls` map is validated against `app/registry.py::supported_controls` and must
+equal what the adapter forwards. For `ace-step-1.5` the accepted+forwarded set is:
+`bpm, key_scale, vocal_language, inference_steps, guidance_scale, shift(turbo-noop),
+variations`. `mood` and `gender` are accepted by the registry: `mood` is consumed by the
+auto-LoRA matcher, and both are now folded into the resolved non-lyric caption so they
+actually reach the model. Free-text song **idea** and raw **style** are first-class request
+fields (`song_idea`, `style_prompt`) — never control-bag keys — and persist independently in
+the recipe for recreation.

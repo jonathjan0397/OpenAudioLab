@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, AuthUser, GuestAllowance, PolicyPayload } from "../api";
+import { api, ApiError, AuthUser, GuestAllowance, PolicyPayload } from "../api";
+import { buildGenerationRequest } from "../lib/generation";
 import ArtworkTile from "./ArtworkTile";
 import Waveform from "./Waveform";
 import { usePlayer } from "./PlayerContext";
@@ -131,7 +132,7 @@ export default function CreateWidget({
   const [draftOpen, setDraftOpen] = useState(Boolean(saved.draftOpen ?? false));
   const [sheetOpen, setSheetOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [desc, setDesc] = useState(String(saved.desc || EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)]));
+  const [desc, setDesc] = useState(String(saved.desc || ""));
   const [styles, setStyles] = useState(String(saved.styles || ""));
   const [lyrics, setLyrics] = useState(String(saved.lyrics || ""));
   const [drafted, setDrafted] = useState(Boolean(saved.drafted ?? false));
@@ -277,39 +278,41 @@ export default function CreateWidget({
 
   const generate = useMutation({
     mutationFn: async () => {
-      let finalLyrics = lyrics.trim() || undefined;
-      if (!instrumental && !finalLyrics) {
+      const userLyrics = lyrics;
+      let finalLyrics = userLyrics;
+      let lyricsProvided = userLyrics.trim().length > 0;
+      if (!instrumental && !lyricsProvided) {
         const r = await api.post<{ text: string }>("/api/v1/llm/lyrics", { prompt: desc, mode: "write" });
         finalLyrics = r.text;
       }
-      const controls: Record<string, unknown> = {};
-      if (desc.trim()) controls.description = desc.trim();
-      if (styles.trim()) controls.styles = styles.trim();
-      if (mood) controls.mood = mood.toLowerCase();
-      if (!instrumental && gender) controls.gender = gender;
-      if (bpm) controls.bpm = Number(bpm);
-      if (keyScale) controls.key_scale = keyScale;
-      if (language) controls.vocal_language = language;
-      if (shift !== 1) controls.shift = shift;
-      if (quality !== 8) controls.inference_steps = quality;
-      if (variations > 1) controls.variations = variations;
-      const parts = [desc, mood ? `${mood.toLowerCase()} mood` : "", styles].filter(Boolean);
+      const durationSeconds = mode === "extend" ? Math.min(duration + 60, 600) : duration;
+      const body = buildGenerationRequest({
+        idea: desc,
+        styles,
+        mood,
+        gender,
+        bpm,
+        keyScale,
+        language,
+        shift,
+        quality,
+        guidance: 0,
+        variations,
+        title: title.trim() || draftTitle,
+        lyrics: finalLyrics,
+        lyricsProvided,
+        instrumental,
+        durationSeconds,
+        loraId,
+        seed: mode === "remix" ? Math.floor(Math.random() * 1_000_000_000) : undefined,
+      });
+      if (isGuest) {
+        body.policy_accepted = guestPolicyAccepted || policyAccepted;
+        if (policies.data?.version) body.policy_version = policies.data.version;
+      }
       return api.post<JobAccepted>(
         "/api/v1/jobs",
-        {
-          operation: "music.generate",
-          model_id: "ace-step-1.5",
-          music_description: parts.join(", "),
-          ...((title.trim() || draftTitle) ? { title: (title.trim() || draftTitle).slice(0, 200) } : {}),
-          ...(finalLyrics && !instrumental ? { lyrics: finalLyrics, lyrics_origin: "frontend_llm" } : {}),
-          controls,
-          duration_seconds: mode === "create" && easy ? undefined : mode === "extend" ? Math.min(duration + 60, 600) : duration,
-          ...(mode === "remix" ? { seed: Math.floor(Math.random() * 1_000_000_000) } : {}),
-          instrumental,
-          ...(loraId ? { lora_id: loraId } : {}),
-          ...(isGuest ? { policy_accepted: guestPolicyAccepted || policyAccepted, policy_version: policies.data?.version } : {}),
-          outputs: ["mix_wav"],
-        },
+        body,
         { "Idempotency-Key": crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}` }
       );
     },
@@ -318,8 +321,9 @@ export default function CreateWidget({
       setJobId(d.job_id);
       qc.invalidateQueries({ queryKey: ["guest"] });
     },
-    onError: (e: Error) => {
-      setError(e.message);
+    onError: (e: unknown) => {
+      const err = e instanceof ApiError ? e : null;
+      setError(err?.controlHint() || err?.message || "Generation failed. Please try again.");
       qc.invalidateQueries({ queryKey: ["guest"] });
     },
   });
@@ -431,6 +435,13 @@ export default function CreateWidget({
                 {busy ? "✦ Generating…" : actionLabel} →
               </button>
             )}
+          </div>
+          <div className="create-examples" role="group" aria-label="Song idea suggestions">
+            {EXAMPLES.slice(0, 4).map((ex) => (
+              <button key={ex} type="button" className="example-chip" onClick={() => { pushHistory(); setDesc(ex); }} title="Use this idea">
+                {ex}
+              </button>
+            ))}
           </div>
           <div className="create-simple-row">
             <input className="create-title" placeholder="Song title (optional)" maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -595,8 +606,18 @@ export default function CreateWidget({
               </div>
               <div className="field ctrl">
                 <div className="field">
-                  <label>Weirdness {shift.toFixed(2)}</label>
-                  <input type="range" min={0.5} max={2} step={0.05} value={shift} onChange={(e) => setShift(Number(e.target.value))} />
+                  <label>Timestep Shift {shift.toFixed(2)}</label>
+                  <input
+                    type="range"
+                    min={1}
+                    max={5}
+                    step={0.25}
+                    value={shift}
+                    disabled
+                    title="Not applied to the current Turbo model. Timestep shift only affects base (non-turbo) checkpoints."
+                    onChange={(e) => setShift(Number(e.target.value))}
+                  />
+                  <span className="sub">No audible effect on Turbo — base models only.</span>
                 </div>
               </div>
               <div className="field ctrl">
