@@ -454,3 +454,42 @@ and the entered seconds-region. Serializer vitest -> 13. Live OpenAudioLab-path 
 with the exact payload succeeded: 15s 48kHz stereo real audio, lineage region 3–11 /
 balanced / 0.6 / chunk auto. Honest limits surfaced: genuine lengthening/continuation
 is a distinct capability (repaint only edits within the clip), not faked.
+
+## 2026-10-20 — Phase 3 (multi-model) backend: catalog, entitlements, quotes, Turbo CFG lock, capability routing (branch `feat/phase3-multimodel`)
+
+Implemented the multi-model platform core (Stages A–D + lineage), tested, no
+premature exposure of unrun models.
+
+- `app/catalog.py`: versioned catalog of the four public `model_selections` ->
+  engine releases + execution profiles + a provisional `PRICE_POLICY_VERSION`
+  (turbo 1.0, sft 2.0, xl 4.0, merge 1.5; compute_factor default 1.0). Only
+  `turbo-fast-v1` is `available`; `sft-quality-v1` is available-but-gated by a
+  registered `worker_capability`; `xl-sft-premium-4b-v1` and
+  `merge-experimental-v1` are `unconfigured` -> 503 (never a silent Turbo
+  downgrade). Engine-grounded: Turbo locks steps=8/CFG=1.0; SFT/XL 50–100 /
+  CFG 2–3 / DCW off; `sampler_mode`/ancestral/600-step rejected (not native to
+  ca1e85f); effective-NFE ceiling derived from `timesteps`.
+- `app/entitlements.py`: premium requires a real paid subscription resolved from
+  the account behind a cookie OR an account API key (`usr_` owner). A balance or
+  plan label is not entitlement; guests/unsubscribed -> 403; Turbo unaffected.
+- Migrations 0027 (`quotes`), 0028 (`worker_capabilities`, `gpu_leases`).
+- `routes/jobs.py`: `model_id` now optional; `POST /api/v1/generation/quote`
+  issues owner+hash-bound quotes with a TTL; `create_job` resolves the catalog,
+  enforces entitlement + eligible worker + profile controls, binds and consumes
+  the quote, and charges exactly the quoted amount atomically (403/402/409/503/422
+  per spec). Turbo charge and guest 4/120s limits unchanged.
+- `orchestration`: Creation Card records model_selection/profile/engine/planner/
+  family + quote_id/policy_version/reserved_credits.
+- `GET /api/v1/model-selections` returns public catalog (ranges/availability/
+  pricing, no engine paths); OpenAPI exposes the new endpoints.
+
+Tests: backend **232 passed** (new `tests/test_multimodel.py`: Turbo lock,
+entitlement 403, unconfigured 503, no-compatible-worker 503, QUOTE_REQUIRED,
+quote bind + 2x charge, tamper, expiry, catalog shape, OpenAPI). Frontend build
++ vitest unchanged (13).
+
+**Remaining this phase (NOT done, NOT faked):** Stage E GPU-0 alternation runtime
+(worker model-swap under a fenced lease + VRAM re-check + planner in-process),
+Stage F provisioning `acestep-v15-sft` + live SFT audio validation, Stage G UI
+model selector + per-model drafts + quote display. Premium is honestly gated until
+a validated worker runs it. Nothing merged/deployed yet this phase.
