@@ -12,16 +12,21 @@ Grounded against the pinned engine (ca1e85f):
 - SFT/Base are separate families; SFT defaults DCW off (model-aware upstream
   default); the pinned REST has no `sampler_mode`, so euler/heun/ancestral are
   rejected, and `timesteps` overrides steps (effective NFE is counted).
+- Denoising defaults follow upstream per-model recommendations (not the low
+  initial values). Non-turbo (sft/xl-sft/merge): steps 64/100/64, guidance 7.0
+  (band 5.0-9.0; upstream default 7.0, "typical 5-9", best-quality 7-9), shift
+  1.0, DCW off. Turbo-family (turbo/xl-turbo) is CFG-distilled: steps 8 +
+  guidance 1.0 locked, shift 3.0, DCW on (turbo default). `shift` is a
+  profile-owned band so it is exempt from the registry's base-only marker.
 - XL (4B) DiT models are first-class in the pinned runtime (upstream issue #990,
-  PR #989, merged before ca1e85f). XL-SFT / XL-Turbo load at ~9 GB bf16
-  (upstream `MODEL_VRAM["dit_xl_base"]=9.0`) and are explicitly tier6b (20-24 GB)
-  in `gpu_config.py:428-449` ("XL fits without offload"). VRAM floor set to
-  15 GB so the 24 GB baseline worker can serve them (with llama-server shrink
-  via `OAL_LLM_CTX=4096` + `OAL_LLM_GPU_LAYERS=32` the static footprint is
-  ~13.7 GB leaving 8 GB headroom on 24 GB).
-- XL-Turbo is CFG-distilled (`modeling_acestep_v15_xl_turbo.py:1845-1923`
-  forces `diffusion_guidance_scale=1.0` and rejects CFG/ADG), mirroring
-  `turbo-fast-v1`: 8 steps locked, guidance locked 1.0.
+  PR #989, merged before ca1e85f). The 4B DiT is ~9 GB bf16 resident, but the
+  full engine (DiT + Qwen3-0.6B text encoder [1.2 GB] + VAE + activations) peaks
+  ~20.6 GiB WITHOUT offload, which OOMs a 24 GB card beside a GPU-resident
+  llama-server (the "XL fits without offload" tier6b note was wrong for the full
+  process). The worker therefore runs `ACESTEP_OFFLOAD_TO_CPU=1` + int8 weight-only
+  DiT (`ACESTEP_QUANTIZATION=int8_weight_only`, halving the resident DiT), holding
+  a measured steady ~13.5 GB so XL-Turbo/XL-SFT serve alongside the lyrics
+  llama-server still on GPU (same 15 GB VRAM floor below).
 - The community merge stays unconfigured until its exact checkpoint/license/VRAM
   are approved and benchmarked.
 
@@ -75,6 +80,13 @@ class ExecutionProfile:
     # floor (15 GB) lets the shared 24 GB baseline worker serve it once the
     # llama-server footprint is shrunk (OAL_LLM_CTX/OAL_LLM_GPU_LAYERS).
     vram_required_mb: int = 0
+    # Timestep-shift band the profile exposes to the DiT. Effective for the base
+    # family (sft/xl/merge); turbo-family distills a discrete {1,2,3} schedule and
+    # defaults to 3.0. Profile owns the band so it is exempt from the registry's
+    # base-only applicability marker (see validate_profile_controls).
+    shift_min: float = 1.0
+    shift_max: float = 5.0
+    shift_default: float = 1.0
 
     def control_schema(self) -> dict[str, Any]:
         steps: dict[str, Any] = {"type": "integer", "minimum": self.steps_min, "maximum": self.steps_max}
@@ -92,6 +104,12 @@ class ExecutionProfile:
             },
             "dcw_enabled": {"type": "boolean", "const": False} if self.dcw_forced_off else {"type": "boolean"},
             "infer_method": {"type": "string", "enum": list(self.sampler_modes)},
+            "shift": {
+                "type": "number",
+                "minimum": self.shift_min,
+                "maximum": self.shift_max,
+                "default": self.shift_default,
+            },
             "tasks": list(self.tasks),
             "max_duration_seconds": self.max_duration_seconds,
             "max_batch": self.max_batch,
@@ -143,6 +161,7 @@ def _turbo() -> ModelRelease:
                 max_duration_seconds=600, max_batch=4,
                 availability="available", multiplier=1.00,
                 vram_required_mb=14000,
+                shift_min=1.0, shift_max=3.0, shift_default=3.0,
             ),
         ),
     )
@@ -161,15 +180,16 @@ def _sft() -> ModelRelease:
                 engine_model="acestep-v15-sft",
                 native_family="sft",
                 label="Quality",
-                quality_note="50-100 steps, CFG 2.0-3.0, DCW off (safe non-turbo profile).",
-                steps_min=50, steps_max=100, steps_default=50,
-                cfg_min=2.0, cfg_max=3.0, cfg_default=3.0, cfg_locked=False,
+                quality_note="64 steps (50-100), CFG 7.0 (5-9), DCW off, shift 1.0 (safe non-turbo profile).",
+                steps_min=50, steps_max=100, steps_default=64,
+                cfg_min=5.0, cfg_max=9.0, cfg_default=7.0, cfg_locked=False,
                 dcw_forced_off=True,
                 planner_model="acestep-5Hz-lm-1.7B",
                 tasks=("text2music", "cover", "cover-nofsq", "repaint"),
                 max_duration_seconds=600, max_batch=2,
                 availability="available", multiplier=2.00,
                 vram_required_mb=15000,
+                shift_min=1.0, shift_max=3.0, shift_default=1.0,
             ),
         ),
     )
@@ -191,15 +211,16 @@ def _xl() -> ModelRelease:
                 engine_model=ckpt or "acestep-v15-xl-sft",
                 native_family="xl",
                 label="Premium (XL 4B DiT)",
-                quality_note="XL 4B DiT (SFT); higher fidelity than 2B SFT. ~9 GB bf16; fits a 24 GB worker.",
-                steps_min=50, steps_max=100, steps_default=50,
-                cfg_min=2.0, cfg_max=3.0, cfg_default=3.0, cfg_locked=False,
+                quality_note="XL 4B DiT (SFT); 100 steps, CFG 7.0 (5-9), DCW off, shift 1.0. int8 DiT fits a 24 GB worker.",
+                steps_min=50, steps_max=100, steps_default=100,
+                cfg_min=5.0, cfg_max=9.0, cfg_default=7.0, cfg_locked=False,
                 dcw_forced_off=True,
                 planner_model=None,
                 tasks=("text2music", "cover", "repaint"),
                 max_duration_seconds=600, max_batch=1,
                 availability="available" if ckpt else "unconfigured", multiplier=4.00,
                 vram_required_mb=15000,
+                shift_min=1.0, shift_max=3.0, shift_default=1.0,
             ),
         ),
     )
@@ -221,15 +242,16 @@ def _xl_turbo() -> ModelRelease:
                 engine_model=ckpt or "acestep-v15-xl-turbo",
                 native_family="xl",
                 label="Fast (XL 4B DiT)",
-                quality_note="XL 4B DiT (Turbo); CFG-distilled, 8 steps. Fast, higher fidelity than 2B turbo.",
+                quality_note="XL 4B DiT (Turbo); CFG-distilled, 8 steps, DCW on, shift 3.0. Fast, higher fidelity than 2B turbo.",
                 steps_min=8, steps_max=8, steps_default=8,
                 cfg_min=1.0, cfg_max=1.0, cfg_default=1.0, cfg_locked=True,
-                dcw_forced_off=True,
+                dcw_forced_off=False,  # turbo-family distillation default (DCW on), matches 2B turbo
                 planner_model=None,
                 tasks=("text2music", "cover", "repaint"),
                 max_duration_seconds=600, max_batch=1,
                 availability="available" if ckpt else "unconfigured", multiplier=2.00,
                 vram_required_mb=15000,
+                shift_min=1.0, shift_max=3.0, shift_default=3.0,
             ),
         ),
     )
@@ -254,14 +276,15 @@ def _merge() -> ModelRelease:
                 label="Experimental merge",
                 quality_note="Operator-provided community checkpoint; may produce composition artifacts. "
                              "Set OAL_MERGE_CHECKPOINT_ID after validating exact repo/revision/license/VRAM.",
-                steps_min=20, steps_max=40, steps_default=32,
-                cfg_min=4.0, cfg_max=5.0, cfg_default=4.5, cfg_locked=False,
-                dcw_forced_off=False,
+                steps_min=50, steps_max=100, steps_default=64,
+                cfg_min=5.0, cfg_max=9.0, cfg_default=7.0, cfg_locked=False,
+                dcw_forced_off=True,
                 planner_model=None,
                 tasks=("text2music",) if ckpt else (),
                 max_duration_seconds=600, max_batch=1,
                 availability="available" if ckpt else "unconfigured", multiplier=1.50,
                 vram_required_mb=16000,
+                shift_min=1.0, shift_max=3.0, shift_default=1.0,
             ),
         ),
     )
@@ -365,7 +388,12 @@ def validate_profile_controls(profile: ExecutionProfile, controls: dict[str, Any
 
     # Applicability: a control restricted to certain families must not be sent on
     # a release outside those families (e.g. base-only `shift` on Turbo).
+    # `shift` is exempt: the ExecutionProfile owns its band/defaults per model
+    # (turbo distills a discrete schedule, base/sft/merge use 1.0), so the
+    # registry's base-only marker is not consulted here.
     for key in controls:
+        if key == "shift":
+            continue
         spec = CONTROL_SPECS.get(key)
         if spec is not None and spec.families is not None and profile.native_family not in spec.families:
             raise CatalogError(
@@ -407,6 +435,17 @@ def validate_profile_controls(profile: ExecutionProfile, controls: dict[str, Any
         raise CatalogError(422, "MODEL_PARAMETER_CONFLICT", "guidance_scale out of range for this model.",
                            {"control": "guidance_scale", "min": profile.cfg_min, "max": profile.cfg_max})
 
+    # Shift (profile-owned band). Fills the default when omitted so non-turbo
+    # inherits its training-appropriate value (1.0) rather than the REST 3.0, and
+    # turbo-family keeps its discrete-schedule default (3.0). Never clamps explicit.
+    shift = controls.get("shift", profile.shift_default)
+    if not isinstance(shift, (int, float)) or isinstance(shift, bool):
+        raise CatalogError(422, "MODEL_PARAMETER_CONFLICT", "shift must be numeric.", {"control": "shift"})
+    shift = float(shift)
+    if not profile.shift_min - 1e-6 <= shift <= profile.shift_max + 1e-6:
+        raise CatalogError(422, "MODEL_PARAMETER_CONFLICT", "shift out of range for this model.",
+                           {"control": "shift", "min": profile.shift_min, "max": profile.shift_max})
+
     # DCW: safe SFT/XL profiles force it off; explicit non-False is a conflict.
     if "dcw_enabled" in controls and controls["dcw_enabled"] is not None:
         if not isinstance(controls["dcw_enabled"], bool):
@@ -415,7 +454,7 @@ def validate_profile_controls(profile: ExecutionProfile, controls: dict[str, Any
             raise CatalogError(422, "MODEL_PARAMETER_CONFLICT", f"{profile.label} requires DCW off.",
                                {"control": "dcw_enabled", "required": False})
 
-    resolved = {**{"inference_steps": steps, "guidance_scale": cfg}, **{k: v for k, v in controls.items() if k not in ("inference_steps", "guidance_scale")}}
+    resolved = {**{"inference_steps": steps, "guidance_scale": cfg, "shift": shift}, **{k: v for k, v in controls.items() if k not in ("inference_steps", "guidance_scale", "shift")}}
 
     # Custom timesteps override steps (effective NFE must respect the budget).
     nfe = _effective_nfe(resolved)

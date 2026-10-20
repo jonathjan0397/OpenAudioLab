@@ -182,14 +182,16 @@ def test_premium_vram_floors_are_declared():
 def test_xl_turbo_profile_is_cfg_distilled_and_locked():
     from app import catalog
     # XL-Turbo is CFG-distilled (upstream forces guidance=1.0, rejects CFG/ADG),
-    # so it mirrors turbo-fast-v1: 8 steps locked, guidance locked at 1.0, DCW off.
+    # so it mirrors turbo-fast-v1: 8 steps locked, guidance locked at 1.0, DCW on
+    # (turbo-family distillation default, matching 2B turbo), shift 3.0.
     p = catalog.CATALOG["ace-step-1.5-xl-turbo"].profiles[0]
     assert p.profile_id == "xl-turbo-fast-v1"
     assert p.native_family == "xl"
     assert (p.steps_min, p.steps_max, p.steps_default) == (8, 8, 8)
     assert (p.cfg_min, p.cfg_max, p.cfg_default) == (1.0, 1.0, 1.0)
     assert p.cfg_locked is True
-    assert p.dcw_forced_off is True
+    assert p.dcw_forced_off is False  # turbo-family DCW default (on)
+    assert (p.shift_min, p.shift_max, p.shift_default) == (1.0, 3.0, 3.0)
     assert p.planner_model is None
     assert p.multiplier == 2.00
     assert p.tasks == ("text2music", "cover", "repaint")
@@ -199,6 +201,7 @@ def test_xl_turbo_profile_is_cfg_distilled_and_locked():
     schema = p.control_schema()
     assert schema["inference_steps"]["const"] == 8
     assert schema["guidance_scale"]["const"] == 1.0 and schema["guidance_scale"]["locked"] is True
+    assert schema["shift"]["default"] == 3.0 and schema["shift"]["maximum"] == 3.0
 
 
 def test_xl_sft_profile_uses_xl_family_and_no_planner():

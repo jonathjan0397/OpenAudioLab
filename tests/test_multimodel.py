@@ -151,8 +151,11 @@ def test_turbo_locks_steps_and_cfg(client) -> None:
     assert r.status_code == 422 and r.json()["error"]["code"] == "MODEL_PARAMETER_CONFLICT"
     r = _post(client, tok, _base(model_selection="ace-step-1.5-turbo", controls={"guidance_scale": 7}), "mm-2")
     assert r.status_code == 422 and r.json()["error"]["code"] == "MODEL_PARAMETER_CONFLICT"
-    r = _post(client, tok, _base(model_selection="ace-step-1.5-turbo", controls={"shift": 3}), "mm-3")
-    assert r.status_code == 422 and r.json()["error"]["code"] == "CONTROL_UNSUPPORTED"
+    # shift is now a profile-owned band (turbo 1.0-3.0); in-band is accepted, above is rejected.
+    r = _post(client, tok, _base(model_selection="ace-step-1.5-turbo", controls={"shift": 5}), "mm-3")
+    assert r.status_code == 422 and r.json()["error"]["code"] == "MODEL_PARAMETER_CONFLICT"
+    r = _post(client, tok, _base(model_selection="ace-step-1.5-turbo", controls={"shift": 3}), "mm-3b")
+    assert r.status_code == 202, r.text
     r = _post(client, tok, _base(model_selection="ace-step-1.5-turbo", controls={"sampler_mode": "euler"}), "mm-4")
     assert r.status_code == 422 and r.json()["error"]["code"] == "MODEL_PARAMETER_CONFLICT"
 
@@ -222,7 +225,7 @@ def test_sft_premium_requires_quote(client) -> None:
 def test_quote_then_sft_admission_binds_and_charges(client) -> None:
     tok = _paid_token(client)
     _grant_sft_worker(client)
-    body = _base(model_selection="ace-step-1.5-sft", controls={"inference_steps": 50, "guidance_scale": 2.5, "dcw_enabled": False})
+    body = _base(model_selection="ace-step-1.5-sft", controls={"inference_steps": 50, "guidance_scale": 7.0, "dcw_enabled": False})
     q = _quote(client, tok, body)
     assert q.status_code == 200, q.text
     qd = q.json()
@@ -237,7 +240,7 @@ def test_quote_tamper_mismatch_rejected(client) -> None:
     body = _base(model_selection="ace-step-1.5-sft")
     qd = _quote(client, tok, body).json()
     # Change the request after quoting (steps) -> hash/compute mismatch.
-    tampered = dict(body, controls={"inference_steps": 60, "guidance_scale": 2.5, "dcw_enabled": False})
+    tampered = dict(body, controls={"inference_steps": 60, "guidance_scale": 8.0, "dcw_enabled": False})
     r = _post(client, tok, dict(tampered, quote_id=qd["quote_id"]), "mm-tamper")
     assert r.status_code == 409 and r.json()["error"]["code"] in ("QUOTE_MISMATCH",)
 
@@ -268,6 +271,9 @@ def test_model_selections_catalog_public(client) -> None:
     assert turbo["control_ranges"]["guidance_scale"]["locked"] is True
     sft = by_id["ace-step-1.5-sft"]["profiles"][0]
     assert sft["requires_paid"] is True and sft["control_ranges"]["inference_steps"]["min"] == 50
+    assert sft["control_ranges"]["inference_steps"]["default"] == 64
+    assert sft["control_ranges"]["guidance_scale"] == {"min": 5.0, "max": 9.0, "default": 7.0, "locked": False}
+    assert sft["control_ranges"]["shift"] == {"min": 1.0, "max": 3.0, "default": 1.0}
     assert sft["control_ranges"]["dcw_forced_off"] is True
     # XL (both) are premium and unconfigured until the operator provisions them.
     xl_turbo = by_id["ace-step-1.5-xl-turbo"]["profiles"][0]

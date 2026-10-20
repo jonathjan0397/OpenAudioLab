@@ -81,6 +81,7 @@ def list_model_selections(request: Request) -> list[dict]:
                 "control_ranges": {
                     "inference_steps": {"min": p.steps_min, "max": p.steps_max, "default": p.steps_default, "locked": p.cfg_locked or p.steps_min == p.steps_max},
                     "guidance_scale": {"min": p.cfg_min, "max": p.cfg_max, "default": p.cfg_default, "locked": p.cfg_locked},
+                    "shift": {"min": p.shift_min, "max": p.shift_max, "default": p.shift_default},
                     "dcw_forced_off": p.dcw_forced_off,
                 },
                 "max_duration_seconds": p.max_duration_seconds,
