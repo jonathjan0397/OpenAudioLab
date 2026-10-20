@@ -128,6 +128,7 @@ export interface ModelProfile {
   control_ranges: {
     inference_steps: { min: number; max: number; default: number; locked?: boolean };
     guidance_scale: { min: number; max: number; default: number; locked?: boolean };
+    shift?: { min: number; max: number; default: number };
     dcw_forced_off: boolean;
   };
   pricing: { multiplier: number; policy_version: string; provisional: boolean };

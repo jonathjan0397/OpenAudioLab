@@ -53,12 +53,6 @@ const LANGUAGES = [
   { value: "hi", label: "Hindi" },
 ];
 
-const QUALITY = [
-  { value: 8, label: "Turbo (fast)" },
-  { value: 16, label: "Balanced" },
-  { value: 32, label: "Fine (slow)" },
-];
-
 export const DRAFT_KEY = "oal-create-draft-v2";
 
 interface DraftSnapshot {
@@ -139,6 +133,7 @@ export default function CreateWidget({
   const [quote, setQuote] = useState<GenerationQuote | null>(null);
   const selectedModel = (catalog.data || []).find((m) => m.model_selection === modelSelection) || null;
   const selectedProfile = selectedModel?.profiles?.[0] || null;
+  const stepsRange = selectedProfile?.control_ranges?.inference_steps ?? null;
   const premiumSelected = !!selectedProfile && selectedProfile.requires_paid;
   const isGuest = me.isFetched && !me.data;
   const guestPolicyAccepted = Boolean(guest.data?.policy_accepted);
@@ -207,6 +202,13 @@ export default function CreateWidget({
       })
     );
   }, [title, desc, styles, lyrics, mood, instrumental, gender, loraId, bpm, keyScale, timeSignature, language, shift, quality, variations, duration, drafted, draftOpen, modelSelection]);
+
+  // When the selected model's step band changes, reset Quality to that profile's
+  // default so a value carried from another model (e.g. Turbo's 8, or a premium
+  // 100 when switching to Turbo) can never be out of the new band.
+  useEffect(() => {
+    if (stepsRange?.default != null) setQuality(stepsRange.default);
+  }, [stepsRange?.default, stepsRange?.min, stepsRange?.max]);
 
   const snapshot = (): DraftSnapshot => ({ title, desc, styles, lyrics, mood, drafted });
   const pushHistory = () => setHistory((h) => [...h.slice(-9), snapshot()]);
@@ -333,7 +335,7 @@ export default function CreateWidget({
           executionProfileId: premiumSelected ? selectedProfile!.execution_profile_id : undefined,
           seed: mode === "remix" ? Math.floor(Math.random() * 1_000_000_000) : undefined,
         },
-        { supportedControls: caps.data?.supported_controls },
+        { supportedControls: caps.data?.supported_controls, controlRanges: selectedProfile?.control_ranges },
       );
       // Premium selection: get a server quote first, then bind it. The quote and
       // the job carry identical fields (the server hash excludes quote_id).
@@ -703,10 +705,19 @@ export default function CreateWidget({
               </div>
               <div className="field ctrl">
                 <div className="field">
-                  <label>Quality</label>
-                  <select value={quality} onChange={(e) => setQuality(Number(e.target.value))}>
-                    {QUALITY.map((q) => <option key={q.value} value={q.value}>{q.label}</option>)}
-                  </select>
+                  <label>Quality ({stepsRange?.locked ? `fixed ${stepsRange.default}` : `${quality} steps`})</label>
+                  {stepsRange?.locked ? (
+                    <input type="range" min={stepsRange.default} max={stepsRange.default} value={stepsRange.default} disabled />
+                  ) : (
+                    <input
+                      type="range"
+                      min={stepsRange?.min ?? 1}
+                      max={stepsRange?.max ?? 128}
+                      step={1}
+                      value={quality}
+                      onChange={(e) => setQuality(Number(e.target.value))}
+                    />
+                  )}
                 </div>
               </div>
               <div className="field ctrl">

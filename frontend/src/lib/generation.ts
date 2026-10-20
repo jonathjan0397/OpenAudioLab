@@ -57,8 +57,21 @@ const DEFAULT_SUPPORTED_CONTROLS = [
   "variations",
 ];
 
+export interface ControlRange {
+  min: number;
+  max: number;
+  default: number;
+  locked?: boolean;
+}
+
 export interface BuildOptions {
   supportedControls?: Iterable<string>;
+  // Per-profile control bands from /model-selections. When supplied, the numeric
+  // controls (steps/guidance/shift) are emitted only if they are in-band and differ
+  // from the profile default, so a stale or turbo-shaped UI value can never trip the
+  // backend's "out of range" rejection (the server then applies the profile default).
+  // When omitted, the legacy truthy/default rules are kept (e.g. Studio's Turbo path).
+  controlRanges?: Partial<Record<"inference_steps" | "guidance_scale" | "shift", ControlRange>>;
 }
 
 export function buildGenerationRequest(
@@ -68,6 +81,7 @@ export function buildGenerationRequest(
   const supported = new Set(
     opts.supportedControls ? Array.from(opts.supportedControls) : DEFAULT_SUPPORTED_CONTROLS,
   );
+  const ranges = opts.controlRanges ?? {};
 
   // Resolved non-lyric caption. Singer preference is folded in here because the
   // adapter has no dedicated gender field, so a control value alone would not
@@ -89,11 +103,26 @@ export function buildGenerationRequest(
   if (d.keyScale) candidate.key_scale = d.keyScale;
   if (d.timeSignature) candidate.time_signature = d.timeSignature;
   if (d.language) candidate.vocal_language = d.language;
-  if (d.guidance) candidate.guidance_scale = Number(d.guidance);
-  if (d.quality !== 8) candidate.inference_steps = d.quality;
-  // shift is emitted only when the model declares it applicable; an intentional
-  // 0 shift is preserved (explicit finite check, not truthiness).
-  if (Number.isFinite(d.shift) && d.shift !== 1) candidate.shift = d.shift;
+  // guidance/steps/shift: when a profile band is known, emit only an in-band value
+  // that differs from the profile default (and is not locked); otherwise the server
+  // applies the correct per-model default. Without bands, keep the legacy rules.
+  const within = (v: number, r?: ControlRange) =>
+    !!r && !r.locked && Number.isFinite(v) && v >= r.min && v <= r.max && v !== r.default;
+  const g = Number(d.guidance);
+  if (ranges.guidance_scale) {
+    if (within(g, ranges.guidance_scale)) candidate.guidance_scale = g;
+  } else if (g) candidate.guidance_scale = g;
+  const q = Number(d.quality);
+  if (ranges.inference_steps) {
+    if (within(q, ranges.inference_steps)) candidate.inference_steps = q;
+  } else if (q !== 8) candidate.inference_steps = q;
+  // shift: UI default 1 means "unset" (slider disabled). Emit only an explicit,
+  // in-band deviation, so a turbo profile (default 3.0) never sends a stale shift=1
+  // that the legacy model_id path would reject; the server applies the profile default.
+  const sh = Number(d.shift);
+  if (Number.isFinite(sh) && sh !== 1) {
+    if (!ranges.shift || (sh >= ranges.shift.min && sh <= ranges.shift.max)) candidate.shift = sh;
+  }
   if (d.variations > 1) candidate.variations = d.variations;
 
   const controls: Record<string, unknown> = {};

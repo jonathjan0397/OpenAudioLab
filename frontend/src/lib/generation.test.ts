@@ -170,4 +170,36 @@ describe("buildGenerationRequest", () => {
     expect(b.repainting_start).toBe(0);
     expect(b.repainting_end).toBe(5);
   });
+
+  it("band-gates steps/guidance to the profile (out-of-band or default omitted; locked never sent)", () => {
+    const sftRanges = {
+      inference_steps: { min: 50, max: 100, default: 64 },
+      guidance_scale: { min: 5, max: 9, default: 7 },
+      shift: { min: 1, max: 3, default: 1 },
+    };
+    // a stale Turbo-ladder value (32) on a premium 50-100 band is dropped -> backend applies default
+    expect(buildGenerationRequest({ ...base, quality: 32 }, { controlRanges: sftRanges }).controls)
+      .not.toHaveProperty("inference_steps");
+    // in-band and differs from default -> sent
+    expect((buildGenerationRequest({ ...base, quality: 80 }, { controlRanges: sftRanges }).controls as Record<string, unknown>).inference_steps).toBe(80);
+    // equals the profile default -> omitted
+    expect(buildGenerationRequest({ ...base, quality: 64 }, { controlRanges: sftRanges }).controls)
+      .not.toHaveProperty("inference_steps");
+    // locked Turbo profile: steps and guidance are never emitted regardless of value
+    const turboRanges = {
+      inference_steps: { min: 8, max: 8, default: 8, locked: true },
+      guidance_scale: { min: 1, max: 1, default: 1, locked: true },
+    };
+    const locked = buildGenerationRequest({ ...base, quality: 16, guidance: 7 }, { controlRanges: turboRanges }).controls as Record<string, unknown>;
+    expect(locked).not.toHaveProperty("inference_steps");
+    expect(locked).not.toHaveProperty("guidance_scale");
+  });
+
+  it("treats shift=1 as 'unset' and only emits in-band deviations", () => {
+    const ranges = { shift: { min: 1, max: 3, default: 3 } };
+    const opts = { supportedControls: ["shift"], controlRanges: ranges };
+    expect(buildGenerationRequest({ ...base, shift: 1 }, opts).controls).not.toHaveProperty("shift");
+    expect((buildGenerationRequest({ ...base, shift: 2 }, opts).controls as Record<string, unknown>).shift).toBe(2);
+    expect(buildGenerationRequest({ ...base, shift: 5 }, opts).controls).not.toHaveProperty("shift");
+  });
 });
