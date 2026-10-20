@@ -697,3 +697,68 @@ class AdminAudit(Base):
     reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
     context_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class Quote(Base):
+    """Server-issued, owner-bound credit quote that binds a model/profile/controls
+    snapshot to an exact charge until it is consumed by a job or expires."""
+
+    __tablename__ = "quotes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    owner_id: Mapped[str] = mapped_column(String(80), index=True)
+    request_hash: Mapped[str] = mapped_column(String(64), index=True)
+    model_selection: Mapped[str] = mapped_column(String(80))
+    engine_model: Mapped[str] = mapped_column(String(120))
+    execution_profile_id: Mapped[str] = mapped_column(String(80))
+    controls_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    context_json: Mapped[dict] = mapped_column(JSON, default=dict)  # src/reference/lyric hashes, duration, outputs, task
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    takes: Mapped[int] = mapped_column(Integer, default=1)
+    reserved_credits: Mapped[int] = mapped_column(Integer, default=0)
+    compute_factor: Mapped[float] = mapped_column(Float, default=1.0)
+    policy_version: Mapped[str] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)  # pending|consumed|expired
+    consumed_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class WorkerCapability(Base):
+    """A worker's advertised, validated ability to run a (model_selection,
+    execution_profile) on a specific GPU/lease class. Presence is the gate for
+    premium admission; a healthy liveness endpoint or raw VRAM is NOT sufficient."""
+
+    __tablename__ = "worker_capabilities"
+    __table_args__ = (UniqueConstraint("worker_id", "model_selection", "execution_profile_id", name="uq_workercap_worker_profile"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    worker_id: Mapped[str] = mapped_column(String(120), index=True)
+    model_selection: Mapped[str] = mapped_column(String(80), index=True)
+    execution_profile_id: Mapped[str] = mapped_column(String(80))
+    engine_model: Mapped[str] = mapped_column(String(120))
+    planner_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    tasks_json: Mapped[list] = mapped_column(JSON, default=list)
+    max_duration_seconds: Mapped[int] = mapped_column(Integer, default=600)
+    vram_total_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    supports_staged_planner: Mapped[bool] = mapped_column(Boolean, default=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class GpuLease(Base):
+    """Fenced exclusive ownership of one physical GPU so only one heavy engine is
+    resident at a time (serial GPU-0 alternation). A lease is acquired before a
+    model load and released after unload/idle-stop."""
+
+    __tablename__ = "gpu_leases"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    gpu_id: Mapped[str] = mapped_column(String(40), index=True)  # e.g. "cuda:0"
+    holder: Mapped[str | None] = mapped_column(String(120), nullable=True)  # worker_id
+    model_selection: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    fence_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="free", index=True)  # free|held
+    acquired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

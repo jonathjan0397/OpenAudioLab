@@ -21,9 +21,11 @@ from sqlalchemy.orm import Session
 
 from ..deps import owner_from_request
 from ..errors import ApiError
-from ..models import Asset, GuestSession, Job, JobEvent, IdempotencyRecord, new_uuid, utcnow
+from ..models import Asset, GuestSession, Job, JobEvent, IdempotencyRecord, Quote, WorkerCapability, new_uuid, utcnow
 from ..orchestration import append_event, as_utc, enqueue
 from ..registry import MODEL_RELEASES, SUPPORTED_OPERATIONS, validate_controls
+from .. import catalog as _catalog
+from ..entitlements import is_premium, require_model_access
 from ..storage import parse_range
 from ..tokens import check_token, make_token
 from ..schemas import (
@@ -92,19 +94,19 @@ def _validate_owned_audio_asset(session: Session, owner_id: str, asset_id: str, 
         raise ApiError(422, "SOURCE_INVALID", f"The {role} asset is not an audio recording.")
 
 
-def _validate_source_task(session: Session, owner_id: str, payload: GenerateJobRequest, release) -> None:
+def _validate_source_task(session: Session, owner_id: str, payload: GenerateJobRequest, tasks: tuple[str, ...]) -> None:
     """Validate the selected task and any referenced source/reference audio.
 
     Public task names map to verified upstream tasks; ownership is enforced at every
     referenced asset before the job is admitted (browser never supplies engine paths).
     """
     task_type = payload.task_type or "text2music"
-    if task_type not in release.supported_task_types:
+    if task_type not in tasks:
         raise ApiError(
             422,
             "TASK_UNSUPPORTED",
             f"Task '{task_type}' is not supported by this model.",
-            {"requested_task": task_type, "supported_task_types": list(release.supported_task_types)},
+            {"requested_task": task_type, "supported_task_types": list(tasks)},
         )
     if task_type in {"cover", "cover-nofsq", "repaint"} and not payload.src_asset_id:
         raise ApiError(
@@ -136,15 +138,17 @@ def _validate_request(payload: GenerateJobRequest, max_lyrics_chars: int) -> Non
             f"Operation '{payload.operation}' is not supported by this backend.",
             {"supported_operations": list(SUPPORTED_OPERATIONS)},
         )
-    release = MODEL_RELEASES.get(payload.model_id)
-    if release is None:
+    release = MODEL_RELEASES.get(payload.model_id) if payload.model_id is not None else None
+    if payload.model_id is None and payload.model_selection is None:
+        raise ApiError(422, "MODEL_SELECTION_REQUIRED", "Provide model_id or model_selection.")
+    if payload.model_id is not None and release is None:
         raise ApiError(
             422,
             "MODEL_UNKNOWN",
             "Unknown model id.",
             {"known_models": sorted(MODEL_RELEASES)},
         )
-    if not release.enabled:
+    if release is not None and not release.enabled:
         raise ApiError(
             503,
             "MODEL_UNAVAILABLE",
@@ -171,40 +175,47 @@ def _validate_request(payload: GenerateJobRequest, max_lyrics_chars: int) -> Non
             "LYRICS_NOT_ALLOWED",
             "Instrumental jobs must not supply lyrics.",
         )
-    unknown_controls = sorted(set(payload.controls) - set(release.supported_controls))
-    if unknown_controls:
-        raise ApiError(
-            422,
-            "CONTROL_UNSUPPORTED",
-            "Unknown or unsupported controls supplied.",
-            {"unknown_controls": unknown_controls, "supported_controls": list(release.supported_controls)},
-        )
-    invalid_controls = validate_controls(payload.model_id, payload.controls)
-    if invalid_controls:
-        raise ApiError(
-            422,
-            "CONTROL_INVALID",
-            "One or more control values are out of range or the wrong type.",
-            {
-                "invalid_controls": invalid_controls,
-                "supported_controls": list(release.supported_controls),
-            },
-        )
-    if payload.seed is not None and not release.supports_seed:
-        raise ApiError(422, "CONTROL_UNSUPPORTED", "This model does not accept a seed.")
-    if payload.duration_seconds is not None:
-        if not release.supports_duration:
-            raise ApiError(422, "CONTROL_UNSUPPORTED", "This model does not accept a duration target.")
-        if not (release.min_duration_seconds <= payload.duration_seconds <= release.max_duration_seconds):
+    if payload.model_selection is None:
+        # Legacy path: validate controls against the model_id registry entry.
+        # When model_selection is present, the catalog (profile-aware) validates
+        # controls at admission, so it can enforce per-profile bands and lock.
+        unknown_controls = sorted(set(payload.controls) - set(release.supported_controls))
+        if unknown_controls:
             raise ApiError(
                 422,
                 "CONTROL_UNSUPPORTED",
-                "Requested duration is outside the model range.",
+                "Unknown or unsupported controls supplied.",
+                {"unknown_controls": unknown_controls, "supported_controls": list(release.supported_controls)},
+            )
+        invalid_controls = validate_controls(payload.model_id, payload.controls)
+        if invalid_controls:
+            raise ApiError(
+                422,
+                "CONTROL_INVALID",
+                "One or more control values are out of range or the wrong type.",
                 {
-                    "min_duration_seconds": release.min_duration_seconds,
-                    "max_duration_seconds": release.max_duration_seconds,
+                    "invalid_controls": invalid_controls,
+                    "supported_controls": list(release.supported_controls),
                 },
             )
+    if release is not None:
+        # Legacy model_id path: seed/duration bounds come from the registry entry.
+        # The catalog validates duration per-profile in _admit_context.
+        if payload.seed is not None and not release.supports_seed:
+            raise ApiError(422, "CONTROL_UNSUPPORTED", "This model does not accept a seed.")
+        if payload.duration_seconds is not None:
+            if not release.supports_duration:
+                raise ApiError(422, "CONTROL_UNSUPPORTED", "This model does not accept a duration target.")
+            if not (release.min_duration_seconds <= payload.duration_seconds <= release.max_duration_seconds):
+                raise ApiError(
+                    422,
+                    "CONTROL_UNSUPPORTED",
+                    "Requested duration is outside the model range.",
+                    {
+                        "min_duration_seconds": release.min_duration_seconds,
+                        "max_duration_seconds": release.max_duration_seconds,
+                    },
+                )
 
 
 def _idempotency_key(request: Request, max_length: int) -> str:
@@ -247,6 +258,179 @@ def _auto_lora_match(session: Session, payload: GenerateJobRequest) -> dict | No
     if best is None:
         return None
     return {"lora_id": best.id, "lora_match": {"mode": "auto", "name": best.name, "tags": best_tags}}
+
+
+def _catalog_api_error(exc) -> ApiError:
+    return ApiError(exc.status, exc.code, exc.message, exc.details)
+
+
+def _resolve_catalog(payload: GenerateJobRequest):
+    try:
+        release, profile = _catalog.resolve(payload.model_selection, payload.execution_profile_id, payload.model_id)
+    except _catalog.CatalogError as exc:
+        raise _catalog_api_error(exc)
+    if profile.availability != "available":
+        raise ApiError(
+            503,
+            "MODEL_UNAVAILABLE",
+            f"Model '{release.selection}' profile '{profile.profile_id}' is not currently available.",
+            {"model_selection": release.selection, "execution_profile_id": profile.profile_id,
+             "availability": profile.availability, "reason": "unconfigured_or_unvalidated"},
+        )
+    return release, profile
+
+
+def _require_eligible_worker(session: Session, profile) -> None:
+    """Premium profiles dispatch only to a worker that advertised the exact
+    capability; otherwise fail honestly (never silently run on Turbo)."""
+    if not _catalog_release_family_premium(profile):
+        return
+    cap = session.execute(
+        select(WorkerCapability).where(
+            WorkerCapability.model_selection == profile.model_selection,
+            WorkerCapability.execution_profile_id == profile.profile_id,
+            WorkerCapability.enabled.is_(True),
+        ).limit(1)
+    ).scalar_one_or_none()
+    if cap is None:
+        raise ApiError(
+            503,
+            "NO_COMPATIBLE_WORKER",
+            "No enabled worker currently advertises this model profile.",
+            {"model_selection": profile.model_selection, "execution_profile_id": profile.profile_id},
+        )
+
+
+def _catalog_release_family_premium(profile) -> bool:
+    return profile.native_family != "turbo"
+
+
+def _validate_controls_catalog(profile, controls: dict) -> dict:
+    try:
+        return _catalog.validate_profile_controls(profile, controls or {})
+    except _catalog.CatalogError as exc:
+        raise _catalog_api_error(exc)
+
+
+def _admission_hash(payload: GenerateJobRequest) -> str:
+    """Canonical hash of the admission-relevant fields, EXCLUDING quote_id so a
+    quote and the subsequent job bind to the same content."""
+    data = payload.model_dump(mode="json")
+    data.pop("quote_id", None)
+    canonical = json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _admit_context(session: Session, owner_id: str, payload: GenerateJobRequest, settings):
+    """Full admission checks shared by /generation/quote and /jobs.
+
+    Returns (release, profile, resolved_controls, cost, takes) or raises. Never
+    downgrades a premium request to Turbo: unprovisioned releases 503 and premium
+    without a compatible worker 503, without an entitlement 403.
+    """
+    release, profile = _resolve_catalog(payload)
+    require_model_access(session, owner_id, release)
+    _require_eligible_worker(session, profile)
+    _validate_source_task(session, owner_id, payload, profile.tasks)
+    resolved_controls = _validate_controls_catalog(profile, payload.controls)
+    takes = max(1, min(4, int((payload.controls or {}).get("variations") or 1)))
+    if payload.duration_seconds is not None and payload.duration_seconds > profile.max_duration_seconds:
+        raise ApiError(
+            422, "DURATION_EXCEEDS_MODEL",
+            f"{profile.label} supports up to {profile.max_duration_seconds}s.",
+            {"max_duration_seconds": profile.max_duration_seconds},
+        )
+    cost = _catalog.quoted_credits(profile, takes)
+    return release, profile, resolved_controls, cost, takes
+
+
+def _bind_quote(session: Session, owner_id: str, payload: GenerateJobRequest, profile, cost: int):
+    """Premium profiles must present an accepted, unexpired quote matching this
+    exact request; Turbo keeps existing no-quote behavior for back-compat."""
+    if profile.multiplier != 1.0 and not payload.quote_id:
+        raise ApiError(
+            422, "QUOTE_REQUIRED",
+            "A server-issued quote is required for this model profile.",
+            {"model_selection": profile.model_selection, "execution_profile_id": profile.profile_id},
+        )
+    if not payload.quote_id:
+        return None
+    quote = session.get(Quote, payload.quote_id)
+    if quote is None or quote.owner_id != owner_id:
+        raise ApiError(409, "QUOTE_NOT_FOUND", "Quote not found for this account.")
+    if quote.status != "pending":
+        raise ApiError(409, "QUOTE_CONSUMED", "Quote already used or expired.")
+    if as_utc(quote.expires_at) <= utcnow():
+        quote.status = "expired"
+        raise ApiError(409, "QUOTE_EXPIRED", "Quote expired; request a new quote.")
+    if (
+        quote.request_hash != _admission_hash(payload)
+        or quote.execution_profile_id != profile.profile_id
+        or quote.reserved_credits != cost
+    ):
+        raise ApiError(409, "QUOTE_MISMATCH", "Quote no longer matches this request; requote.")
+    return quote
+
+
+@router.post("/generation/quote", status_code=200)
+def create_generation_quote(
+    payload: GenerateJobRequest,
+    request: Request,
+    owner_id: str = Depends(owner_from_request),
+) -> JSONResponse:
+    """Return a server-issued, owner-bound credit quote for an intended request."""
+    from ..policies import current_policy_payload  # noqa: F401 (keeps parity; unused if policy not needed)
+
+    settings = request.app.state.settings
+    _validate_request(payload, settings.max_lyrics_chars)
+    ttl_minutes = max(1, int(settings.quote_ttl_seconds // 60))
+    from ..models import User
+    with request.app.state.db.session() as session:
+        release, profile, resolved_controls, cost, takes = _admit_context(session, owner_id, payload, settings)
+        quote = Quote(
+            id=new_uuid(),
+            owner_id=owner_id,
+            request_hash=_admission_hash(payload),
+            model_selection=release.selection,
+            engine_model=profile.engine_model,
+            execution_profile_id=profile.profile_id,
+            controls_json=resolved_controls,
+            context_json={
+                "duration_seconds": payload.duration_seconds,
+                "instrumental": payload.instrumental,
+                "outputs": payload.outputs,
+                "task_type": payload.task_type or "text2music",
+                "src_asset_id": payload.src_asset_id,
+                "reference_asset_id": payload.reference_asset_id,
+                "lyrics_sha256": hashlib.sha256(payload.lyrics.encode("utf-8")).hexdigest() if payload.lyrics else None,
+                "takes": takes,
+            },
+            duration_seconds=payload.duration_seconds,
+            takes=takes,
+            reserved_credits=cost,
+            compute_factor=profile.compute_factor,
+            policy_version=_catalog.PRICE_POLICY_VERSION,
+            status="pending",
+            created_at=utcnow(),
+            expires_at=utcnow() + timedelta(minutes=ttl_minutes),
+        )
+        session.add(quote)
+        session.commit()
+        session.refresh(quote)
+        user = session.get(User, owner_id[4:]) if owner_id.startswith("usr_") else None
+        balance = user.credits_balance if user is not None else None
+    return JSONResponse(status_code=200, content={
+        "quote_id": quote.id,
+        "model_selection": quote.model_selection,
+        "execution_profile_id": quote.execution_profile_id,
+        "engine_model": quote.engine_model,
+        "reserved_credits": quote.reserved_credits,
+        "takes": quote.takes,
+        "compute_factor": quote.compute_factor,
+        "policy_version": quote.policy_version,
+        "expires_at": quote.expires_at.isoformat(),
+        "balance": balance,
+    })
 
 
 @router.post("/jobs", status_code=202, response_model=JobAcceptedResponse)
@@ -311,7 +495,6 @@ def create_job(
                     "The registry LoRA was trained for a different base model.",
                     {"lora_base_model_id": lora.base_model_id, "model_id": payload.model_id},
                 )
-        _validate_source_task(session, owner_id, payload, MODEL_RELEASES[payload.model_id])
         existing = session.execute(
             select(IdempotencyRecord).where(
                 IdempotencyRecord.owner_id == owner_id,
@@ -329,15 +512,34 @@ def create_job(
                 )
             job = _get_owned_job(session, existing.job_id, owner_id)
         else:
+            release, profile, resolved_controls, admission_cost, admission_takes = _admit_context(
+                session, owner_id, payload, settings
+            )
+            quote = _bind_quote(session, owner_id, payload, profile, admission_cost)
             request_json = payload.model_dump(mode="json")
             if payload.operation == "music.generate" and request_json.get("seed") is None:
                 request_json["seed"] = random.randint(1, 1_000_000_000)
+            request_json["_admission"] = {
+                "model_selection": release.selection,
+                "execution_profile_id": profile.profile_id,
+                "engine_model": profile.engine_model,
+                "planner_model": profile.planner_model,
+                "family": profile.native_family,
+                "resolved_controls": resolved_controls,
+                "policy_version": _catalog.PRICE_POLICY_VERSION,
+                "reserved_credits": admission_cost,
+                "quote_id": payload.quote_id,
+            }
             job = Job(
                 id=new_uuid(),
                 owner_id=owner_id,
                 operation=payload.operation,
-                model_id=payload.model_id,
-                model_revision=MODEL_RELEASES[payload.model_id].revision,
+                model_id=payload.model_id or "ace-step-1.5",
+                model_revision=(
+                    MODEL_RELEASES["ace-step-1.5"].revision
+                    if profile.native_family == "turbo"
+                    else f"1.5.0@ca1e85f:{profile.engine_model}"
+                ),
                 status="queued",
                 request_json=request_json,
                 request_hash=request_hash,
@@ -399,7 +601,7 @@ def create_job(
                 user = session.get(User, owner_id[4:])
                 if user is None:
                     raise ApiError(401, "USER_NOT_FOUND", "Account not found for session owner.")
-                cost = settings.credit_cost_per_generation * max(1, min(4, int((payload.controls or {}).get("variations") or 1)))
+                cost = admission_cost
                 if user.credits_balance < cost:
                     raise ApiError(
                         402,
@@ -411,6 +613,9 @@ def create_job(
                 session.add(
                     CreditEntry(owner_id=owner_id, delta=-cost, reason="generation", job_id=job.id)
                 )
+            if quote is not None:
+                quote.status = "consumed"
+                quote.consumed_job_id = job.id
             enqueue(session, job, settings)
             append_event(session, job.id, "queued", "queued")
             try:

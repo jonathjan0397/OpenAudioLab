@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     bootstrap_admin_email: str = ""
     bootstrap_admin_password: str = ""
     credit_cost_per_generation: int = 10
+    quote_ttl_seconds: int = 900
     web_dir: str = "./web"
     # M9: task-locked LLM assistant (lyrics + style prompts) via llama.cpp.
     llm_base_url: str = ""

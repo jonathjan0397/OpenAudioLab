@@ -260,6 +260,7 @@ def _generation_manifest(
     synthetic: bool,
 ) -> dict:
     request = dict(job.request_json or {})
+    admission = dict(request.get("_admission") or {})
     controls = dict(request.get("controls") or {})
     engine_payload = dict(engine_payload or {})
     engine_result = dict(engine_result or {})
@@ -272,6 +273,11 @@ def _generation_manifest(
         "requested": {
             "operation": job.operation,
             "model_id": job.model_id,
+            "model_selection": admission.get("model_selection", job.model_id),
+            "execution_profile_id": admission.get("execution_profile_id"),
+            "engine_model": admission.get("engine_model"),
+            "planner_model": admission.get("planner_model"),
+            "family": admission.get("family"),
             "model_revision": job.model_revision,
             "music_description": request.get("music_description"),
             "song_idea": request.get("song_idea"),
@@ -309,6 +315,11 @@ def _generation_manifest(
             "engine_version": engine_version,
             "seed": seed,
             "synthetic": synthetic,
+            "pricing": {
+                "policy_version": admission.get("policy_version"),
+                "quote_id": admission.get("quote_id"),
+                "reserved_credits": admission.get("reserved_credits"),
+            },
             "upstream": {
                 "task_id": engine_result.get("task_id"),
                 "dit_model": engine_result.get("dit_model"),

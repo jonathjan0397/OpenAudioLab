@@ -1,9 +1,10 @@
-"""Model discovery from the static registry stub."""
+"""Model discovery from the static registry stub + multi-model catalog."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter
 
+from .. import catalog as _catalog
 from ..errors import ApiError
 from ..registry import MODEL_RELEASES, control_capabilities
 from ..schemas import ModelDetail, ModelSummary
@@ -47,3 +48,42 @@ def get_model(model_id: str) -> ModelDetail:
         max_duration_seconds=release.max_duration_seconds,
         output_options=list(release.output_options),
     )
+
+
+@router.get("/model-selections")
+def list_model_selections() -> list[dict]:
+    """Public product catalog: selections, profiles, availability, control ranges
+    and pricing metadata. Server admission still enforces entitlement/availability;
+    hiding is not access control. No private engine paths are exposed."""
+    out = []
+    for release in _catalog.CATALOG.values():
+        profiles = []
+        for p in release.profiles:
+            profiles.append({
+                "execution_profile_id": p.profile_id,
+                "label": p.label,
+                "quality_note": p.quality_note,
+                "availability": p.availability,
+                "requires_paid": release.family != "turbo",
+                "experimental": release.experimental,
+                "tasks": list(p.tasks),
+                "control_ranges": {
+                    "inference_steps": {"min": p.steps_min, "max": p.steps_max, "default": p.steps_default, "locked": p.cfg_locked or p.steps_min == p.steps_max},
+                    "guidance_scale": {"min": p.cfg_min, "max": p.cfg_max, "default": p.cfg_default, "locked": p.cfg_locked},
+                    "dcw_forced_off": p.dcw_forced_off,
+                },
+                "max_duration_seconds": p.max_duration_seconds,
+                "max_batch": p.max_batch,
+                "planner_model": p.planner_model,
+                "pricing": {"multiplier": p.multiplier, "policy_version": _catalog.PRICE_POLICY_VERSION, "provisional": True},
+            })
+        out.append({
+            "model_selection": release.selection,
+            "display_name": release.display_name,
+            "family": release.family,
+            "license_status": release.license_status,
+            "experimental": release.experimental,
+            "availability": release.availability,
+            "profiles": profiles,
+        })
+    return out
