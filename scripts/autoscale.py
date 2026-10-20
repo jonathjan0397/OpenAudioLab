@@ -41,8 +41,8 @@ HUB_TUNNEL = os.environ.get("OAL_HUB_TUNNEL_IP", "10.203.0.1")
 QUEUE_KEY = os.environ.get("OAL_QUEUE_KEY", "oal:queue:ace-step-1.5")
 BURST_KEY = QUEUE_KEY + ":burst"
 REDIS_URL = os.environ.get("OAL_REDIS_URL", f"redis://{HUB}:6379/0")
-IMAGE = os.environ.get("OAL_WORKER_IMAGE", "stratastack/oal-worker:ca1e85f-torch2.10-cu128-wg")
-DISK = os.environ.get("OAL_VAST_DISK", "40")
+IMAGE = os.environ.get("OAL_WORKER_IMAGE", "stratastack/oal-worker:ca1e85f-torch2.10-cu128-wg-int8")
+DISK = os.environ.get("OAL_VAST_DISK", "90")
 SCALE_UP = int(os.environ.get("OAL_SCALE_UP_DEPTH", "2"))
 JOBS_PER_NODE = int(os.environ.get("OAL_SCALE_JOBS_PER_NODE", "20"))
 MAX_NODES = int(os.environ.get("OAL_SCALE_MAX_NODES", "3"))
@@ -365,6 +365,19 @@ def worker_env(transport="wg", slot=None, role="engine_worker", tier=None, llm=F
             env += [
                 f"-e ACESTEP_CONFIG_PATH={ACESTEP_MODEL}",
                 f"-e OAL_ACESTEP_MODEL={ACESTEP_MODEL}",
+            ]
+        if os.environ.get("OAL_VAST_PREMIUM", "1") != "0":
+            # XL/SFT premium on 24GB+ Vast nodes: int8 weight-only DiT (halves the
+            # resident) + CPU offload so premium fits; checkpoints pull on demand.
+            # pick_offer already gates nodes to >=24GB, and profiles self-gate out
+            # below their vram_required_mb floor, so this is safe to enable broadly.
+            # Disable with OAL_VAST_PREMIUM=0 (turbo-only Vast).
+            env += [
+                "-e ACESTEP_QUANTIZATION=int8_weight_only",
+                "-e ACESTEP_OFFLOAD_TO_CPU=1",
+                "-e OAL_PREMIUM_PROFILES_ENABLED=sft-quality-v1,xl-sft-quality-v1,xl-turbo-fast-v1",
+                "-e OAL_XL_CHECKPOINT_ID=acestep-v15-xl-sft",
+                "-e OAL_XL_TURBO_CHECKPOINT_ID=acestep-v15-xl-turbo",
             ]
     if transport in ("ts", "public"):
         # Vast containers cannot mount NFS (no CAP_SYS_ADMIN): write to local

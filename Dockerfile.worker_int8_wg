@@ -1,0 +1,12 @@
+# Thin int8 overlay for VAST (ephemeral) workers.
+# Bakes the env-gated int8 DiT-quantization patch onto the lightweight Vast base
+# lineage (ca1e85f-torch2.10-cu128-wg: ~13GB, wireguard, no checkpoints baked; app
+# code + models arrive via the backend bundle / HF download at runtime). Avoids a
+# heavy full rebuild. The same change is applied from source via `git apply` in
+# Dockerfile.worker for from-source builds.
+#
+# Runtime behavior is toggled by ACESTEP_QUANTIZATION (unset => bf16, inert). Vast
+# nodes set it (and the XL/premium env) in scripts/autoscale.py::worker_env.
+FROM stratastack/oal-worker:ca1e85f-torch2.10-cu128-wg
+COPY patches/engine/startup_model_init.py /opt/acestep/acestep/api/startup_model_init.py
+RUN grep -q "ACESTEP_QUANTIZATION" /opt/acestep/acestep/api/startup_model_init.py
