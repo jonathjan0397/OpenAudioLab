@@ -638,3 +638,18 @@ Why XL-SFT and the merge are NOT switched on in this environment (evidence, not 
 Enabling XL needs either a dedicated >=32-48 GB worker (new authorized paid infra) or an
 offload-capable runtime change (violates version pinning). Enabling the merge needs a
 specific operator-approved checkpoint + license check.
+
+## 2026-10-20 — VRAM-gated premium registration (deployed, vram-5ea06c7)
+
+Premium profiles are advertised only when allowlisted AND installed AND this
+worker's measured total VRAM >= the profile floor (turbo 14G / sft 15G / merge 16G /
+xl-sft 32G). On the shared 24 GB GPU 0 this keeps SFT available and NEVER advertises
+XL-SFT (which cannot fit), so a premium job can't be dispatched/charged onto a worker
+that would OOM. Live re-verified: turbo+sft runnable, xl+merge un-advertised 503,
+and a real SFT render still succeeds on acestep-v15-sft.
+
+XL offload conclusion (why not "implemented in runtime" here): the pinned ca1e85f
+loader uses per-tensor `.to(device=...)` with no device_map/accelerate hook, XL is
+~20 GB of weights, and GPU 0 also hosts llama-server -- there is no offload path and
+insufficient VRAM, so a correct XL run needs a dedicated >=32/48 GB worker (config +
+allowlist now lights it up automatically), not a runtime fork on this node.
