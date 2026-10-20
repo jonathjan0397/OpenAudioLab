@@ -123,6 +123,26 @@ describe("buildGenerationRequest", () => {
     expect(b).not.toHaveProperty("src_asset_id");
   });
 
+  it("keeps legacy model_id when no model_selection is given", () => {
+    const b = buildGenerationRequest({ ...base, idea: "x" });
+    expect(b.model_id).toBe("ace-step-1.5");
+    expect(b).not.toHaveProperty("model_selection");
+  });
+
+  it("sends model_selection/profile/quote and OMITS model_id to avoid contradiction", () => {
+    const b = buildGenerationRequest({
+      ...base,
+      idea: "x",
+      modelSelection: "ace-step-1.5-sft",
+      executionProfileId: "sft-quality-v1",
+      quoteId: "q-123",
+    });
+    expect(b).not.toHaveProperty("model_id");
+    expect(b.model_selection).toBe("ace-step-1.5-sft");
+    expect(b.execution_profile_id).toBe("sft-quality-v1");
+    expect(b.quote_id).toBe("q-123");
+  });
+
   it("emits repaint region + mode/strength for a repaint request", () => {
     const b = buildGenerationRequest({
       ...base,

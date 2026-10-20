@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+from sqlalchemy import select, func
 
 from .. import catalog as _catalog
 from ..errors import ApiError
+from ..models import WorkerCapability
 from ..registry import MODEL_RELEASES, control_capabilities
 from ..schemas import ModelDetail, ModelSummary
 
@@ -51,10 +53,18 @@ def get_model(model_id: str) -> ModelDetail:
 
 
 @router.get("/model-selections")
-def list_model_selections() -> list[dict]:
-    """Public product catalog: selections, profiles, availability, control ranges
-    and pricing metadata. Server admission still enforces entitlement/availability;
-    hiding is not access control. No private engine paths are exposed."""
+def list_model_selections(request: Request) -> list[dict]:
+    """Public product catalog: selections, profiles, availability, runnability,
+    control ranges and pricing metadata. Server admission still enforces
+    entitlement/availability; hiding is not access control. No private paths."""
+    with request.app.state.db.session() as session:
+        runnable = set(
+            session.execute(
+                select(WorkerCapability.model_selection, WorkerCapability.execution_profile_id).where(
+                    WorkerCapability.enabled.is_(True)
+                )
+            ).all()
+        )
     out = []
     for release in _catalog.CATALOG.values():
         profiles = []
@@ -64,6 +74,7 @@ def list_model_selections() -> list[dict]:
                 "label": p.label,
                 "quality_note": p.quality_note,
                 "availability": p.availability,
+                "runnable": (p.model_selection, p.profile_id) in runnable,
                 "requires_paid": release.family != "turbo",
                 "experimental": release.experimental,
                 "tasks": list(p.tasks),
@@ -84,6 +95,7 @@ def list_model_selections() -> list[dict]:
             "license_status": release.license_status,
             "experimental": release.experimental,
             "availability": release.availability,
+            "runnable": any(pr["runnable"] for pr in profiles),
             "profiles": profiles,
         })
     return out

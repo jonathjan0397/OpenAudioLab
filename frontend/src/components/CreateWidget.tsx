@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, ApiError, AuthUser, GuestAllowance, PolicyPayload } from "../api";
+import { api, ApiError, AuthUser, GenerationQuote, GuestAllowance, ModelSelection, PolicyPayload } from "../api";
 import { buildGenerationRequest } from "../lib/generation";
 import ArtworkTile from "./ArtworkTile";
 import Waveform from "./Waveform";
@@ -130,6 +130,16 @@ export default function CreateWidget({
       }>("/api/v1/models/ace-step-1.5"),
     staleTime: 300000,
   });
+  const catalog = useQuery({
+    queryKey: ["model-selections"],
+    queryFn: () => api.get<ModelSelection[]>("/api/v1/model-selections"),
+    staleTime: 300000,
+  });
+  const [modelSelection, setModelSelection] = useState("ace-step-1.5-turbo");
+  const [quote, setQuote] = useState<GenerationQuote | null>(null);
+  const selectedModel = (catalog.data || []).find((m) => m.model_selection === modelSelection) || null;
+  const selectedProfile = selectedModel?.profiles?.[0] || null;
+  const premiumSelected = !!selectedProfile && selectedProfile.requires_paid;
   const isGuest = me.isFetched && !me.data;
   const guestPolicyAccepted = Boolean(guest.data?.policy_accepted);
   const [policyAccepted, setPolicyAccepted] = useState(false);
@@ -193,9 +203,10 @@ export default function CreateWidget({
         duration,
         drafted,
         draftOpen,
+        modelSelection,
       })
     );
-  }, [title, desc, styles, lyrics, mood, instrumental, gender, loraId, bpm, keyScale, timeSignature, language, shift, quality, variations, duration, drafted, draftOpen]);
+  }, [title, desc, styles, lyrics, mood, instrumental, gender, loraId, bpm, keyScale, timeSignature, language, shift, quality, variations, duration, drafted, draftOpen, modelSelection]);
 
   const snapshot = (): DraftSnapshot => ({ title, desc, styles, lyrics, mood, drafted });
   const pushHistory = () => setHistory((h) => [...h.slice(-9), snapshot()]);
@@ -318,10 +329,19 @@ export default function CreateWidget({
           instrumental,
           durationSeconds,
           loraId,
+          modelSelection: premiumSelected ? modelSelection : undefined,
+          executionProfileId: premiumSelected ? selectedProfile!.execution_profile_id : undefined,
           seed: mode === "remix" ? Math.floor(Math.random() * 1_000_000_000) : undefined,
         },
         { supportedControls: caps.data?.supported_controls },
       );
+      // Premium selection: get a server quote first, then bind it. The quote and
+      // the job carry identical fields (the server hash excludes quote_id).
+      if (premiumSelected) {
+        const q = await api.post<GenerationQuote>("/api/v1/generation/quote", body);
+        body.quote_id = q.quote_id;
+        setQuote(q);
+      }
       if (isGuest) {
         body.policy_accepted = guestPolicyAccepted || policyAccepted;
         if (policies.data?.version) body.policy_version = policies.data.version;
@@ -585,6 +605,45 @@ export default function CreateWidget({
           </div>
           {moreOpen && (
             <div className="create-advanced">
+              <div className="field ctrl">
+                <div className="field" style={{ width: "100%" }}>
+                  <label>Model</label>
+                  <div className="model-cards" role="radiogroup" aria-label="Model selection">
+                    {(catalog.data || []).map((m) => {
+                      const p = m.profiles[0];
+                      const selectable = p.runnable && (!p.requires_paid || !!me.data?.user);
+                      const selected = m.model_selection === modelSelection;
+                      const badge = !p.runnable ? "unavailable" : p.experimental ? "experimental" : p.requires_paid ? "paid" : "basic";
+                      return (
+                        <button
+                          key={m.model_selection}
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          disabled={!selectable}
+                          className={`model-card${selected ? " on" : ""}`}
+                          title={p.quality_note}
+                          onClick={() => { setModelSelection(m.model_selection); setQuote(null); }}
+                        >
+                          <span className="mc-name">{m.display_name}</span>
+                          <span className={`mc-badge b-${badge}`}>{badge}</span>
+                          <span className="mc-cost">{p.pricing.multiplier.toFixed(2)}× / take</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {selectedProfile?.control_ranges?.guidance_scale?.locked && (
+                    <span className="sub" style={{ fontSize: 11 }}>
+                      {selectedModel?.display_name}: {selectedProfile.control_ranges.inference_steps.locked ? "8 steps" : ""} · effective CFG {selectedProfile.control_ranges.guidance_scale.default} (fixed).
+                    </span>
+                  )}
+                  {premiumSelected && quote && (
+                    <span className="sub" style={{ fontSize: 11 }}>
+                      Quoted: {quote.reserved_credits} credits{quote.balance != null ? ` · balance ${quote.balance}` : ""}
+                    </span>
+                  )}
+                </div>
+              </div>
               <div className="field ctrl">
                 <div className="field">
                   <label>Duration</label>

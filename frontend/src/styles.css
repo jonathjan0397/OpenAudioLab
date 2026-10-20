@@ -324,6 +324,13 @@ img.avatar { padding: 0; }
 .create-examples { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
 .example-chip { font-size: 12px; color: var(--muted, #9a9a9a); background: transparent; border: 1px solid var(--border, #2a2a2a); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
 .example-chip:hover { color: var(--fg, #eaeaea); border-color: var(--accent, #6a5cff); }
+.model-cards { display: flex; flex-wrap: wrap; gap: 8px; }
+.model-card { display: flex; flex-direction: column; gap: 4px; text-align: left; border: 1px solid var(--border, #2a2a2a); background: transparent; border-radius: 10px; padding: 8px 10px; cursor: pointer; min-width: 128px; }
+.model-card:disabled { opacity: 0.5; cursor: not-allowed; }
+.model-card.on { border-color: var(--accent, #6a5cff); box-shadow: 0 0 0 1px var(--accent, #6a5cff) inset; }
+.mc-name { font-size: 13px; font-weight: 600; }
+.mc-badge { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.8; }
+.mc-cost { font-size: 11px; color: var(--muted, #9a9a9a); }
 .input-spark { color: var(--accent); font-size: 16px; padding-top: 9px; }
 .create-wide {
   position: relative; z-index: 1; background: var(--surface); border: 1px solid var(--border);

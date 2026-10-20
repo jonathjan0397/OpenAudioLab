@@ -113,3 +113,43 @@ export interface PolicyPayload {
   support_url: string;
   documents: { id: string; name: string; version: string }[];
 }
+
+export interface ModelProfile {
+  execution_profile_id: string;
+  label: string;
+  quality_note: string;
+  availability: string;
+  runnable: boolean;
+  requires_paid: boolean;
+  experimental: boolean;
+  tasks: string[];
+  max_duration_seconds: number;
+  max_batch: number;
+  control_ranges: {
+    inference_steps: { min: number; max: number; default: number; locked?: boolean };
+    guidance_scale: { min: number; max: number; default: number; locked?: boolean };
+    dcw_forced_off: boolean;
+  };
+  pricing: { multiplier: number; policy_version: string; provisional: boolean };
+}
+
+export interface ModelSelection {
+  model_selection: string;
+  display_name: string;
+  family: string;
+  experimental: boolean;
+  availability: string;
+  runnable: boolean;
+  profiles: ModelProfile[];
+}
+
+export interface GenerationQuote {
+  quote_id: string;
+  model_selection: string;
+  execution_profile_id: string;
+  reserved_credits: number;
+  takes: number;
+  policy_version: string;
+  expires_at: string;
+  balance: number | null;
+}

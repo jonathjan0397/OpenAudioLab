@@ -35,6 +35,11 @@ export interface GenerationDraft {
   repaintMode?: string;
   repaintStrength?: number;
   chunkMaskMode?: string;
+  // Multi-model selection. When modelSelection is set, model_id is omitted so the
+  // server does not see a contradictory legacy model_id + model_selection pair.
+  modelSelection?: string;
+  executionProfileId?: string;
+  quoteId?: string;
 }
 
 // Default capability set for the deployed ACE-Step 1.5 Turbo release. Callers
@@ -98,13 +103,21 @@ export function buildGenerationRequest(
 
   const body: Record<string, unknown> = {
     operation: "music.generate",
-    model_id: "ace-step-1.5",
     music_description: caption || d.title.trim() || "Untitled",
     controls,
     duration_seconds: d.durationSeconds,
     instrumental: d.instrumental,
     outputs: ["mix_wav"],
   };
+  // model_selection requests omit the legacy model_id to avoid a contradiction;
+  // otherwise keep the existing Turbo model_id for back-compat.
+  if (d.modelSelection) {
+    body.model_selection = d.modelSelection;
+    if (d.executionProfileId) body.execution_profile_id = d.executionProfileId;
+    if (d.quoteId) body.quote_id = d.quoteId;
+  } else {
+    body.model_id = "ace-step-1.5";
+  }
   const idea = d.idea.trim();
   const stylePrompt = d.styles.trim();
   if (idea) body.song_idea = idea;
