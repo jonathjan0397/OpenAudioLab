@@ -180,3 +180,33 @@ def test_worker_receive_queues_by_tier(orch) -> None:
     burst_settings = orch.settings.model_copy(update={"worker_tier": "burst"})
     burst = EngineWorker(orch.db, orch.queue, orch.storage, FakeAdapter([]), burst_settings, worker_id="t-burst")
     assert burst.receive_queues == ["oal:queue:ace-step-1.5:burst"]
+
+
+def test_payload_forwards_resolved_controls_not_raw(orch) -> None:
+    # Regression: the worker must send the API's profile-resolved controls (steps/cfg/
+    # shift defaults) so non-turbo models run at their denoising settings, not the
+    # engine's REST default of 8 steps. Raw controls were empty here and must be ignored.
+    from types import SimpleNamespace
+    worker = _worker(orch, FakeAdapter([]))
+    job = SimpleNamespace(
+        request_json={
+            "music_description": "x", "instrumental": True, "seed": 5, "duration_seconds": 12,
+            "controls": {},
+            "_admission": {"resolved_controls": {"inference_steps": 64, "guidance_scale": 7.0, "shift": 1.0}},
+        },
+        lyrics=None, owner_id="usr_x",
+    )
+    payload = worker._payload_for(job)
+    assert payload["controls"] == {"inference_steps": 64, "guidance_scale": 7.0, "shift": 1.0}
+
+
+def test_payload_falls_back_to_raw_controls_without_admission(orch) -> None:
+    # Legacy/no-admission jobs keep the prior behavior (forward whatever was sent).
+    from types import SimpleNamespace
+    worker = _worker(orch, FakeAdapter([]))
+    job = SimpleNamespace(
+        request_json={"music_description": "x", "controls": {"inference_steps": 50}},
+        lyrics=None, owner_id="usr_x",
+    )
+    payload = worker._payload_for(job)
+    assert payload["controls"] == {"inference_steps": 50}

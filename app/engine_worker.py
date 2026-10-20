@@ -327,13 +327,21 @@ class EngineWorker:
 
     def _payload_for(self, job: Job) -> dict:
         request = dict(job.request_json)
+        # Forward the API's profile-resolved controls (steps/cfg/shift defaults and
+        # any user overrides, computed at admission in validate_profile_controls) so
+        # the engine actually runs the per-model denoising settings. Raw
+        # request["controls"] is often empty (users omit optional controls), which
+        # previously let the engine fall back to its own REST default of 8 steps for
+        # every model. Legacy/no-admission jobs fall back to the raw controls.
+        admission = request.get("_admission") or {}
+        controls = admission.get("resolved_controls") or request.get("controls")
         return self.adapter.build_payload(
             music_description=request.get("music_description", ""),
             lyrics=job.lyrics,
             instrumental=bool(request.get("instrumental")),
             seed=request.get("seed"),
             duration_seconds=request.get("duration_seconds"),
-            controls=request.get("controls"),
+            controls=controls,
             source=self._source_for(job, request),
         )
 
