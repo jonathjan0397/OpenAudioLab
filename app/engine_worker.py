@@ -425,6 +425,7 @@ class EngineWorker:
         from .models import WorkerCapability
 
         ckpt_root = Path(self.settings.acestep_checkpoints_dir)
+        allow = {s.strip() for s in (self.settings.premium_profiles_enabled or "").split(",") if s.strip()}
         with self.db.session() as session:
             for release in _catalog.CATALOG.values():
                 for prof in release.profiles:
@@ -433,7 +434,11 @@ class EngineWorker:
                     if prof.native_family == "turbo":
                         present = True
                     else:
-                        present = (ckpt_root / prof.engine_model).is_dir()
+                        # Premium requires an explicit allowlist entry AND the
+                        # checkpoint being installed -- never advertised on
+                        # checkpoint presence alone (a mis-routed premium job would
+                        # silently run on the resident Turbo model).
+                        present = prof.profile_id in allow and (ckpt_root / prof.engine_model).is_dir()
                     existing = session.execute(
                         select(WorkerCapability).where(
                             WorkerCapability.worker_id == self.worker_id,

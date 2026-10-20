@@ -44,10 +44,20 @@ def test_registers_capabilities_gated_by_installed_checkpoints(orch) -> None:
     assert "ace-step-1.5-merge-sft-turbo" not in caps
 
 
-def test_sft_capability_enabled_when_checkpoint_present(orch, tmp_path) -> None:
+def test_sft_capability_requires_allowlist_and_checkpoint(orch, tmp_path) -> None:
     (tmp_path / "acestep-v15-sft").mkdir()
     orch.settings.acestep_checkpoints_dir = str(tmp_path)
+    # Checkpoint present but NOT allowlisted -> must stay disabled (no silent premium serving).
+    orch.settings.premium_profiles_enabled = ""
     _w(orch).register()
+    with orch.db.session() as session:
+        cap = session.execute(select(WorkerCapability).where(
+            WorkerCapability.worker_id == "route-test",
+            WorkerCapability.model_selection == "ace-step-1.5-sft")).scalar_one()
+    assert cap.enabled is False
+    # Allowlisted + present -> enabled.
+    orch.settings.premium_profiles_enabled = "sft-quality-v1"
+    _w(orch, adapter=FakeAdapter()).register()
     with orch.db.session() as session:
         cap = session.execute(select(WorkerCapability).where(
             WorkerCapability.worker_id == "route-test",
