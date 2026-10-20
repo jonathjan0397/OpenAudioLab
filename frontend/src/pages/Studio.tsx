@@ -102,6 +102,10 @@ export default function StudioPage() {
   const [detailsFor, setDetailsFor] = useState<string | null>(null);
   const [remixFor, setRemixFor] = useState<string | null>(null);
   const [remixStyle, setRemixStyle] = useState("");
+  const [repaintFor, setRepaintFor] = useState<string | null>(null);
+  const [repaintStart, setRepaintStart] = useState("0");
+  const [repaintEnd, setRepaintEnd] = useState("8");
+  const [repaintCaption, setRepaintCaption] = useState("");
   const [newArtistName, setNewArtistName] = useState("");
   const [wsActive, setWsActive] = useState<string | null>(null);
   const [wsNewName, setWsNewName] = useState("");
@@ -280,6 +284,46 @@ export default function StudioPage() {
     onSuccess: () => {
       setRemixFor(null);
       setRemixStyle("");
+      qc.invalidateQueries({ queryKey: ["my-jobs"] });
+    },
+  });
+
+  const repaintFromTrack = useMutation({
+    mutationFn: (t: Track) =>
+      api.post<{ job_id: string }>(
+        "/api/v1/jobs",
+        buildGenerationRequest({
+          idea: "",
+          styles: repaintCaption.trim(),
+          mood: "",
+          gender: "",
+          bpm: "",
+          keyScale: "",
+          timeSignature: "",
+          language: "",
+          shift: 1,
+          quality: 8,
+          guidance: 0,
+          variations: 1,
+          title: `${t.title || "Untitled"} · Repaint`,
+          lyrics: "",
+          lyricsProvided: true,
+          instrumental: true,
+          durationSeconds: Math.max(10, Math.min(120, Math.round(t.duration_seconds || 15))),
+          loraId: "",
+          taskType: "repaint",
+          srcAssetId: t.asset_id,
+          repaintingStart: Math.max(0, Number(repaintStart) || 0),
+          repaintingEnd: Math.max(0, Number(repaintEnd) || 0),
+          repaintMode: "balanced",
+          repaintStrength: 0.6,
+          chunkMaskMode: "auto",
+        }),
+        { "Idempotency-Key": crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}` },
+      ),
+    onSuccess: () => {
+      setRepaintFor(null);
+      setRepaintCaption("");
       qc.invalidateQueries({ queryKey: ["my-jobs"] });
     },
   });
@@ -477,12 +521,52 @@ export default function StudioPage() {
                          setRemixFor(remixFor === t.asset_id ? null : t.asset_id);
                          setRemixStyle("");
                        }}
-                     >
-                       ✦ Remix
-                     </button>
-                   </div>
-                 </div>
-                 {remixFor === t.asset_id && (
+                      >
+                        ✦ Remix
+                      </button>
+                      <button
+                        className="btn"
+                        style={repaintFor === t.asset_id ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
+                        onClick={() => {
+                          setRepaintFor(repaintFor === t.asset_id ? null : t.asset_id);
+                          setRepaintStart("0");
+                          setRepaintEnd(String(Math.max(2, Math.round((t.duration_seconds || 15) / 2))));
+                          setRepaintCaption("");
+                        }}
+                      >
+                        ✦ Repaint
+                      </button>
+                    </div>
+                  </div>
+                  {repaintFor === t.asset_id && (
+                    <div className="card" style={{ padding: "10px 14px", margin: "-6px 0 10px", background: "color-mix(in srgb, var(--surface) 70%, transparent)" }}>
+                      <div className="sub" style={{ fontSize: 12, marginBottom: 6 }}>
+                        Re-generate a time region (seconds) of this take; audio outside the region is preserved. Bounds within 0–{Math.round(t.duration_seconds || 15)}s.
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                        <input type="number" min={0} max={Math.round(t.duration_seconds || 15)} value={repaintStart} onChange={(e) => setRepaintStart(e.target.value)} style={{ width: 64 }} aria-label="Repaint start seconds" />
+                        <span className="sub">→</span>
+                        <input type="number" min={0} max={Math.round(t.duration_seconds || 15)} value={repaintEnd} onChange={(e) => setRepaintEnd(e.target.value)} style={{ width: 64 }} aria-label="Repaint end seconds" />
+                        <input value={repaintCaption} onChange={(e) => setRepaintCaption(e.target.value)} placeholder="what should play in this region" maxLength={200} style={{ flex: 1, minWidth: 160 }} />
+                        <button
+                          className="btn btn-primary"
+                          disabled={!(Number(repaintEnd) > Number(repaintStart)) || repaintFromTrack.isPending}
+                          onClick={() => repaintFromTrack.mutate(t)}
+                        >
+                          {repaintFromTrack.isPending ? "Repainting…" : "✦ Repaint region"}
+                        </button>
+                      </div>
+                      <div className="sub" style={{ fontSize: 11, marginTop: 6, opacity: 0.8 }}>
+                        Note: true lengthening/continuation is a separate capability; this repaints within the existing clip.
+                      </div>
+                      {repaintFromTrack.isError && (
+                        <div style={{ color: "var(--danger, #e57373)", fontSize: 12, marginTop: 6 }}>
+                          {(repaintFromTrack.error as Error)?.message || "Repaint failed."}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {remixFor === t.asset_id && (
                    <div className="card" style={{ padding: "10px 14px", margin: "-6px 0 10px", background: "color-mix(in srgb, var(--surface) 70%, transparent)" }}>
                      <div className="sub" style={{ fontSize: 12, marginBottom: 6 }}>
                        Cover this take with a new style. The engine restyles from this exact source audio (approximate preservation — melody/arrangement may shift).

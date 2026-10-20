@@ -122,4 +122,32 @@ describe("buildGenerationRequest", () => {
     expect(b).not.toHaveProperty("task_type");
     expect(b).not.toHaveProperty("src_asset_id");
   });
+
+  it("emits repaint region + mode/strength for a repaint request", () => {
+    const b = buildGenerationRequest({
+      ...base,
+      styles: "orchestral swell",
+      taskType: "repaint",
+      srcAssetId: "asset-9",
+      repaintingStart: 3,
+      repaintingEnd: 11,
+      repaintMode: "balanced",
+      repaintStrength: 0.5,
+      chunkMaskMode: "auto",
+    });
+    expect(b.task_type).toBe("repaint");
+    expect(b.src_asset_id).toBe("asset-9");
+    expect(b.repainting_start).toBe(3);
+    expect(b.repainting_end).toBe(11);
+    expect(b.repaint_mode).toBe("balanced");
+    expect(b.repaint_strength).toBe(0.5);
+    expect(b.chunk_mask_mode).toBe("auto");
+    expect(b.controls).not.toHaveProperty("styles");
+  });
+
+  it("preserves an intentional repainting_start of 0", () => {
+    const b = buildGenerationRequest({ ...base, taskType: "repaint", srcAssetId: "a", repaintingStart: 0, repaintingEnd: 5 });
+    expect(b.repainting_start).toBe(0);
+    expect(b.repainting_end).toBe(5);
+  });
 });

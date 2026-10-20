@@ -422,3 +422,12 @@ feedback. `generation.ts` gained optional `taskType`/`srcAssetId`/`referenceAsse
 Serializer `vitest` extended to 11 (cover mapping + text2music passthrough). Frontend build clean;
 backend unchanged at 221. Still on `feat/phase2-source-conditioned`, not deployed; full
 OpenAudioLab-path live cover E2E + repaint/extension real-audio gates require a deploy.
+
+Phase 2 UI (cont.): Studio "✦ Repaint" region picker. `generation.ts` gained
+`repaintingStart/End`, `repaintMode`, `repaintStrength`, `chunkMaskMode` (top-level
+typed fields, only when present; text2music unchanged; `repainting_start:0` preserved).
+The repaint mutation posts a real `task_type=repaint` job with the owned `src_asset_id`
+and the entered seconds-region. Serializer vitest -> 13. Live OpenAudioLab-path repaint
+with the exact payload succeeded: 15s 48kHz stereo real audio, lineage region 3–11 /
+balanced / 0.6 / chunk auto. Honest limits surfaced: genuine lengthening/continuation
+is a distinct capability (repaint only edits within the clip), not faked.
