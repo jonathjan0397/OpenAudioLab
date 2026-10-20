@@ -517,3 +517,33 @@ Still remaining for full Phase 3 (NOT done, NOT faked): Stage F provision
 serialized GPU-0 swap and validate it; measured compute factors / peak-VRAM
 benchmarks; community merge validation. SFT stays capability-gated (503) until its
 checkpoint is provisioned + validated.
+
+## 2026-10-20 — Phase 3 SFT live-attempt surfaced a real bug -> durable premium guard deployed (master 5dbf47a)
+
+Provisioned `acestep-v15-sft` (4.79 GB) onto the baseline worker and ran a real
+SFT job through the deployed path. Result was NOT a validated SFT: the job
+completed with real audio but `engine_version` reported `acestep-v15-house-turbo`
+-- the baseline runs an *externally-started* ACE-Step server
+(`OAL_ENGINE_AUTOSTART=0` -> `engine_process is None`), so my in-worker model
+swap never applied, and the server's on-demand model switch is not (yet) proven
+to honor the request. A paid premium request was effectively served by the wrong
+model. I did NOT ship that.
+
+Fixes:
+- Rolled back the throwaway paid account (deleted its user/api_key/credit_entry/
+  job/quote rows and its sft capability) so no mis-charge persists.
+- Durable guard (redeployed): a non-turbo `execution_profile` is advertised as a
+  worker capability ONLY when its id is in `OAL_PREMIUM_PROFILES_ENABLED` AND the
+  checkpoint is installed. Checkpoint presence alone no longer enables premium.
+
+Re-deployed `stratastack/oal-backend:mm-5dbf47a` + restarted worker. Live after
+the fix: `model-selections` -> turbo runnable=True, sft/xl/merge runnable=False
+(even with the sft checkpoint present) -> premium 503s instead of being served by
+Turbo; a real guest Turbo generation still succeeds (no regression). Backend 236
+passed, vitest 15, build clean.
+
+**Remaining (genuinely not done, gated by the allowlist):** validate the
+server-side on-demand model routing so a premium job actually loads
+`acestep-v15-sft` within GPU-0 VRAM budget (or run a dedicated premium worker),
+confirm `engine_version`/audio reflect SFT, then set `OAL_PREMIUM_PROFILES_ENABLED
+=sft-quality-v1`. Until then premium is honestly unavailable (503), never faked.
