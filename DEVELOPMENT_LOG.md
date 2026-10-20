@@ -547,3 +547,34 @@ server-side on-demand model routing so a premium job actually loads
 `acestep-v15-sft` within GPU-0 VRAM budget (or run a dedicated premium worker),
 confirm `engine_version`/audio reflect SFT, then set `OAL_PREMIUM_PROFILES_ENABLED
 =sft-quality-v1`. Until then premium is honestly unavailable (503), never faked.
+
+## 2026-10-20 — SFT genuinely validated on GPU-0 (worker-managed serialized swap)
+
+Root cause of the earlier mis-serve: the baseline ran `OAL_ENGINE_AUTOSTART=0`, so
+the ENTRYPOINT started an external, model-pinned (house-turbo) server and the
+worker's `engine_process` was `None` -> my swap never applied. And `ensure_running`
+only swapped when its tracked `self.model` was already known, so the first premium
+job after a warm/unknown start just relabeled.
+
+Fixes deployed (master `2e7fedd`, backend `mm-2e7fedd`):
+- Baseline worker now runs `OAL_ENGINE_AUTOSTART=1` (worker-managed lazy engine:
+  entrypoint no longer pins an external server) + `OAL_PREMIUM_PROFILES_ENABLED=
+  sft-quality-v1` + a persisted `acestep-v15-sft` bind-mount (copied to
+  `/Cold-Archive/oal-models/` so it survives container recreation).
+- `AceStepProcess.model` defaults to the env checkpoint and `ensure_running` stops
+  + reloads whenever the requested model differs.
+
+Live proof (real audio, via the API/worker on GPU 0):
+- SFT job -> `engine_version = ace-step-1.5/acestep-v15-sft`, 2.30 MB non-synthetic
+  48 kHz stereo 12 s, reserved 20 credits (base 10 x 2.0 multiplier).
+- Follow-up Turbo job -> swapped back, `engine_version = .../acestep-v15-house-turbo`.
+- Serialized alternation confirmed both directions on the single GPU 0.
+
+Benchmark note: peak GPU-0 memory during a 12 s / 50-step SFT job was ~16.2 GB
+(turbo baseline incl. llama-server ~16.9 GB) -- fits the 24 GB card with headroom.
+`compute_factor` remains provisional 1.0 pending a broader duration/batch sweep;
+the 2.0x multiplier is a proposed starting value, not a measured tariff.
+`xl-sft-premium-4b-v1` (4B planner ~12 GB) and the community `merge-experimental-v1`
+remain `unconfigured` (503) -- the pinned engine has no `acestep-v15-xl-sft` repo id
+and the merge lacks an approved checkpoint/license/VRAM profile. Throwaway paid
+test accounts were removed (0 left).
