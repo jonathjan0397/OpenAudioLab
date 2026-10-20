@@ -125,9 +125,13 @@ owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_
 - Engine-verified on the deployed Turbo model at ca1e85f: a real cover with a staged source produced
   source-honored audio (the engine only accepts temp-dir or relative source paths — not absolute
   paths elsewhere).
-- Tests: backend 221 passed (new `tests/test_source_conditioned.py`). extract/lego/complete remain
-  base-family only (out of scope for the Turbo worker); Studio source-picker UI + repaint audition
-  are the next Phase 2 step.
+- Engine-verified on the deployed Turbo model at ca1e85f: a real cover with a staged source produced
+  source-honored audio (the engine only accepts temp-dir or relative source paths — not absolute
+  paths elsewhere).
+- Studio UI: a per-track "✦ Remix" action submits a real `task_type=cover` job that references the
+  take's owned `src_asset_id` and a user-entered target style (via the canonical serializer), with
+  inline status/error; covers surface in the live queue. Serializer `vitest` extended (11 tests).
+- extract/lego/complete remain base-family only (out of scope for the Turbo worker).
 
 ## [Milestone 5] - 2026-10-15
 

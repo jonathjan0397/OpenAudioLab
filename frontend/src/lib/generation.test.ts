@@ -97,4 +97,29 @@ describe("buildGenerationRequest", () => {
     expect(buildGenerationRequest({ ...base })).not.toHaveProperty("seed");
     expect(buildGenerationRequest({ ...base, seed: 7 })).toHaveProperty("seed", 7);
   });
+
+  it("adds source-conditioned fields for a cover, keeping controls clean", () => {
+    const b = buildGenerationRequest({
+      ...base,
+      styles: "thrash metal",
+      taskType: "cover",
+      srcAssetId: "asset-123",
+      audioCoverStrength: 0.7,
+      coverNoiseStrength: 0.2,
+    });
+    expect(b.task_type).toBe("cover");
+    expect(b.src_asset_id).toBe("asset-123");
+    expect(b.audio_cover_strength).toBe(0.7);
+    expect(b.cover_noise_strength).toBe(0.2);
+    expect(b.style_prompt).toBe("thrash metal");
+    expect(b.music_description).toContain("thrash metal");
+    expect(b.controls).not.toHaveProperty("styles");
+    expect(b.controls).not.toHaveProperty("description");
+  });
+
+  it("leaves task/source fields absent for a plain text2music request", () => {
+    const b = buildGenerationRequest({ ...base, idea: "sunny" });
+    expect(b).not.toHaveProperty("task_type");
+    expect(b).not.toHaveProperty("src_asset_id");
+  });
 });

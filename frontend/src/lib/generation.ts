@@ -23,6 +23,13 @@ export interface GenerationDraft {
   durationSeconds: number;
   loraId: string;
   seed?: number;
+  // Source-conditioned generation (cover/repaint). Left undefined for plain
+  // text2music so the backend default applies unchanged.
+  taskType?: string;
+  srcAssetId?: string;
+  referenceAssetId?: string;
+  audioCoverStrength?: number;
+  coverNoiseStrength?: number;
 }
 
 // Default capability set for the deployed ACE-Step 1.5 Turbo release. Callers
@@ -105,5 +112,10 @@ export function buildGenerationRequest(
   }
   if (d.loraId) body.lora_id = d.loraId;
   if (typeof d.seed === "number") body.seed = d.seed;
+  if (d.taskType) body.task_type = d.taskType;
+  if (d.srcAssetId) body.src_asset_id = d.srcAssetId;
+  if (d.referenceAssetId) body.reference_asset_id = d.referenceAssetId;
+  if (typeof d.audioCoverStrength === "number") body.audio_cover_strength = d.audioCoverStrength;
+  if (typeof d.coverNoiseStrength === "number") body.cover_noise_strength = d.coverNoiseStrength;
   return body;
 }

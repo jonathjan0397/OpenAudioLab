@@ -413,3 +413,12 @@ admission + manifest lineage, temp staging writes content-hashed file, cross-own
 
 Next (Phase 2 UI): Studio "Remix/Repaint" source picker + region selection + A/B; then repaint/
 extension real-audio gates. Not merged/deployed.
+
+Phase 2 UI (same branch): added a Studio per-track "✦ Remix" action that builds a real
+`task_type=cover` request via the canonical serializer (target style + the take's owned
+`src_asset_id`, instrumental, clamped duration) and POSTs it, with inline pending/error/queued
+feedback. `generation.ts` gained optional `taskType`/`srcAssetId`/`referenceAssetId`/
+`audioCoverStrength`/`coverNoiseStrength` emitted as top-level fields (never control-bag).
+Serializer `vitest` extended to 11 (cover mapping + text2music passthrough). Frontend build clean;
+backend unchanged at 221. Still on `feat/phase2-source-conditioned`, not deployed; full
+OpenAudioLab-path live cover E2E + repaint/extension real-audio gates require a deploy.

@@ -8,6 +8,7 @@ import Waveform from "../components/Waveform";
 import { usePlayer } from "../components/PlayerContext";
 import { Donut, Progress, StatusPill, fmtTime } from "../components/ui";
 import { exportArtifact } from "../components/social";
+import { buildGenerationRequest } from "../lib/generation";
 
 interface Track {
   asset_id: string;
@@ -99,6 +100,8 @@ export default function StudioPage() {
   const [filter, setFilter] = useState("all");
   const [stemsFor, setStemsFor] = useState<string | null>(null);
   const [detailsFor, setDetailsFor] = useState<string | null>(null);
+  const [remixFor, setRemixFor] = useState<string | null>(null);
+  const [remixStyle, setRemixStyle] = useState("");
   const [newArtistName, setNewArtistName] = useState("");
   const [wsActive, setWsActive] = useState<string | null>(null);
   const [wsNewName, setWsNewName] = useState("");
@@ -244,6 +247,42 @@ export default function StudioPage() {
         qc.invalidateQueries({ queryKey: ["my-tracks"] });
       });
   };
+
+  const coverFromTrack = useMutation({
+    mutationFn: (t: Track) =>
+      api.post<{ job_id: string }>(
+        "/api/v1/jobs",
+        buildGenerationRequest({
+          idea: "",
+          styles: remixStyle.trim(),
+          mood: "",
+          gender: "",
+          bpm: "",
+          keyScale: "",
+          timeSignature: "",
+          language: "",
+          shift: 1,
+          quality: 8,
+          guidance: 0,
+          variations: 1,
+          title: `${t.title || "Untitled"} · Cover`,
+          lyrics: "",
+          lyricsProvided: true,
+          instrumental: true,
+          durationSeconds: Math.max(10, Math.min(120, Math.round(t.duration_seconds || 30))),
+          loraId: "",
+          taskType: "cover",
+          srcAssetId: t.asset_id,
+          audioCoverStrength: 0.7,
+        }),
+        { "Idempotency-Key": crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}` },
+      ),
+    onSuccess: () => {
+      setRemixFor(null);
+      setRemixStyle("");
+      qc.invalidateQueries({ queryKey: ["my-jobs"] });
+    },
+  });
 
   if (!me.data?.user) {
     return (
@@ -428,12 +467,53 @@ export default function StudioPage() {
                         setDetailsFor(detailsFor === t.asset_id ? null : t.asset_id);
                         qc.invalidateQueries({ queryKey: ["generation-manifest", t.asset_id] });
                       }}
-                    >
-                      ⓘ Details
-                    </button>
-                  </div>
-                </div>
-                {stemsFor === t.asset_id && (
+                     >
+                       ⓘ Details
+                     </button>
+                     <button
+                       className="btn"
+                       style={remixFor === t.asset_id ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
+                       onClick={() => {
+                         setRemixFor(remixFor === t.asset_id ? null : t.asset_id);
+                         setRemixStyle("");
+                       }}
+                     >
+                       ✦ Remix
+                     </button>
+                   </div>
+                 </div>
+                 {remixFor === t.asset_id && (
+                   <div className="card" style={{ padding: "10px 14px", margin: "-6px 0 10px", background: "color-mix(in srgb, var(--surface) 70%, transparent)" }}>
+                     <div className="sub" style={{ fontSize: 12, marginBottom: 6 }}>
+                       Cover this take with a new style. The engine restyles from this exact source audio (approximate preservation — melody/arrangement may shift).
+                     </div>
+                     <div style={{ display: "flex", gap: 8 }}>
+                       <input
+                         value={remixStyle}
+                         onChange={(e) => setRemixStyle(e.target.value)}
+                         placeholder="e.g. thrash metal, fast and aggressive"
+                         maxLength={200}
+                         style={{ flex: 1 }}
+                       />
+                       <button
+                         className="btn btn-primary"
+                         disabled={!remixStyle.trim() || coverFromTrack.isPending}
+                         onClick={() => coverFromTrack.mutate(t)}
+                       >
+                         {coverFromTrack.isPending ? "Covering…" : "✦ Cover it"}
+                       </button>
+                     </div>
+                     {coverFromTrack.isError && t.asset_id === remixFor && (
+                       <div style={{ color: "var(--danger, #e57373)", fontSize: 12, marginTop: 6 }}>
+                         {(coverFromTrack.error as Error)?.message || "Cover failed."}
+                       </div>
+                     )}
+                     {coverFromTrack.isSuccess && !coverFromTrack.isPending && (
+                       <div className="sub" style={{ color: "var(--accent)", fontSize: 12, marginTop: 6 }}>Cover queued — see the Live queue below.</div>
+                     )}
+                   </div>
+                 )}
+                 {stemsFor === t.asset_id && (
                   <div className="card" style={{ padding: "10px 14px", margin: "-6px 0 10px", background: "color-mix(in srgb, var(--surface) 70%, transparent)" }}>
                     {(stemsQuery.isLoading || stemsQuery.isFetching) && <span style={{ color: "var(--muted)", fontSize: 12 }}>Loading stems…</span>}
                     {stemsQuery.data && stemsQuery.data.stems.length === 0 && (
