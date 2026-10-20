@@ -274,6 +274,8 @@ def _generation_manifest(
             "model_id": job.model_id,
             "model_revision": job.model_revision,
             "music_description": request.get("music_description"),
+            "song_idea": request.get("song_idea"),
+            "style_prompt": request.get("style_prompt"),
             "title": request.get("title"),
             "lyrics_sha256": job.lyrics_sha256,
             "lyrics_origin": job.lyrics_origin,

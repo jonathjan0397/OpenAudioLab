@@ -71,7 +71,10 @@ def test_happy_path_pipeline(client, orch) -> None:
 
 
 def test_generation_manifest_is_durable(client, orch) -> None:
-    job_id = _run_pipeline(client, orch, key="manifest-1", seed=123)
+    job_id = _run_pipeline(
+        client, orch, key="manifest-1", seed=123,
+        song_idea="a rainy study night", style_prompt="lofi chill",
+    )
     artifacts = client.get(f"/api/v1/jobs/{job_id}/artifacts", headers=auth(TOKEN_A)).json()["artifacts"]
     artifact = artifacts[0]
     manifest = artifact["manifest"]
@@ -82,6 +85,12 @@ def test_generation_manifest_is_durable(client, orch) -> None:
     assert manifest["effective"]["seed"] == 123
     assert manifest["requested"]["lyrics_sha256"] == manifest["resolved"]["lyrics_sha256"]
     assert manifest["artifact"]["sha256"] == artifact["sha256"]
+    # Independent idea/style metadata is captured in the durable card, not folded
+    # into music_description or the control bag.
+    assert manifest["requested"]["song_idea"] == "a rainy study night"
+    assert manifest["requested"]["style_prompt"] == "lofi chill"
+    assert "description" not in manifest["requested"]["controls"]
+    assert "styles" not in manifest["requested"]["controls"]
 
     fetched = client.get(f"/api/v1/artifacts/{artifact['asset_id']}/manifest", headers=auth(TOKEN_A)).json()
     assert fetched["asset_id"] == artifact["asset_id"]
