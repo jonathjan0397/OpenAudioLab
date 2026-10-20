@@ -698,3 +698,25 @@ Honest status: code + checkpoints + worker config are in place; XL remains `unco
 which a real 12 s XL-SFT + XL-Turbo render + `nvidia-smi` peak < 20 GB must be confirmed
 before the multipliers are considered validated. The community merge still awaits an
 operator-approved exact checkpoint/revision/license.
+
+ ## 2026-10-20 — XL audio-validated on the 24 GB worker; offload REQUIRED (no-offload OOM)
+
+ Live validation completed the entry above. On the shared 24 GB baseline worker
+ (GPU0, NVIDIA RTX PRO 4000 Blackwell), real 12 s stereo renders were produced for
+ **both** XL selections (peak `nvidia-smi` **19.7 GB / 24 GB**, `synthetic_test_audio=false`):
+ - `ace-step-1.5-xl-turbo` (profile `xl-turbo-fast-v1`, engine `acestep-v15-xl-turbo`)
+ - `ace-step-1.5-xl-sft` (profile `xl-sft-quality-v1`, engine `acestep-v15-xl-sft`)
+ Turbo regression (global offload on) still renders, peak **11.2 GB**.
+
+ The "no offload" plan assumption was refuted live. Without offload the **full engine
+ process** (XL DiT ~10 GB bf16 + Qwen3 text encoder ~10 GB + VAE/embedding) peaked at
+ **20.6 GiB**, which with the co-located llama-server (~2.85 GiB) + two CUDA contexts
+ exceeded the 23.46 GiB card → CUDA OOM. `VRAM_AUTO_OFFLOAD_THRESHOLD_GB` is `20.0`,
+ so a 24 GB card does not auto-offload. Fix (both in `run_house_workers.sh`):
+ - `ACESTEP_OFFLOAD_TO_CPU=1` — DiT stays resident on GPU; text encoder/VAE load to
+   GPU only while in use, then return to CPU (no perf hit). No quantization.
+ - `OAL_LLM_GPU_LAYERS=0` — llama-server (Qwen3-4B) moved fully to CPU, freeing its
+   ~2.85 GiB + CUDA context. (Supersedes the `OAL_LLM_GPU_LAYERS=32` line above.)
+
+ Note: flash-attention is unavailable for XL on this card → SDPA fallback
+ (`init_service_loader.py`), not a blocker.

@@ -10,10 +10,15 @@ owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_
 ### XL (4B DiT) premium models provisioned on the 24 GB baseline worker (2026-10-20)
 - Corrected the earlier "XL needs a dedicated ≥32 GB worker" assumption: XL is a
   first-class model in the pinned engine (`ca1e85f`, upstream issue #990 / PR #989).
-  The 4B DiT loads **~9 GB in bf16** (upstream `MODEL_VRAM["dit_xl_base"]=9.0`) and
-  is explicitly an upstream **tier6b (20-24 GB)** model ("XL fits without offload"),
-  so the shared 24 GB baseline worker serves it once the co-located llama-server
-  footprint is shrunk (`OAL_LLM_CTX=4096`, `OAL_LLM_GPU_LAYERS=32`).
+  The 4B DiT loads **~9 GB in bf16** (upstream `MODEL_VRAM["dit_xl_base"]=9.0`), but
+  the **full engine process** (DiT + Qwen3 text encoder + VAE/embedding) peaks at
+  **~20.6 GiB without offload**, which OOMs a 24 GB card once the co-located
+  llama-server is counted. XL therefore runs with **`ACESTEP_OFFLOAD_TO_CPU=1`**
+  (DiT stays resident on GPU; text encoder/VAE load to GPU only while in use, then
+  return to CPU — no perf hit) **and** the llama-server moved fully to CPU
+  (`OAL_LLM_GPU_LAYERS=0`), freeing its ~2.85 GiB. No quantization. Audio-validated:
+  XL-Turbo + XL-SFT peak **19.7 GB / 24 GB**, Turbo (regression) 11.2 GB. Note:
+  flash-attention is unavailable for XL on this card → SDPA fallback.
 - Renamed the XL-SFT premium profile `xl-sft-premium-4b-v1` → `xl-sft-quality-v1`;
   VRAM floor lowered `32000` → `15000`; `planner_model` set to `None` (the XL DiT is
   self-contained; no separate 4B LLM planner is loaded); `tasks` trimmed to
