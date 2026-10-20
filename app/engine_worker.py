@@ -66,6 +66,7 @@ class AceStepProcess:
         self.start_timeout = start_timeout
         self.poll = poll
         self.proc: subprocess.Popen | None = None
+        self.model: str | None = None
 
     def is_running(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
@@ -79,20 +80,34 @@ class AceStepProcess:
         except Exception:
             return False
 
-    def ensure_running(self) -> None:
+    def ensure_running(self, model: str | None = None) -> None:
+        # Only one heavy engine is resident at a time: a model change stops the
+        # current server (freeing CUDA memory via process exit) before starting
+        # the requested checkpoint. Passing None keeps the currently loaded model.
+        if model and self.is_running() and self.model and model != self.model:
+            log.info("engine model swap %s -> %s (stopping current to free GPU/RAM)", self.model, model)
+            self.stop()
         if self.is_running() and self._healthy():
+            if model:
+                self.model = model
             return
         if not self.is_running():
-            log.info("starting ACE-Step server: %s (cwd=%s)", " ".join(self.cmd), self.cwd)
+            if model:
+                os.environ["ACESTEP_CONFIG_PATH"] = model
+            log.info("starting ACE-Step server: %s (cwd=%s, model=%s)", " ".join(self.cmd), self.cwd, model or self.model)
             self.proc = subprocess.Popen(self.cmd, cwd=self.cwd, start_new_session=True)
+            if model:
+                self.model = model
         deadline = time.monotonic() + self.start_timeout
         while time.monotonic() < deadline:
             if self._healthy():
-                log.info("ACE-Step server ready")
+                log.info("ACE-Step server ready (model=%s)", self.model)
                 return
             if self.proc is not None and self.proc.poll() is not None:
+                rc = self.proc.returncode
                 self.proc = None
-                raise EngineError("ENGINE_START_FAILED", f"ACE-Step server exited (code {self.proc.returncode if self.proc else '?'}).")
+                self.model = None
+                raise EngineError("ENGINE_START_FAILED", f"ACE-Step server exited (code {rc}).")
             time.sleep(self.poll)
         self.stop()
         raise EngineError("ENGINE_START_TIMEOUT", "ACE-Step server did not become healthy in time.")
@@ -190,6 +205,7 @@ class EngineWorker:
         self.engine_process = engine_process
         self._stop = False
         self._last_activity = time.monotonic()
+        self._caps_registered = False
 
     def register(self) -> None:
         telemetry = _gpu_telemetry()
@@ -202,6 +218,12 @@ class EngineWorker:
             if telemetry is not None:
                 worker.gpu_util, worker.vram_used_mb, worker.vram_total_mb = telemetry
             session.commit()
+        if not self._caps_registered:
+            try:
+                self._register_capabilities()
+                self._caps_registered = True
+            except Exception:
+                log.exception("worker capability registration failed")
 
     def _mark_unhealthy(self, code: str, message: str) -> None:
         cooldown = max(0.0, float(self.settings.worker_unhealthy_cooldown_seconds))
@@ -385,6 +407,57 @@ class EngineWorker:
         self._drain_checked_at = now
         return self._drain_flag
 
+    def _target_engine_model(self, request_json: dict) -> str:
+        """Engine checkpoint this job needs. Turbo uses the worker's configured
+        default (preserving the live baseline model); premium uses its release."""
+        admission = dict((request_json or {}).get("_admission") or {})
+        model = admission.get("engine_model")
+        family = admission.get("family")
+        if not model or family == "turbo":
+            return self.settings.acestep_model
+        return model
+
+    def _register_capabilities(self) -> None:
+        """Advertise which catalog profiles this worker can actually run, based on
+        the engine checkpoints installed here. Absent checkpoints stay disabled,
+        so premium jobs 503 until provisioned (never a silent Turbo downgrade)."""
+        from . import catalog as _catalog
+        from .models import WorkerCapability
+
+        ckpt_root = Path(self.settings.acestep_checkpoints_dir)
+        with self.db.session() as session:
+            for release in _catalog.CATALOG.values():
+                for prof in release.profiles:
+                    if prof.availability != "available":
+                        continue
+                    if prof.native_family == "turbo":
+                        present = True
+                    else:
+                        present = (ckpt_root / prof.engine_model).is_dir()
+                    existing = session.execute(
+                        select(WorkerCapability).where(
+                            WorkerCapability.worker_id == self.worker_id,
+                            WorkerCapability.model_selection == prof.model_selection,
+                            WorkerCapability.execution_profile_id == prof.profile_id,
+                        )
+                    ).scalar_one_or_none()
+                    if existing is None:
+                        session.add(WorkerCapability(
+                            worker_id=self.worker_id,
+                            model_selection=prof.model_selection,
+                            execution_profile_id=prof.profile_id,
+                            engine_model=prof.engine_model if prof.native_family != "turbo" else self.settings.acestep_model,
+                            planner_model=prof.planner_model,
+                            tasks_json=list(prof.tasks),
+                            max_duration_seconds=prof.max_duration_seconds,
+                            enabled=present,
+                        ))
+                    else:
+                        existing.enabled = present
+                        existing.tasks_json = list(prof.tasks)
+                        existing.max_duration_seconds = prof.max_duration_seconds
+            session.commit()
+
     def run_once(self) -> bool:
         if self._draining():
             self.register()
@@ -407,19 +480,26 @@ class EngineWorker:
                 self._maybe_stop_engine()
             return False
         self._last_activity = time.monotonic()
-        if self.engine_process is not None:
-            try:
-                self.engine_process.ensure_running()
-            except EngineError as exc:
-                log.warning("engine start failed for job %s (%s); requeueing", job_id, exc.code)
-                self._mark_unhealthy(exc.code, exc.message)
-                self.queue.publish(self.receive_queues[0], job_id)
-                time.sleep(5)
-                return True
         claim = claim_attempt(self.db, job_id, self.worker_id)
         if claim is None:
             return True
         claimed_job, attempt_id, lease_token = claim
+        with self.db.session() as session:
+            _claimed = get_job_by_id(session, claimed_job)
+            target_model = self._target_engine_model(dict(_claimed.request_json or {}))
+        # Start/swap the engine to the job's model AFTER claiming, so only the
+        # requested checkpoint is ever resident (serialized GPU ownership).
+        if self.engine_process is not None:
+            try:
+                self.engine_process.ensure_running(model=target_model)
+            except EngineError as exc:
+                log.warning("engine start/swap failed for job %s (%s); requeueing", job_id, exc.code)
+                self._mark_unhealthy(exc.code, exc.message)
+                self._requeue(claimed_job, attempt_id, lease_token)
+                time.sleep(5)
+                return True
+        if target_model:
+            self.adapter.model = target_model
         with self.db.session() as session:
             job = get_job_by_id(session, claimed_job)
             payload = self._payload_for(job)

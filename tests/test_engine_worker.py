@@ -119,14 +119,18 @@ class FakeProcess:
         self.ensure_raises = ensure_raises
         self.ensure_calls = 0
         self.stopped = False
+        self.model = None
 
     def is_running(self) -> bool:
         return self._running
 
-    def ensure_running(self) -> None:
+    def ensure_running(self, model: str | None = None) -> None:
         self.ensure_calls += 1
+        if model and self.model and model != self.model:
+            self.stopped = True  # swap stops the previous engine first
         if self.ensure_raises is not None:
             raise self.ensure_raises
+        self.model = model or self.model
         self._running = True
 
     def stop(self) -> None:

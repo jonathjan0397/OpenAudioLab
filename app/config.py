@@ -159,6 +159,7 @@ class Settings(BaseSettings):
     s3_secret_key: str = ""
     s3_prefix: str = ""
     adapter_cache_dir: str = "/opt/acestep/adapter-cache"
+    acestep_checkpoints_dir: str = "/opt/acestep/checkpoints"
     # Source/reference audio for cover/repaint is staged here and passed to the
     # co-located ACE-Step server. The engine's validate_audio_path only accepts
     # absolute paths under the system temp dir, so this MUST live under /tmp.
