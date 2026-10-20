@@ -1,0 +1,9 @@
+# Thin overlay: bakes the env-gated int8 DiT-quantization patch onto the current
+# house worker image (its /opt/acestep is the pinned ACE-Step ca1e85f clone, file
+# unpatched). Avoids a heavy full rebuild (torch/demucs/TF). The same change is
+# applied from source via `git apply` in Dockerfile.worker for from-source builds.
+# Runtime behavior is toggled by ACESTEP_QUANTIZATION (unset => bf16), so this base
+# layer is inert unless the worker sets the env (run_house_workers.sh does).
+FROM stratastack/oal-worker:house-v1-070
+COPY patches/engine/startup_model_init.py /opt/acestep/acestep/api/startup_model_init.py
+RUN grep -q "ACESTEP_QUANTIZATION" /opt/acestep/acestep/api/startup_model_init.py

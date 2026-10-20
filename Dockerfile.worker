@@ -26,6 +26,15 @@ RUN git clone https://github.com/ace-step/ACE-Step-1.5.git . \
     && git checkout "$ACESTEP_REF" \
     && uv sync --frozen
 
+# --- OAL env-gated int8 DiT quantization patch -------------------------------
+# Adds an ACESTEP_QUANTIZATION env read + pass-through to initialize_service so the
+# XL (4B) DiT can be int8 weight-only (fits a 24 GB card alongside a GPU-resident
+# lyrics llama-server). Unset => bf16 (upstream default preserved). Validated on
+# sm_120; grep guard aborts the build if upstream drifts the patch target.
+COPY patches/acestep-ca1e85f-int8-quant.patch /tmp/oal-quant.patch
+RUN git apply /tmp/oal-quant.patch \
+    && grep -q "ACESTEP_QUANTIZATION" /opt/acestep/acestep/api/startup_model_init.py
+
 # DataLoader with num_workers>0 forks from the training runner thread; the
 # forked workers then never receive indices (queue feeder races with the
 # fork) and training hangs at step 0 with GPU memory allocated. Load

@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-IMAGE=stratastack/oal-worker:house-v1-070
+IMAGE=stratastack/oal-worker:house-v1-070-int8
 DB='postgresql+psycopg2://oal:993903361d4157b90803f309e6a0f6d2@10.203.0.1:55432/oal'
 REDIS='redis://:3acc81a98ee300acba919d424164e0e5@10.203.0.1:6379/0'
 SECRET=4022736855959b810ab98d772ab1af94af9f0b222495595c996479145915f5cc
@@ -11,6 +11,7 @@ docker run -d --name oal-worker-hub --gpus all --network host --restart unless-s
   -e CUDA_VISIBLE_DEVICES=0 \
   -e ACESTEP_API_HOST=0.0.0.0 -e ACESTEP_API_PORT=8001 -e ACESTEP_DEVICE=cuda:0 -e ACESTEP_INIT_LLM=false \
   -e ACESTEP_OFFLOAD_TO_CPU=1 \
+  -e ACESTEP_QUANTIZATION=int8_weight_only \
   -e ACESTEP_CONFIG_PATH=acestep-v15-house-turbo -e OAL_ACESTEP_MODEL=acestep-v15-house-turbo \
   -e OAL_ACESTEP_BASE_URL=http://127.0.0.1:8001 -e OAL_APP_DIR=/srv/openaudiolab/code \
   -e OAL_BACKEND_URL=http://10.203.0.1:50555 -e OAL_DATABASE_URL="$DB" \
@@ -25,7 +26,7 @@ docker run -d --name oal-worker-hub --gpus all --network host --restart unless-s
   -e OAL_WORKER_ID=oal-baseline-gpu0 \
   -e OAL_LLM_AUTOSTART=1 \
   -e OAL_LLM_CTX=4096 \
-  -e OAL_LLM_GPU_LAYERS=0 \
+  -e OAL_LLM_GPU_LAYERS=99 \
   -e OAL_WORKER_ROLE=engine_worker,audio_worker -e OAL_WORKER_TIER=baseline \
   -v /mnt/oal-storage:/data/oal -v oal-acestep-cache:/root/.cache \
   -v /Cold-Archive/oal-train-gpu0:/opt/acestep/training-data \

@@ -130,3 +130,19 @@ actually reach the model. Free-text song **idea** and raw **style** are first-cl
 request fields (`song_idea`, `style_prompt`) — never control-bag keys — and persist
 independently in the recipe for recreation. Control **values** are additionally range/
 type-validated (`CONTROL_INVALID`) so a slider can't ship an out-of-range number.
+
+## Catalog `model_selection` path (multi-model, post-Phase3)
+
+The statements above describe the legacy single `model_id` (`ace-step-1.5` Turbo) path, which is
+unchanged. The newer `model_selection` path (`ace-step-1.5-{turbo,sft,xl-sft,xl-turbo,merge-…}`)
+validates controls against the per-model `ExecutionProfile` in `app/catalog.py::validate_profile_controls`
+and forwards the **resolved** controls (profile defaults filled for anything the caller omits) so the
+engine runs the correct per-model denoising settings instead of its REST default of 8 steps. Notable
+differences from the legacy path:
+- **Non-turbo guidance/steps** are set to upstream recommendations — sft 64 steps (50-100)/CFG 7.0
+  (5-9)/shift 1.0; xl-sft 100/CFG 7.0/shift 1.0; merge 64/CFG 7.0/shift 1.0; DCW forced off. Turbo-family
+  locks 8 steps + CFG 1.0 (distilled) and uses shift 3.0; xl-turbo DCW matches the 2B turbo default (on).
+- **`shift` is a profile-owned band** (turbo 1-3, base 1-3), so it is accepted on Turbo *profiles*
+  here, unlike the legacy Turbo `model_id` (which still rejects it as base-only).
+- `sampler_mode` (euler/heun) remains unsupported: the pinned REST `GenerateMusicRequest` has no such
+  field, so it is rejected and `infer_method` (ode/sde) is used instead.

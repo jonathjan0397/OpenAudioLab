@@ -720,3 +720,47 @@ operator-approved exact checkpoint/revision/license.
 
  Note: flash-attention is unavailable for XL on this card → SDPA fallback
  (`init_service_loader.py`), not a blocker.
+
+ ## 2026-10-20 — int8 shipped; per-model denoising defaults raised; worker-control
+ ## forwarding bug fixed
+
+ Three things landed after the XL-on-24 GB validation.
+
+ 1. **int8 DiT quantization validated + shipped (all DiT models).** torchao
+    `int8_weight_only` (pinned `_apply_dit_quantization`) loads cleanly on Blackwell
+    sm_120 ("DiT quantized with: int8_weight_only", no kernel errors). Same-seed A/B
+    int8-vs-bf16 (nondeterminism floor is 0 — a same-seed repeat was byte-identical):
+    turbo SNR 19.5 dB / Pearson 0.996; sft 13.1 / 0.977; XL-Turbo 23.7 / 0.998;
+    XL-SFT 12.0 / 0.969; loudness shift < 0.5 dB. Weight-only int8 keeps activations
+    bf16 → only subtle HF detail loss, no structural change; fp8 not required. Worker
+    env `ACESTEP_QUANTIZATION=int8_weight_only` (+ `ACESTEP_OFFLOAD_TO_CPU=1`,
+    `OAL_LLM_GPU_LAYERS=99`) returns the lyrics llama-server to GPU (style-prompt
+    0.46 s, full lyrics draft 4.6 s) with XL steady peak **~13.5 GB / 24 GB**.
+    **Correction** to the entry above: the Qwen3 text encoder is **1.2 GB**
+    (`gpu_config.py:154` `"text_encoder": 1.2`), NOT 8-10 GB; the 20.6 GiB no-offload
+    footprint was DiT(9) + activations + CUDA/fragmentation + llama.
+
+ 2. **Per-model denoising defaults aligned to upstream.** Non-turbo guidance had
+    been set 2.0-3.0, far below the engine's `guidance_scale` default 7.0 (docs
+    "typical 5-9", best-quality 7-9). New: sft 64 steps (50-100)/CFG 7.0/shift 1.0;
+    xl-sft 100 steps/CFG 7.0/shift 1.0; merge 64/CFG 7.0/shift 1.0/DCW off.
+    Turbo-family stays 8 steps/CFG 1.0/shift 3.0; xl-turbo DCW flipped to on (matches
+    2B turbo default). `shift` is now a profile-owned band surfaced in
+    `control_schema` + `/model-selections` and forwarded. Verified upstream:
+    **quantization and denoising are independent** — nothing ties int8 to steps/
+    guidance; this is correctness, not int8 compensation.
+
+ 3. **Worker-control-forwarding bug (the real reason the settings matter).**
+    `engine_worker._payload_for` read raw `request["controls"]` (empty when users omit
+    optional controls) instead of the API's `_admission["resolved_controls"]`, so the
+    engine fell back to its REST default `inference_steps=8` for EVERY model — the
+    profile steps/cfg/shift were computed at admission but never sent. Fixed to
+    forward resolved controls (raw as legacy fallback). Verified live: xl-sft ran
+    **100/100**, sft **64/64**, turbo stayed 8. (`sampler_mode` euler/heun is genuinely
+    absent from the pinned REST `release_task_models`, so it stays correctly rejected.)
+
+ Deploy: hub backend rebuilt at `a95d4fb` (image `denoise-a95d4fb`) serving the new
+ catalog; worker image `stratastack/oal-worker:house-v1-070-int8` bakes the int8 patch
+ via `Dockerfile.worker_int8` (thin overlay on the current base; the same patch is
+ `git apply`+grep-guarded into `Dockerfile.worker` for from-source builds). The
+ transitional bind-mount is removed. Tests 250 pass.

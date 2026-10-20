@@ -7,6 +7,29 @@ owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_
 
 ## [Unreleased]
 
+### int8 DiT quantization + corrected per-model denoising defaults (2026-10-20)
+- **int8 ships (all DiT models).** The engine's env-gated patch (pinned `_apply_dit_quantization`)
+  was validated on Blackwell sm_120: `ACESTEP_QUANTIZATION=int8_weight_only` halves the
+  XL DiT resident (~9→~4.5 GB), letting the lyrics llama-server return to GPU
+  (`OAL_LLM_GPU_LAYERS=99`) with XL steady peak **~13.5 GB / 24 GB** (real 12 s stereo
+  renders for XL-Turbo/XL-SFT/turbo/sft). Same-seed A/B int8-vs-bf16: SNR 19.5/13.1/
+  23.7/12.0 dB (turbo/sft/XL-Turbo/XL-SFT), Pearson 0.97-0.998, loudness shift < 0.5 dB
+  → accepted, fp8 not required. The int8 patch is baked into the worker image
+  (`Dockerfile.worker` `git apply` + grep guard; `Dockerfile.worker_int8` thin overlay).
+  Corrected an earlier mis-statement: the Qwen3 text encoder is **1.2 GB** (`gpu_config.py:154`),
+  not 8-10 GB.
+- **Per-model denoising defaults raised to upstream** (they were under-set): non-turbo
+  guidance was 2.0-3.0 vs the engine default 7.0. Now sft 64 steps (50-100)/CFG 7.0
+  (5-9)/shift 1.0; xl-sft 100/CFG 7.0/shift 1.0; merge 64/CFG 7.0/shift 1.0/DCW off;
+  turbo-family stays 8 steps/CFG 1.0/shift 3.0; xl-turbo DCW flipped on (match 2B turbo).
+  `shift` exposed as a profile-owned control band.
+- **Fix: worker now forwards the profile-resolved controls.** `_payload_for` read raw
+  `request["controls"]` (usually empty) instead of `_admission["resolved_controls"]`, so
+  the engine ran at its REST default `inference_steps=8` for every model and the
+  per-model steps/cfg/shift never applied. Now resolved controls are forwarded (raw kept
+  as legacy fallback); verified xl-sft 100/100 and sft 64/64 steps in the engine log.
+  Tests: 250 passed.
+
 ### XL (4B DiT) premium models provisioned on the 24 GB baseline worker (2026-10-20)
 - Corrected the earlier "XL needs a dedicated ≥32 GB worker" assumption: XL is a
   first-class model in the pinned engine (`ca1e85f`, upstream issue #990 / PR #989).
