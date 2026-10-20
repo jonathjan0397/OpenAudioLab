@@ -653,3 +653,48 @@ loader uses per-tensor `.to(device=...)` with no device_map/accelerate hook, XL 
 ~20 GB of weights, and GPU 0 also hosts llama-server -- there is no offload path and
 insufficient VRAM, so a correct XL run needs a dedicated >=32/48 GB worker (config +
 allowlist now lights it up automatically), not a runtime fork on this node.
+
+## 2026-10-20 — XL (4B DiT) corrected + provisioned on the 24 GB baseline worker
+
+Deep-research pass **corrects** the two "XL cannot run here" conclusions recorded
+above (lines ~604-655). Those conclusions were based on three false premises that
+are now refuted against the pinned `ca1e85f` runtime + the live Hugging Face repos:
+
+1. **XL is a first-class native model in the pinned runtime**, not diffusers-only.
+   `ACE-Step/acestep-v15-xl-sft` and `ACE-Step/acestep-v15-xl-turbo` are published
+   native HF repos (4x fp32 safetensors shards + `modeling_acestep_v15_xl_base.py`
+   / `modeling_acestep_v15_xl_turbo.py` custom code, `model_type=acestep`, MIT). The
+   loader (`init_service_loader.py`) calls `AutoModel.from_pretrained(..., dtype=self.dtype)`,
+   converting the ~19.9 GB fp32 shards to **~9 GB bf16** resident -- matching upstream
+   `gpu_config.py` `MODEL_VRAM["dit_xl_base"]=9.0`.
+2. **The pinned runtime already has offload + tiling** (contrary to the grep above):
+   `offload_to_cpu` / `offload_dit_to_cpu`, torchao `int8_weight_only`/`fp8_weight_only`/
+   `w8a8_dynamic`, `use_tiled_decode` (default True at REST), `MAX_CUDA_VRAM` debug, and an
+   XL-aware `_vram_guard_reduce_batch`. No runtime fork is required.
+3. **24 GB is the upstream-design tier for XL**: upstream issue #990 / PR #989 (merged
+   before `ca1e85f`) document tier6b (20-24 GB) as "XL: no quantization needed, batch 2-4".
+   `vector_quantize_pytorch 1.27.20` (required by the XL modeling code) is already pinned
+   in `uv.lock`; `transformers<4.58` already satisfied.
+
+Config changes this session:
+- `app/catalog.py`: renamed `xl-sft-premium-4b-v1` -> **`xl-sft-quality-v1`**; VRAM floor
+  `32000` -> **`15000`**; `planner_model` -> `None` (XL DiT is self-contained, no separate
+  4B LLM planner is loaded); `tasks` trimmed to `text2music`/`cover`/`repaint`;
+  multiplier 4.00 (provisional). Added the **`ace-step-1.5-xl-turbo`** selection with
+  `xl-turbo-fast-v1`: CFG-distilled (guidance locked 1.0, 8 steps locked, DCW off),
+  multiplier 2.00 (provisional).
+- `app/config.py`: added **`OAL_XL_TURBO_CHECKPOINT_ID`** (default empty -> unconfigured).
+- `scripts/run_house_workers.sh`: baseline worker now bind-mounts
+  `/Cold-Archive/oal-models/acestep-v15-xl-{sft,turbo}` into `/opt/acestep/checkpoints/`
+  and allowlists `sft-quality-v1,xl-sft-quality-v1,xl-turbo-fast-v1`, with the
+  llama-server footprint shrunk via `OAL_LLM_CTX=4096` + `OAL_LLM_GPU_LAYERS=32` (frees
+  ~1-2 GB). Static footprint ~13.7 GB leaves ~8 GB headroom on 24 GB for XL peaks.
+- Both native XL checkpoints downloaded to `/Cold-Archive/oal-models/` (19 GB + 20 GB).
+- Tests: profile shape/lock, provisional multipliers (2.0/4.0), provisioned quote+charge,
+  and unconfigured-503 coverage for both XL selections (suite 248 passed).
+
+Honest status: code + checkpoints + worker config are in place; XL remains `unconfigured`
+(503) until the operator's live worker carries the new env and the checkpoint dirs, after
+which a real 12 s XL-SFT + XL-Turbo render + `nvidia-smi` peak < 20 GB must be confirmed
+before the multipliers are considered validated. The community merge still awaits an
+operator-approved exact checkpoint/revision/license.

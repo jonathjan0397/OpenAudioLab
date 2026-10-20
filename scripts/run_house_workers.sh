@@ -18,13 +18,19 @@ docker run -d --name oal-worker-hub --gpus all --network host --restart unless-s
   -e OAL_STORAGE_BACKEND=local -e OAL_STORAGE_DIR=/data/oal \
   -e OAL_TRAIN_WORKDIR=/opt/acestep/training-data -e OAL_TRAIN_MIN_FREE_MB=0 \
   -e OAL_TRAIN_HTTP_TIMEOUT_SECONDS=7200 -e OAL_ENGINE_AUTOSTART=1 \
-  -e OAL_PREMIUM_PROFILES_ENABLED=sft-quality-v1 \
+  -e OAL_PREMIUM_PROFILES_ENABLED=sft-quality-v1,xl-sft-quality-v1,xl-turbo-fast-v1 \
+  -e OAL_XL_CHECKPOINT_ID=acestep-v15-xl-sft \
+  -e OAL_XL_TURBO_CHECKPOINT_ID=acestep-v15-xl-turbo \
   -e OAL_WORKER_ID=oal-baseline-gpu0 \
   -e OAL_LLM_AUTOSTART=1 \
+  -e OAL_LLM_CTX=4096 \
+  -e OAL_LLM_GPU_LAYERS=32 \
   -e OAL_WORKER_ROLE=engine_worker,audio_worker -e OAL_WORKER_TIER=baseline \
   -v /mnt/oal-storage:/data/oal -v oal-acestep-cache:/root/.cache \
   -v /Cold-Archive/oal-train-gpu0:/opt/acestep/training-data \
   -v /Cold-Archive/oal-models/acestep-v15-sft:/opt/acestep/checkpoints/acestep-v15-sft \
+  -v /Cold-Archive/oal-models/acestep-v15-xl-sft:/opt/acestep/checkpoints/acestep-v15-xl-sft \
+  -v /Cold-Archive/oal-models/acestep-v15-xl-turbo:/opt/acestep/checkpoints/acestep-v15-xl-turbo \
   "$IMAGE"
 
 docker run -d --name oal-worker-gpu1 --gpus all --restart unless-stopped \

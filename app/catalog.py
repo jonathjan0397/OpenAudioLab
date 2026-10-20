@@ -12,9 +12,16 @@ Grounded against the pinned engine (ca1e85f):
 - SFT/Base are separate families; SFT defaults DCW off (model-aware upstream
   default); the pinned REST has no `sampler_mode`, so euler/heun/ancestral are
   rejected, and `timesteps` overrides steps (effective NFE is counted).
-- `acestep-v15-xl-sft` is not in the pinned engine's model map and the 4B
-  planner alone needs ~12 GB, so `xl-sft-premium-4b-v1` is registered but
-  unconfigured (not offered) until a dedicated, validated runtime exists.
+- XL (4B) DiT models are first-class in the pinned runtime (upstream issue #990,
+  PR #989, merged before ca1e85f). XL-SFT / XL-Turbo load at ~9 GB bf16
+  (upstream `MODEL_VRAM["dit_xl_base"]=9.0`) and are explicitly tier6b (20-24 GB)
+  in `gpu_config.py:428-449` ("XL fits without offload"). VRAM floor set to
+  15 GB so the 24 GB baseline worker can serve them (with llama-server shrink
+  via `OAL_LLM_CTX=4096` + `OAL_LLM_GPU_LAYERS=32` the static footprint is
+  ~13.7 GB leaving 8 GB headroom on 24 GB).
+- XL-Turbo is CFG-distilled (`modeling_acestep_v15_xl_turbo.py:1845-1923`
+  forces `diffusion_guidance_scale=1.0` and rejects CFG/ADG), mirroring
+  `turbo-fast-v1`: 8 steps locked, guidance locked 1.0.
 - The community merge stays unconfigured until its exact checkpoint/license/VRAM
   are approved and benchmarked.
 
@@ -63,8 +70,10 @@ class ExecutionProfile:
     sampler_modes: tuple[str, ...] = ("ode", "sde")
     # Minimum GPU VRAM (MB) a worker must have to run this profile. Registration
     # only advertises a premium profile on workers that actually fit it -- a
-    # healthy liveness endpoint or total VRAM is not the test; this is. XL needs a
-    # dedicated large worker and will NOT be advertised on a 24 GB node.
+    # healthy liveness endpoint or total VRAM is not the test; this is. XL (4B
+    # DiT) loads ~9 GB bf16 and is an upstream 20-24 GB (tier6b) model, so the
+    # floor (15 GB) lets the shared 24 GB baseline worker serve it once the
+    # llama-server footprint is shrunk (OAL_LLM_CTX/OAL_LLM_GPU_LAYERS).
     vram_required_mb: int = 0
 
     def control_schema(self) -> dict[str, Any]:
@@ -177,20 +186,50 @@ def _xl() -> ModelRelease:
         license_status="verified",
         profiles=(
             ExecutionProfile(
-                profile_id="xl-sft-premium-4b-v1",
+                profile_id="xl-sft-quality-v1",
                 model_selection="ace-step-1.5-xl-sft",
                 engine_model=ckpt or "acestep-v15-xl-sft",
                 native_family="xl",
-                label="Premium (4B planner)",
-                quality_note="XL decoder + 4B planner; needs a validated larger/offload-capable worker.",
+                label="Premium (XL 4B DiT)",
+                quality_note="XL 4B DiT (SFT); higher fidelity than 2B SFT. ~9 GB bf16; fits a 24 GB worker.",
                 steps_min=50, steps_max=100, steps_default=50,
                 cfg_min=2.0, cfg_max=3.0, cfg_default=3.0, cfg_locked=False,
                 dcw_forced_off=True,
-                planner_model="acestep-5Hz-lm-4B",
-                tasks=("text2music", "cover", "cover-nofsq", "repaint"),
+                planner_model=None,
+                tasks=("text2music", "cover", "repaint"),
                 max_duration_seconds=600, max_batch=1,
                 availability="available" if ckpt else "unconfigured", multiplier=4.00,
-                vram_required_mb=32000,
+                vram_required_mb=15000,
+            ),
+        ),
+    )
+
+
+def _xl_turbo() -> ModelRelease:
+    from .config import get_settings
+
+    ckpt = (get_settings().xl_turbo_checkpoint_id or "").strip()
+    return ModelRelease(
+        selection="ace-step-1.5-xl-turbo",
+        display_name="ACE-Step 1.5 XL Turbo (premium)",
+        family="xl",
+        license_status="verified",
+        profiles=(
+            ExecutionProfile(
+                profile_id="xl-turbo-fast-v1",
+                model_selection="ace-step-1.5-xl-turbo",
+                engine_model=ckpt or "acestep-v15-xl-turbo",
+                native_family="xl",
+                label="Fast (XL 4B DiT)",
+                quality_note="XL 4B DiT (Turbo); CFG-distilled, 8 steps. Fast, higher fidelity than 2B turbo.",
+                steps_min=8, steps_max=8, steps_default=8,
+                cfg_min=1.0, cfg_max=1.0, cfg_default=1.0, cfg_locked=True,
+                dcw_forced_off=True,
+                planner_model=None,
+                tasks=("text2music", "cover", "repaint"),
+                max_duration_seconds=600, max_batch=1,
+                availability="available" if ckpt else "unconfigured", multiplier=2.00,
+                vram_required_mb=15000,
             ),
         ),
     )
@@ -229,7 +268,7 @@ def _merge() -> ModelRelease:
 
 
 CATALOG: dict[str, ModelRelease] = {
-    r.selection: r for r in (_turbo(), _sft(), _xl(), _merge())
+    r.selection: r for r in (_turbo(), _sft(), _xl(), _xl_turbo(), _merge())
 }
 
 # Legacy model_id -> turbo profile (existing behavior preserved).

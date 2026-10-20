@@ -7,6 +7,27 @@ owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_
 
 ## [Unreleased]
 
+### XL (4B DiT) premium models provisioned on the 24 GB baseline worker (2026-10-20)
+- Corrected the earlier "XL needs a dedicated ≥32 GB worker" assumption: XL is a
+  first-class model in the pinned engine (`ca1e85f`, upstream issue #990 / PR #989).
+  The 4B DiT loads **~9 GB in bf16** (upstream `MODEL_VRAM["dit_xl_base"]=9.0`) and
+  is explicitly an upstream **tier6b (20-24 GB)** model ("XL fits without offload"),
+  so the shared 24 GB baseline worker serves it once the co-located llama-server
+  footprint is shrunk (`OAL_LLM_CTX=4096`, `OAL_LLM_GPU_LAYERS=32`).
+- Renamed the XL-SFT premium profile `xl-sft-premium-4b-v1` → `xl-sft-quality-v1`;
+  VRAM floor lowered `32000` → `15000`; `planner_model` set to `None` (the XL DiT is
+  self-contained; no separate 4B LLM planner is loaded); `tasks` trimmed to
+  `text2music`/`cover`/`repaint`; multiplier **4.00** (provisional).
+- Added the `ace-step-1.5-xl-turbo` selection with `xl-turbo-fast-v1` profile:
+  CFG-distilled (guidance locked 1.0, 8 steps locked, DCW off), multiplier **2.00**
+  (provisional), mirroring `turbo-fast-v1`'s lock behavior at XL fidelity.
+- New `OAL_XL_TURBO_CHECKPOINT_ID` setting alongside `OAL_XL_CHECKPOINT_ID`; both
+  default empty so the profiles stay `unconfigured` (503) until provisioned.
+- Worker script bind-mounts `acestep-v15-xl-sft` + `acestep-v15-xl-turbo` and
+  allowlists both premium profiles on the baseline worker.
+- Tests: profile shape/lock, provisional multipliers, provisioned quote+charge, and
+  unconfigured-503 coverage for both XL selections (suite 248 passed).
+
 ### Remote worker deployments (ephemeral GPU nodes over WireGuard)
 - S3-compatible object storage adapter (`S3ObjectStorage` + `build_storage`
   factory, `OAL_STORAGE_BACKEND=local|s3` + `OAL_S3_*`, `boto3`) as the durable

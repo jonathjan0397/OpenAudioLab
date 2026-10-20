@@ -48,6 +48,23 @@ def _grant_sft_worker(client) -> None:
         session.commit()
 
 
+def _grant_xl_workers(client) -> None:
+    with client.app.state.db.session() as session:
+        session.add(WorkerCapability(
+            worker_id="test-xl-worker", model_selection="ace-step-1.5-xl-sft",
+            execution_profile_id="xl-sft-quality-v1", engine_model="acestep-v15-xl-sft",
+            planner_model=None, tasks_json=["text2music", "cover", "repaint"],
+            max_duration_seconds=600, enabled=True,
+        ))
+        session.add(WorkerCapability(
+            worker_id="test-xl-worker", model_selection="ace-step-1.5-xl-turbo",
+            execution_profile_id="xl-turbo-fast-v1", engine_model="acestep-v15-xl-turbo",
+            planner_model=None, tasks_json=["text2music", "cover", "repaint"],
+            max_duration_seconds=600, enabled=True,
+        ))
+        session.commit()
+
+
 def _post(client, token, body, key):
     return client.post("/api/v1/jobs", json=body, headers={**auth(token), "Idempotency-Key": key})
 
@@ -115,7 +132,7 @@ def test_premier_unprovisioned_premium_gets_503_not_403(client) -> None:
     # A higher tier must not be told it lacks a subscription for a model that is
     # simply not provisioned here; availability (503) is the honest answer.
     tok = _paid_token(client, plan="premier", subscription="active")
-    for sel in ("ace-step-1.5-xl-sft", "ace-step-1.5-merge-sft-turbo"):
+    for sel in ("ace-step-1.5-xl-sft", "ace-step-1.5-xl-turbo", "ace-step-1.5-merge-sft-turbo"):
         r = _post(client, tok, _base(model_selection=sel), f"mm-503-{sel}")
         assert r.status_code == 503, (sel, r.text)
         assert r.json()["error"]["code"] == "MODEL_UNAVAILABLE"
@@ -155,7 +172,7 @@ def test_sft_requires_paid(client) -> None:
 
 def test_unconfigured_release_is_503(client) -> None:
     tok = _paid_token(client)
-    for sel in ("ace-step-1.5-xl-sft", "ace-step-1.5-merge-sft-turbo"):
+    for sel in ("ace-step-1.5-xl-sft", "ace-step-1.5-xl-turbo", "ace-step-1.5-merge-sft-turbo"):
         r = _post(client, tok, _base(model_selection=sel), "mm-" + sel)
         assert r.status_code == 503, r.text
         assert r.json()["error"]["code"] == "MODEL_UNAVAILABLE"
@@ -165,6 +182,34 @@ def test_sft_needs_compatible_worker_else_503(client) -> None:
     tok = _paid_token(client)
     r = _post(client, tok, _base(model_selection="ace-step-1.5-sft"), "mm-sft-noworker")
     assert r.status_code == 503 and r.json()["error"]["code"] == "NO_COMPATIBLE_WORKER"
+
+
+def test_xl_turbo_provisioned_allows_paid_quote_and_charge(client) -> None:
+    # Once the operator provisions XL-Turbo (env set -> available) and a worker
+    # advertises the capability, a paid user can quote + post at the 2.0 multiplier.
+    import dataclasses
+    from app import catalog
+    original = catalog.CATALOG["ace-step-1.5-xl-turbo"]
+    rel = original
+    avail = dataclasses.replace(rel.profiles[0], availability="available")
+    catalog.CATALOG["ace-step-1.5-xl-turbo"] = dataclasses.replace(rel, profiles=(avail,))
+    try:
+        _grant_xl_workers(client)
+        tok = _paid_token(client, plan="pro", subscription="active")
+        body = _base(model_selection="ace-step-1.5-xl-turbo", controls={"inference_steps": 8})
+        q = _quote(client, tok, body)
+        assert q.status_code == 200, q.text
+        qd = q.json()
+        # base 10 * 2.0 (XL-Turbo) = 20
+        assert qd["reserved_credits"] == 20
+        r = _post(client, tok, dict(body, quote_id=qd["quote_id"]), "mm-xl-turbo-quoted")
+        assert r.status_code == 202, r.text
+        # A non-locked step override on the CFG-distilled XL-Turbo is rejected.
+        r2 = _post(client, tok, _base(model_selection="ace-step-1.5-xl-turbo",
+                                      controls={"inference_steps": 50}), "mm-xl-turbo-steps")
+        assert r2.status_code == 422 and r2.json()["error"]["code"] == "MODEL_PARAMETER_CONFLICT"
+    finally:
+        catalog.CATALOG["ace-step-1.5-xl-turbo"] = original
 
 
 def test_sft_premium_requires_quote(client) -> None:
@@ -215,7 +260,8 @@ def test_model_selections_catalog_public(client) -> None:
     r = client.get("/api/v1/model-selections")
     assert r.status_code == 200
     by_id = {s["model_selection"]: s for s in r.json()}
-    assert {"ace-step-1.5-turbo", "ace-step-1.5-sft", "ace-step-1.5-xl-sft", "ace-step-1.5-merge-sft-turbo"} <= set(by_id)
+    assert {"ace-step-1.5-turbo", "ace-step-1.5-sft", "ace-step-1.5-xl-sft",
+            "ace-step-1.5-xl-turbo", "ace-step-1.5-merge-sft-turbo"} <= set(by_id)
     turbo = by_id["ace-step-1.5-turbo"]["profiles"][0]
     assert turbo["availability"] == "available" and turbo["requires_paid"] is False
     assert turbo["control_ranges"]["inference_steps"]["max"] == 8
@@ -223,6 +269,12 @@ def test_model_selections_catalog_public(client) -> None:
     sft = by_id["ace-step-1.5-sft"]["profiles"][0]
     assert sft["requires_paid"] is True and sft["control_ranges"]["inference_steps"]["min"] == 50
     assert sft["control_ranges"]["dcw_forced_off"] is True
+    # XL (both) are premium and unconfigured until the operator provisions them.
+    xl_turbo = by_id["ace-step-1.5-xl-turbo"]["profiles"][0]
+    assert xl_turbo["requires_paid"] is True and xl_turbo["availability"] == "unconfigured"
+    assert xl_turbo["runnable"] is False
+    assert xl_turbo["control_ranges"]["guidance_scale"]["locked"] is True
+    assert by_id["ace-step-1.5-xl-sft"]["profiles"][0]["availability"] == "unconfigured"
     assert by_id["ace-step-1.5-merge-sft-turbo"]["availability"] == "unconfigured"
     # no private engine path leaked
     assert "/opt" not in r.text and "/root" not in r.text

@@ -165,12 +165,15 @@ class Settings(BaseSettings):
     # allowlisted after real model-routing + audio + VRAM validation, so a paid
     # premium request is never silently served by a different model.
     premium_profiles_enabled: str = ""
-    # Optional operator-supplied checkpoint ids for XL-SFT (premium) and the
-    # community merge (experimental). Empty => profile stays "unconfigured" (503).
+    # Optional operator-supplied checkpoint ids for the XL (premium) and community
+    # merge (experimental) selections. Empty => profile stays "unconfigured" (503).
     # Setting these plus installing the checkpoint and allowlisting the profile is
     # the ONLY way they become available -- never advertised until validated on the
-    # actual runtime + hardware (XL needs a larger/offload-capable worker).
+    # actual runtime + hardware. XL (4B DiT) loads ~9 GB bf16 and is an upstream
+    # 20-24 GB (tier6b) model, so it is served on the shared 24 GB worker with the
+    # llama-server footprint shrunk (OAL_LLM_CTX=4096, OAL_LLM_GPU_LAYERS=32).
     xl_checkpoint_id: str = ""
+    xl_turbo_checkpoint_id: str = ""
     merge_checkpoint_id: str = ""
     # Source/reference audio for cover/repaint is staged here and passed to the
     # co-located ACE-Step server. The engine's validate_audio_path only accepts

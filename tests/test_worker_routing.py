@@ -168,9 +168,57 @@ def test_ensure_running_no_restart_when_model_matches(monkeypatch):
 def test_premium_vram_floors_are_declared():
     from app import catalog
     xl = catalog.CATALOG["ace-step-1.5-xl-sft"].profiles[0]
+    xl_turbo = catalog.CATALOG["ace-step-1.5-xl-turbo"].profiles[0]
     sft = catalog.CATALOG["ace-step-1.5-sft"].profiles[0]
-    # XL requires more than a 24 GB card -> the VRAM gate keeps it from ever being
-    # advertised on the shared 24 GB baseline worker (needs a dedicated large worker).
-    assert xl.vram_required_mb >= 30000
+    # XL (4B DiT) loads ~9 GB bf16 and is an upstream 20-24 GB (tier6b) model, so
+    # the floor keeps it off small GPUs while still letting the shared 24 GB
+    # baseline worker serve it (with the llama-server footprint shrunk).
+    assert 10000 <= xl.vram_required_mb <= 20000
+    assert 10000 <= xl_turbo.vram_required_mb <= 20000
     # SFT (2B) fits the 24 GB worker.
     assert 0 < sft.vram_required_mb <= 24000
+
+
+def test_xl_turbo_profile_is_cfg_distilled_and_locked():
+    from app import catalog
+    # XL-Turbo is CFG-distilled (upstream forces guidance=1.0, rejects CFG/ADG),
+    # so it mirrors turbo-fast-v1: 8 steps locked, guidance locked at 1.0, DCW off.
+    p = catalog.CATALOG["ace-step-1.5-xl-turbo"].profiles[0]
+    assert p.profile_id == "xl-turbo-fast-v1"
+    assert p.native_family == "xl"
+    assert (p.steps_min, p.steps_max, p.steps_default) == (8, 8, 8)
+    assert (p.cfg_min, p.cfg_max, p.cfg_default) == (1.0, 1.0, 1.0)
+    assert p.cfg_locked is True
+    assert p.dcw_forced_off is True
+    assert p.planner_model is None
+    assert p.multiplier == 2.00
+    assert p.tasks == ("text2music", "cover", "repaint")
+    # No operator checkpoint configured in tests -> unconfigured (503), not Turbo.
+    assert p.availability == "unconfigured"
+    # Schema reflects the locks.
+    schema = p.control_schema()
+    assert schema["inference_steps"]["const"] == 8
+    assert schema["guidance_scale"]["const"] == 1.0 and schema["guidance_scale"]["locked"] is True
+
+
+def test_xl_sft_profile_uses_xl_family_and_no_planner():
+    from app import catalog
+    p = catalog.CATALOG["ace-step-1.5-xl-sft"].profiles[0]
+    assert p.profile_id == "xl-sft-quality-v1"
+    assert p.native_family == "xl"
+    assert p.planner_model is None
+    assert p.multiplier == 4.00
+    assert p.tasks == ("text2music", "cover", "repaint")
+
+
+def test_xl_multipliers_are_provisional_and_distinct():
+    from app import catalog
+    turbo = catalog.CATALOG["ace-step-1.5-turbo"].profiles[0]
+    xl_turbo = catalog.CATALOG["ace-step-1.5-xl-turbo"].profiles[0]
+    xl_sft = catalog.CATALOG["ace-step-1.5-xl-sft"].profiles[0]
+    assert turbo.multiplier == 1.0
+    assert xl_turbo.multiplier == 2.0
+    assert xl_sft.multiplier == 4.0
+    # Same takes/compute -> quoted credits scale exactly with the multiplier.
+    assert catalog.quoted_credits(xl_turbo, 1) == 2 * catalog.quoted_credits(turbo, 1)
+    assert catalog.quoted_credits(xl_sft, 1) == 4 * catalog.quoted_credits(turbo, 1)
