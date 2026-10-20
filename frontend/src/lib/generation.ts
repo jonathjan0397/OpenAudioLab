@@ -30,6 +30,11 @@ export interface GenerationDraft {
   referenceAssetId?: string;
   audioCoverStrength?: number;
   coverNoiseStrength?: number;
+  repaintingStart?: number;
+  repaintingEnd?: number;
+  repaintMode?: string;
+  repaintStrength?: number;
+  chunkMaskMode?: string;
 }
 
 // Default capability set for the deployed ACE-Step 1.5 Turbo release. Callers
@@ -117,5 +122,10 @@ export function buildGenerationRequest(
   if (d.referenceAssetId) body.reference_asset_id = d.referenceAssetId;
   if (typeof d.audioCoverStrength === "number") body.audio_cover_strength = d.audioCoverStrength;
   if (typeof d.coverNoiseStrength === "number") body.cover_noise_strength = d.coverNoiseStrength;
+  if (typeof d.repaintingStart === "number") body.repainting_start = d.repaintingStart;
+  if (typeof d.repaintingEnd === "number") body.repainting_end = d.repaintingEnd;
+  if (d.repaintMode) body.repaint_mode = d.repaintMode;
+  if (typeof d.repaintStrength === "number") body.repaint_strength = d.repaintStrength;
+  if (d.chunkMaskMode) body.chunk_mask_mode = d.chunkMaskMode;
   return body;
 }

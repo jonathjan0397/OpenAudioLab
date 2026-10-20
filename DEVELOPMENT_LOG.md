@@ -446,3 +446,11 @@ Negative gates (no reservation/charge; guest counter unchanged at 3):
 
 Rollback: set OAL_IMAGE_TAG to the prior tag and compose up -d (+ restart worker).
 extract/lego/complete remain base-family-only (out of scope for the Turbo worker).
+Phase 2 UI (cont.): Studio "✦ Repaint" region picker. `generation.ts` gained
+`repaintingStart/End`, `repaintMode`, `repaintStrength`, `chunkMaskMode` (top-level
+typed fields, only when present; text2music unchanged; `repainting_start:0` preserved).
+The repaint mutation posts a real `task_type=repaint` job with the owned `src_asset_id`
+and the entered seconds-region. Serializer vitest -> 13. Live OpenAudioLab-path repaint
+with the exact payload succeeded: 15s 48kHz stereo real audio, lineage region 3–11 /
+balanced / 0.6 / chunk auto. Honest limits surfaced: genuine lengthening/continuation
+is a distinct capability (repaint only edits within the clip), not faked.
