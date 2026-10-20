@@ -160,6 +160,9 @@ def _sft() -> ModelRelease:
 
 
 def _xl() -> ModelRelease:
+    from .config import get_settings
+
+    ckpt = (get_settings().xl_checkpoint_id or "").strip()
     return ModelRelease(
         selection="ace-step-1.5-xl-sft",
         display_name="ACE-Step 1.5 XL SFT (premium)",
@@ -169,23 +172,26 @@ def _xl() -> ModelRelease:
             ExecutionProfile(
                 profile_id="xl-sft-premium-4b-v1",
                 model_selection="ace-step-1.5-xl-sft",
-                engine_model="acestep-v15-xl-sft",
+                engine_model=ckpt or "acestep-v15-xl-sft",
                 native_family="xl",
                 label="Premium (4B planner)",
-                quality_note="XL decoder + 4B planner; needs a validated dedicated runtime.",
+                quality_note="XL decoder + 4B planner; needs a validated larger/offload-capable worker.",
                 steps_min=50, steps_max=100, steps_default=50,
                 cfg_min=2.0, cfg_max=3.0, cfg_default=3.0, cfg_locked=False,
                 dcw_forced_off=True,
                 planner_model="acestep-5Hz-lm-4B",
                 tasks=("text2music", "cover", "cover-nofsq", "repaint"),
                 max_duration_seconds=600, max_batch=1,
-                availability="unconfigured", multiplier=4.00,
+                availability="available" if ckpt else "unconfigured", multiplier=4.00,
             ),
         ),
     )
 
 
 def _merge() -> ModelRelease:
+    from .config import get_settings
+
+    ckpt = (get_settings().merge_checkpoint_id or "").strip()
     return ModelRelease(
         selection="ace-step-1.5-merge-sft-turbo",
         display_name="ACE-Step 1.5 Merge SFT+Turbo (experimental)",
@@ -196,17 +202,18 @@ def _merge() -> ModelRelease:
             ExecutionProfile(
                 profile_id="merge-experimental-v1",
                 model_selection="ace-step-1.5-merge-sft-turbo",
-                engine_model="",
+                engine_model=ckpt,
                 native_family="merge",
                 label="Experimental merge",
-                quality_note="Unvalidated community checkpoint; may produce composition artifacts.",
+                quality_note="Operator-provided community checkpoint; may produce composition artifacts. "
+                             "Set OAL_MERGE_CHECKPOINT_ID after validating exact repo/revision/license/VRAM.",
                 steps_min=20, steps_max=40, steps_default=32,
                 cfg_min=4.0, cfg_max=5.0, cfg_default=4.5, cfg_locked=False,
                 dcw_forced_off=False,
                 planner_model=None,
-                tasks=(),
+                tasks=("text2music",) if ckpt else (),
                 max_duration_seconds=600, max_batch=1,
-                availability="unconfigured", multiplier=1.50,
+                availability="available" if ckpt else "unconfigured", multiplier=1.50,
             ),
         ),
     )

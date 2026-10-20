@@ -60,8 +60,8 @@ from app.entitlements import has_paid_subscription
 from app.models import User
 
 
-def _u(plan, status=None, period=None, state="active"):
-    return User(id="x", email="e@e.io", username="u", password_hash="x", state=state,
+def _u(plan, status=None, period=None, state="active", role="user"):
+    return User(id="x", email="e@e.io", username="u", password_hash="x", state=state, role=role,
                 plan=plan, subscription_status=status, current_period_end=period)
 
 
@@ -83,6 +83,10 @@ def test_has_paid_subscription_matrix():
     assert has_paid_subscription(_u("premier", "unpaid", None)) is False
     assert has_paid_subscription(_u("pro", "active", future, state="disabled")) is False
     assert has_paid_subscription(None) is False
+    # Admins are entitled to every model for operational testing, even on the
+    # free plan, but a disabled admin is not.
+    assert has_paid_subscription(_u("free", None, None, role="admin")) is True
+    assert has_paid_subscription(_u("free", None, None, role="admin", state="disabled")) is False
 
 
 def test_pro_and_premier_can_run_sft(client) -> None:

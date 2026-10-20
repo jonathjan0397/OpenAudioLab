@@ -165,6 +165,13 @@ class Settings(BaseSettings):
     # allowlisted after real model-routing + audio + VRAM validation, so a paid
     # premium request is never silently served by a different model.
     premium_profiles_enabled: str = ""
+    # Optional operator-supplied checkpoint ids for XL-SFT (premium) and the
+    # community merge (experimental). Empty => profile stays "unconfigured" (503).
+    # Setting these plus installing the checkpoint and allowlisting the profile is
+    # the ONLY way they become available -- never advertised until validated on the
+    # actual runtime + hardware (XL needs a larger/offload-capable worker).
+    xl_checkpoint_id: str = ""
+    merge_checkpoint_id: str = ""
     # Source/reference audio for cover/repaint is staged here and passed to the
     # co-located ACE-Step server. The engine's validate_audio_path only accepts
     # absolute paths under the system temp dir, so this MUST live under /tmp.

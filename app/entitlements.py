@@ -28,6 +28,10 @@ def is_premium(release: ModelRelease) -> bool:
 def has_paid_subscription(user: User | None) -> bool:
     if user is None or user.state != "active":
         return False
+    # Administrators may exercise every model for operational testing,
+    # independent of their own billing plan.
+    if getattr(user, "role", None) == "admin":
+        return True
     # The server-set plan is the entitlement source of truth.
     if user.plan not in PAID_PLAN_IDS:
         return False
