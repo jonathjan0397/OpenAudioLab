@@ -315,3 +315,32 @@ remix/vocal/melody/repaint and extract/lego/complete (3A), the full advanced-con
 bridge (3B), and their real-audio gates (3C) remain not-wired / engine-blocked (Turbo worker, no
 `src_audio_path`/`task_type`/repaint bridge). Branch committed to `origin/feat/generation-contract`;
 not merged, not deployed (per spec).
+
+## 2026-10-20 — Deployed the generation-contract fix to production (master)
+
+Merged `feat/generation-contract` (fast-forward) into `master` and deployed.
+Cleanup: pruned merged local `impl/*` branches; left remotes and the superseded
+PR #1 branch as-is. Added `house-lora-ab/` and other large local trees to
+`.dockerignore` (the image build context had them).
+
+Deploy: built+pushed `stratastack/oal-backend:gen-contract-9be4753` (the root
+`Dockerfile` builds the frontend into the backend image, so one image ships the
+API + SPA) and set hub `OAL_IMAGE_TAG=gen-contract-9be4753`; `compose up -d`
+recreated api/dispatcher/maintenance (alembic upgrade head = no-op). No worker
+image change (contract fix is API+frontend only). Added `song_idea`/`style_prompt`
+to the durable generation manifest (`orchestration._generation_manifest`) with a
+test, so the Creation Card and Studio recreation capture them.
+
+Live verification on the baseline worker/house-turbo:
+- legacy `controls.description`/`styles` -> HTTP 422 CONTROL_UNSUPPORTED with
+  `unknown_controls`/`supported_controls` (strict rejection intact);
+- corrected payload (`song_idea`/`style_prompt` + caption + `controls.bpm`) ->
+  202 -> succeeded -> real 5.76 MB 48kHz stereo WAV; manifest.requested now shows
+  `song_idea`/`style_prompt` and no free-text in controls.
+
+Operational gotcha recorded: the engine worker builds the manifest from the app
+**code bundle it fetches from the backend at container startup** (not baked into
+the worker image). After a backend deploy that changes `app/`, the running worker
+holds the STALE bundle until restarted — which initially left `song_idea`/
+`style_prompt` absent from the card. Fix: `docker restart oal-worker-hub` to
+re-pull the bundle (worker image itself unchanged).
