@@ -61,6 +61,11 @@ class ExecutionProfile:
     multiplier: float
     compute_factor: float = DEFAULT_COMPUTE_FACTOR
     sampler_modes: tuple[str, ...] = ("ode", "sde")
+    # Minimum GPU VRAM (MB) a worker must have to run this profile. Registration
+    # only advertises a premium profile on workers that actually fit it -- a
+    # healthy liveness endpoint or total VRAM is not the test; this is. XL needs a
+    # dedicated large worker and will NOT be advertised on a 24 GB node.
+    vram_required_mb: int = 0
 
     def control_schema(self) -> dict[str, Any]:
         steps: dict[str, Any] = {"type": "integer", "minimum": self.steps_min, "maximum": self.steps_max}
@@ -128,6 +133,7 @@ def _turbo() -> ModelRelease:
                 tasks=("text2music", "cover", "cover-nofsq", "repaint"),
                 max_duration_seconds=600, max_batch=4,
                 availability="available", multiplier=1.00,
+                vram_required_mb=14000,
             ),
         ),
     )
@@ -154,6 +160,7 @@ def _sft() -> ModelRelease:
                 tasks=("text2music", "cover", "cover-nofsq", "repaint"),
                 max_duration_seconds=600, max_batch=2,
                 availability="available", multiplier=2.00,
+                vram_required_mb=15000,
             ),
         ),
     )
@@ -183,6 +190,7 @@ def _xl() -> ModelRelease:
                 tasks=("text2music", "cover", "cover-nofsq", "repaint"),
                 max_duration_seconds=600, max_batch=1,
                 availability="available" if ckpt else "unconfigured", multiplier=4.00,
+                vram_required_mb=32000,
             ),
         ),
     )
@@ -214,6 +222,7 @@ def _merge() -> ModelRelease:
                 tasks=("text2music",) if ckpt else (),
                 max_duration_seconds=600, max_batch=1,
                 availability="available" if ckpt else "unconfigured", multiplier=1.50,
+                vram_required_mb=16000,
             ),
         ),
     )

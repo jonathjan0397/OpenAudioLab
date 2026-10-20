@@ -429,6 +429,8 @@ class EngineWorker:
 
         ckpt_root = Path(self.settings.acestep_checkpoints_dir)
         allow = {s.strip() for s in (self.settings.premium_profiles_enabled or "").split(",") if s.strip()}
+        telemetry = _gpu_telemetry()
+        total_vram_mb = telemetry[2] if telemetry else 0
         with self.db.session() as session:
             for release in _catalog.CATALOG.values():
                 for prof in release.profiles:
@@ -437,11 +439,18 @@ class EngineWorker:
                     if prof.native_family == "turbo":
                         present = True
                     else:
-                        # Premium requires an explicit allowlist entry AND the
-                        # checkpoint being installed -- never advertised on
-                        # checkpoint presence alone (a mis-routed premium job would
-                        # silently run on the resident Turbo model).
-                        present = prof.profile_id in allow and (ckpt_root / prof.engine_model).is_dir()
+                        # Premium needs an allowlist entry, the installed
+                        # checkpoint, AND enough VRAM on THIS worker. VRAM total
+                        # is not proof of readiness, but a worker below the
+                        # profile's floor can never serve it -- never advertise
+                        # (and never charge) a premium job it would OOM on.
+                        present = (
+                            prof.profile_id in allow
+                            and bool(prof.engine_model)
+                            and (ckpt_root / prof.engine_model).is_dir()
+                            and (prof.vram_required_mb == 0 or total_vram_mb == 0
+                                 or total_vram_mb >= prof.vram_required_mb)
+                        )
                     existing = session.execute(
                         select(WorkerCapability).where(
                             WorkerCapability.worker_id == self.worker_id,

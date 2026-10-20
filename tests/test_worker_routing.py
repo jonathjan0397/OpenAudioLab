@@ -163,3 +163,14 @@ def test_ensure_running_no_restart_when_model_matches(monkeypatch):
     proc.ensure_running(model="acestep-v15-house-turbo")
     assert proc.stops == 0 and started == [] and proc.model == "acestep-v15-house-turbo"
 
+
+
+def test_premium_vram_floors_are_declared():
+    from app import catalog
+    xl = catalog.CATALOG["ace-step-1.5-xl-sft"].profiles[0]
+    sft = catalog.CATALOG["ace-step-1.5-sft"].profiles[0]
+    # XL requires more than a 24 GB card -> the VRAM gate keeps it from ever being
+    # advertised on the shared 24 GB baseline worker (needs a dedicated large worker).
+    assert xl.vram_required_mb >= 30000
+    # SFT (2B) fits the 24 GB worker.
+    assert 0 < sft.vram_required_mb <= 24000
