@@ -33,6 +33,27 @@ torch via `uv.lock`) plus our worker dependencies. Built once and pushed to
 Docker Hub; ephemeral nodes `docker pull` it (no on-node build). Our application
 code is **not** baked — see the code bundle.
 
+## int8 DiT + XL/SFT premium on Vast workers
+
+Vast nodes run the int8-baked image `stratastack/oal-worker:house-v1-070-int8`
+(`OAL_WORKER_IMAGE` in the hub's `.env.backend`, consumed by `scripts/autoscale.py`).
+That is the `house-v1-070` base — which **bakes the HF-unavailable merged
+`acestep-v15-house-turbo`**, the Vast default `OAL_ACESTEP_MODEL` — plus the env-gated
+int8 DiT-quantization patch (`Dockerfile.worker_int8` overlay; the same patch is applied
+from source with `git apply`+grep-guard in `Dockerfile.worker`). `Dockerfile.worker_int8_wg`
+is a lighter `ca1e85f-torch2.10-cu128-wg` overlay for a hypothetical turbo-only fleet that
+does **not** need the House model.
+
+`autoscale.py::worker_env` gives engine nodes the premium/XL env (gated by
+`OAL_VAST_PREMIUM`, default on): `ACESTEP_QUANTIZATION=int8_weight_only`,
+`ACESTEP_OFFLOAD_TO_CPU=1`, `OAL_PREMIUM_PROFILES_ENABLED`, and the
+`OAL_XL_CHECKPOINT_ID`/`OAL_XL_TURBO_CHECKPOINT_ID` ids. Nodes are already ≥24 GB
+(`pick_offer` min_vram), profiles self-gate on `vram_required_mb`, and XL/SFT checkpoints
+download from HuggingFace on the first premium job (Vast cannot bind-mount them), so
+`OAL_VAST_DISK` is sized generously (160). Validated: a launched RTX 3090 (24576 MB)
+pulled `house-v1-070-int8`, booted the int8 engine, fetched the app bundle, and registered
+as a live worker before teardown.
+
 ## Code bundle (container-initiated over the tunnel)
 
 `GET /internal/v1/worker/bundle` returns a `tar.gz` of `app/` plus a `REVISION`

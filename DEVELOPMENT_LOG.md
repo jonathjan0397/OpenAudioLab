@@ -764,3 +764,31 @@ operator-approved exact checkpoint/revision/license.
  via `Dockerfile.worker_int8` (thin overlay on the current base; the same patch is
  `git apply`+grep-guarded into `Dockerfile.worker` for from-source builds). The
  transitional bind-mount is removed. Tests 250 pass.
+
+ ## 2026-10-20 — website Quality-band fix + Vast int8/XL enablement
+
+ - **Frontend (f68274b):** the create form used a hard-coded Quality ladder [8,16,32]
+   that predates the per-profile step bands. Choosing "Balanced(16)"/"Fine(32)" on a
+   50-100 premium model sent an out-of-band value → the strict backend correctly
+   returned "inference_steps out of range". `generation.ts` now takes the selected
+   profile's `control_ranges` and emits steps/guidance/shift only when in-band and
+   differing from the profile default (locked profiles never emit; shift=1 is treated
+   as "unset"); `CreateWidget` renders a band-driven Quality slider and resets it on
+   model switch. Backend left strict (correct contract); vitest 17 pass; served SPA
+   rebuilt/redeployed (asset `index-CgAawNpF.js`).
+ - **Vast int8/XL (d837c9c, df63768):** published `house-v1-070-int8` + a lighter
+   `ca1e85f-torch2.10-cu128-wg-int8` overlay to Docker Hub (the local-only int8 image
+   was previously unbacked-up). `autoscale.py::worker_env` gives engine nodes the
+   premium/XL env (`ACESTEP_QUANTIZATION=int8_weight_only`, `ACESTEP_OFFLOAD_TO_CPU=1`,
+   `OAL_PREMIUM_PROFILES_ENABLED`, XL checkpoint ids; gated by `OAL_VAST_PREMIUM`), and
+   `OAL_VAST_DISK`→160 for on-demand HF checkpoint download (Vast can't bind-mount).
+   Chose the house-based image because Vast autostarts the HF-unavailable merged
+   `acestep-v15-house-turbo` (light base would break the default model). Nodes already
+   ≥24GB via `pick_offer`; profiles self-gate on `vram_required_mb`.
+ - **Live validation:** launched one paid RTX 3090 (24576 MB) via `create_instance`; it
+   pulled `house-v1-070-int8`, booted the int8 engine, fetched the bundle, and
+   registered as a live worker (`acestep-31d478eb18c1-92`) before auto-destroy
+   (`finally` guard). Autoscaler service restarted with the new image+env.
+ - **Secrets hygiene:** the Docker Hub PAT and (incidentally) the ssh push key /
+   secret-key were surfaced in-session; **rotate the `stratastack` PAT** and treat the
+   push key as exposed.

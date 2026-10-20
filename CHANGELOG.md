@@ -7,6 +7,17 @@ owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_
 
 ## [Unreleased]
 
+### Vast remote workers: int8 image + XL/SFT premium capability (2026-10-20)
+- Published the int8 worker images to Docker Hub (`house-v1-070-int8`, and a lighter
+  `ca1e85f-torch2.10-cu128-wg-int8` overlay), backing up the previously local-only artifact.
+- `autoscale.py`: engine Vast nodes now get `ACESTEP_QUANTIZATION=int8_weight_only`,
+  `ACESTEP_OFFLOAD_TO_CPU=1`, `OAL_PREMIUM_PROFILES_ENABLED`, and the XL checkpoint ids
+  (gated by `OAL_VAST_PREMIUM`); `OAL_VAST_DISK` raised to 160 for on-demand HF downloads
+  of the XL/SFT checkpoints (Vast can't bind-mount). Nodes already ≥24 GB via `pick_offer`.
+- Chose `house-v1-070-int8` (not the light base) because Vast autostarts the HF-unavailable
+  merged `acestep-v15-house-turbo`. Validated: a launched RTX 3090 pulled the int8 image,
+  booted, and registered as a live worker before teardown.
+
 ### int8 DiT quantization + corrected per-model denoising defaults (2026-10-20)
 - **int8 ships (all DiT models).** The engine's env-gated patch (pinned `_apply_dit_quantization`)
   was validated on Blackwell sm_120: `ACESTEP_QUANTIZATION=int8_weight_only` halves the
