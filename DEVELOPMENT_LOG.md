@@ -613,3 +613,28 @@ Premium/experimental provisioning status (honest, not faked):
 The allowlist (`OAL_PREMIUM_PROFILES_ENABLED`) means enabling either later is a
 config + validated-checkpoint action, with entitlement already correct for every
 paid tier.
+
+## 2026-10-20 — Admin premium fixed; XL + community-merge made operator-enableable (not auto-on)
+
+- Admins are now entitled to premium models (role=='admin' bypass) -- verified live:
+  admin SFT quote 200; admin XL/merge correctly 503 (nothing provisioned). Live API
+  on `oal-backend:adm-df487d4`. Test admin key removed.
+- XL and experimental are no longer hardcoded off. They turn on only when an operator
+  sets `OAL_XL_CHECKPOINT_ID` / `OAL_MERGE_CHECKPOINT_ID` to a VALIDATED native
+  checkpoint, installs it, and allowlists the profile -- reusing the same proven
+  allowlist + serialized-swap + quote/quota path that carries SFT.
+
+Why XL-SFT and the merge are NOT switched on in this environment (evidence, not excuses):
+- Native XL (`ACE-Step/acestep-v15-xl-turbo`, `-xl-base`) model.safetensors ~20 GB, MIT.
+  The 24 GB GPU 0 also permanently hosts llama-server (~4 GB); with the always-on Turbo
+  swapped out there is ~20 GB -- XL weights + VAE/text-encoder/planner/activations exceed
+  it. The pinned ca1e85f runtime has NO `device_map`/`enable_model_cpu_offload`/
+  `use_tiled_decode` (grep: none) so there is no CPU-offload path to shrink the footprint.
+- Native `acestep-v15-xl-sft` is not published (only `acestep-v15-xl-sft-diffusers`,
+  a different Diffusers format the native ACE-Step handler does not load).
+- No community "merge" checkpoint is approved: ACE-Step ships none, and the spec forbids
+  silently choosing a third-party repo without an exact repo/revision/hashes/license/
+  VRAM/runtime validation.
+Enabling XL needs either a dedicated >=32-48 GB worker (new authorized paid infra) or an
+offload-capable runtime change (violates version pinning). Enabling the merge needs a
+specific operator-approved checkpoint + license check.
