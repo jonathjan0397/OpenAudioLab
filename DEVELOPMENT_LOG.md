@@ -422,3 +422,27 @@ feedback. `generation.ts` gained optional `taskType`/`srcAssetId`/`referenceAsse
 Serializer `vitest` extended to 11 (cover mapping + text2music passthrough). Frontend build clean;
 backend unchanged at 221. Still on `feat/phase2-source-conditioned`, not deployed; full
 OpenAudioLab-path live cover E2E + repaint/extension real-audio gates require a deploy.
+
+## 2026-10-20 — Deployed Phase 1+2 (capability registry + source-conditioned cover/repaint) and ran live gates
+
+Merged stacked branch to `master` (FF) -> `32b855d`; built+pushed
+`stratastack/oal-backend:gen-contract-32b855d` (frontend+API in one image); hub
+`OAL_IMAGE_TAG=gen-contract-32b855d`; compose up (migrate no-op); **restarted
+`oal-worker-hub`** to pull the new code bundle (its `/srv/openaudiolab/code` now
+contains `_stage_asset`/`task_type`).
+
+Live OpenAudioLab-path real-audio gates on the baseline worker (house-turbo), via the
+guest API (authorized baseline GPU):
+- source take -> succeeded (2.88 MB, 48kHz stereo, 15s, non-synthetic);
+- COVER `task_type=cover` + `src_asset_id` + `audio_cover_strength=0.6` -> succeeded,
+  real audio; manifest lineage task_type=cover, src set;
+- REPAINT `task_type=repaint` + `src_asset_id` + region 2.0-8.0 + repaint_mode/strength
+  -> succeeded, real audio; lineage region captured.
+Negative gates (no reservation/charge; guest counter unchanged at 3):
+- extract -> 422 TASK_UNSUPPORTED (lists Turbo task types);
+- cover w/o src -> 422 SOURCE_REQUIRED;
+- cover w/ unknown src -> 404 SOURCE_NOT_FOUND;
+- controls.shift on Turbo -> 422 CONTROL_UNSUPPORTED (Phase 1 strictness intact).
+
+Rollback: set OAL_IMAGE_TAG to the prior tag and compose up -d (+ restart worker).
+extract/lego/complete remain base-family-only (out of scope for the Turbo worker).
