@@ -344,3 +344,38 @@ the worker image). After a backend deploy that changes `app/`, the running worke
 holds the STALE bundle until restarted — which initially left `song_idea`/
 `style_prompt` absent from the card. Fix: `docker restart oal-worker-hub` to
 re-pull the bundle (worker image itself unchanged).
+
+## 2026-10-20 — Roadmap Phase 1: capability registry + control validation (branch `feat/phase1-capability-registry`)
+
+Author: opencode. Task type: roadmap execution (Phase 1 of the approved plan).
+
+Made `app/registry.py` the single capability source: `ControlSpec` (type, range/length,
+default, label, unit, model-family applicability) + per-release `supported_task_types`
+(`text2music/cover/cover-nofsq/repaint` for Turbo) and `model_family`. `CONTROL_SPECS` is
+derived into `control_capabilities(model_id)` and `validate_controls(model_id, controls)`.
+
+Behavior changes (keeps strict rejection, adds value + applicability checks):
+- `jobs.py` now raises `CONTROL_INVALID` with per-field details for out-of-range/wrong-type
+  values (e.g. `bpm:999`, `bpm:"fast"`), and returns no reservation on rejection.
+- Base-only `shift` is excluded from the Turbo `supported_controls`, so it is rejected as
+  `CONTROL_UNSUPPORTED` instead of accepted-but-ineffective (fixes the "appears effective"
+  defect at the API boundary).
+- `time_signature` added end-to-end: registry + `GenerateJobRequest` (already via controls),
+  forwarded by `engine_acestep.build_payload`, captured in `_generation_manifest` requested,
+  surfaced in Studio recreation.
+- `GET /models/{id}` returns `controls` metadata + `supported_task_types` + `model_family`.
+
+Frontend: `generation.ts` is now capability-driven — accepts a `supportedControls` override,
+filters candidate controls to it (so a base-only `shift` never ships for Turbo, but a
+`shift:0` from a base-capable model is preserved), adds `timeSignature`. `CreateWidget` fetches
+model capabilities and passes them; Advanced mode exposes a "Time sig" field; Studio hydrates it.
+
+Verification: backend `pytest 212 passed` (6 new: range/type/shift-on-turbo/time_signature/
+adapter-forward/model-detail). Added a real test runner (`vitest`) — `frontend/src/lib/
+generation.test.ts` 9 tests pass (idea/style out of controls, singer-folding, exact-lyrics
+provenance, instrumental lyric omission, capability filtering, numeric controls, shift:0,
+caption fallback, seed omission). `tsc -b && vite build` clean.
+
+Scope: Phase 1 only; not merged to `master`, not deployed. Next per plan: Phase 2 (Turbo-native
+cover/remix/repaint with the `_stage_asset` private-path pattern + real-audio acceptance on the
+baseline GPU).

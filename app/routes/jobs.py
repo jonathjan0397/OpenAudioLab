@@ -23,7 +23,7 @@ from ..deps import owner_from_request
 from ..errors import ApiError
 from ..models import Asset, GuestSession, Job, JobEvent, IdempotencyRecord, new_uuid, utcnow
 from ..orchestration import append_event, as_utc, enqueue
-from ..registry import MODEL_RELEASES, SUPPORTED_OPERATIONS
+from ..registry import MODEL_RELEASES, SUPPORTED_OPERATIONS, validate_controls
 from ..storage import parse_range
 from ..tokens import check_token, make_token
 from ..schemas import (
@@ -132,6 +132,17 @@ def _validate_request(payload: GenerateJobRequest, max_lyrics_chars: int) -> Non
             "CONTROL_UNSUPPORTED",
             "Unknown or unsupported controls supplied.",
             {"unknown_controls": unknown_controls, "supported_controls": list(release.supported_controls)},
+        )
+    invalid_controls = validate_controls(payload.model_id, payload.controls)
+    if invalid_controls:
+        raise ApiError(
+            422,
+            "CONTROL_INVALID",
+            "One or more control values are out of range or the wrong type.",
+            {
+                "invalid_controls": invalid_controls,
+                "supported_controls": list(release.supported_controls),
+            },
         )
     if payload.seed is not None and not release.supports_seed:
         raise ApiError(422, "CONTROL_UNSUPPORTED", "This model does not accept a seed.")

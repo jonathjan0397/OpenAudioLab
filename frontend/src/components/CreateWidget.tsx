@@ -120,6 +120,16 @@ export default function CreateWidget({
     queryFn: () => api.get<PolicyPayload>("/api/v1/policies"),
     staleTime: 300000,
   });
+  const caps = useQuery({
+    queryKey: ["model-caps", "ace-step-1.5"],
+    queryFn: () =>
+      api.get<{
+        supported_controls: string[];
+        supported_task_types: string[];
+        controls: { key: string; label: string; applicable: boolean; min?: number | null; max?: number | null; default?: number | null; description?: string }[];
+      }>("/api/v1/models/ace-step-1.5"),
+    staleTime: 300000,
+  });
   const isGuest = me.isFetched && !me.data;
   const guestPolicyAccepted = Boolean(guest.data?.policy_accepted);
   const [policyAccepted, setPolicyAccepted] = useState(false);
@@ -143,6 +153,7 @@ export default function CreateWidget({
   const [loraId, setLoraId] = useState(String(saved.loraId || ""));
   const [bpm, setBpm] = useState(String(saved.bpm || ""));
   const [keyScale, setKeyScale] = useState(String(saved.keyScale || ""));
+  const [timeSignature, setTimeSignature] = useState(String(saved.timeSignature || ""));
   const [language, setLanguage] = useState(String(saved.language || ""));
   const [shift, setShift] = useState(Number(saved.shift ?? 1));
   const [quality, setQuality] = useState(Number(saved.quality ?? 8));
@@ -174,6 +185,7 @@ export default function CreateWidget({
         loraId,
         bpm,
         keyScale,
+        timeSignature,
         language,
         shift,
         quality,
@@ -183,7 +195,7 @@ export default function CreateWidget({
         draftOpen,
       })
     );
-  }, [title, desc, styles, lyrics, mood, instrumental, gender, loraId, bpm, keyScale, language, shift, quality, variations, duration, drafted, draftOpen]);
+  }, [title, desc, styles, lyrics, mood, instrumental, gender, loraId, bpm, keyScale, timeSignature, language, shift, quality, variations, duration, drafted, draftOpen]);
 
   const snapshot = (): DraftSnapshot => ({ title, desc, styles, lyrics, mood, drafted });
   const pushHistory = () => setHistory((h) => [...h.slice(-9), snapshot()]);
@@ -286,26 +298,30 @@ export default function CreateWidget({
         finalLyrics = r.text;
       }
       const durationSeconds = mode === "extend" ? Math.min(duration + 60, 600) : duration;
-      const body = buildGenerationRequest({
-        idea: desc,
-        styles,
-        mood,
-        gender,
-        bpm,
-        keyScale,
-        language,
-        shift,
-        quality,
-        guidance: 0,
-        variations,
-        title: title.trim() || draftTitle,
-        lyrics: finalLyrics,
-        lyricsProvided,
-        instrumental,
-        durationSeconds,
-        loraId,
-        seed: mode === "remix" ? Math.floor(Math.random() * 1_000_000_000) : undefined,
-      });
+      const body = buildGenerationRequest(
+        {
+          idea: desc,
+          styles,
+          mood,
+          gender,
+          bpm,
+          keyScale,
+          timeSignature,
+          language,
+          shift,
+          quality,
+          guidance: 0,
+          variations,
+          title: title.trim() || draftTitle,
+          lyrics: finalLyrics,
+          lyricsProvided,
+          instrumental,
+          durationSeconds,
+          loraId,
+          seed: mode === "remix" ? Math.floor(Math.random() * 1_000_000_000) : undefined,
+        },
+        { supportedControls: caps.data?.supported_controls },
+      );
       if (isGuest) {
         body.policy_accepted = guestPolicyAccepted || policyAccepted;
         if (policies.data?.version) body.policy_version = policies.data.version;
@@ -593,6 +609,12 @@ export default function CreateWidget({
                     <option value="">Auto</option>
                     {KEYS.map((k) => <option key={k} value={k}>{k}</option>)}
                   </select>
+                </div>
+              </div>
+              <div className="field ctrl">
+                <div className="field">
+                  <label>Time sig</label>
+                  <input value={timeSignature} onChange={(e) => setTimeSignature(e.target.value)} placeholder="Auto" maxLength={8} />
                 </div>
               </div>
               <div className="field ctrl">

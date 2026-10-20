@@ -207,6 +207,7 @@ export default function StudioPage() {
         loraId: req.lora_id || "",
         bpm: controls.bpm || "",
         keyScale: controls.key_scale || "",
+        timeSignature: controls.time_signature || "",
         language: controls.vocal_language || "",
         shift: controls.shift ?? 1,
         quality: controls.inference_steps ?? 8,

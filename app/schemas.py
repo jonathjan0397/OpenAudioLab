@@ -122,6 +122,9 @@ class ModelDetail(ModelSummary):
     revision: str
     license_status: str
     supported_controls: list[str]
+    supported_task_types: list[str] = []
+    model_family: str = "turbo"
+    controls: list[dict[str, Any]] = []
     supports_seed: bool
     supports_duration: bool
     min_duration_seconds: int

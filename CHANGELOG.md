@@ -96,6 +96,21 @@ owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_
   full advanced control bridge (3B/3C) remain **not-wired / engine-blocked** and are not
   claimed complete.
 
+### Roadmap Phase 1 — Model capability registry + control validation (2026-10-20)
+- `app/registry.py` is now the single capability source: structured control specs
+  (type/range/default/label/unit/model-family applicability) plus per-model
+  `supported_task_types` and `model_family`.
+- API now validates control **values** (range/type) with `CONTROL_INVALID` + per-field
+  details, and rejects base-only `shift` on the Turbo release as `CONTROL_UNSUPPORTED`
+  (no longer accepted-but-ineffective). Strict unknown-control rejection preserved.
+- `time_signature` is accepted, forwarded by the adapter, and captured in the durable
+  manifest; surfaced in Studio recreation.
+- `GET /models/{id}` exposes `controls` metadata, `supported_task_types`, and
+  `model_family`; the frontend serializer is capability-driven (filters to the model's
+  supported set, keeps intentional `shift:0`, exact-lyrics + real provenance).
+- Added a real frontend test runner (`vitest`) with 9 serializer tests across modes.
+- Tests: backend 212 passed; frontend `vitest` 9 passed; `tsc -b && vite build` clean.
+
 ## [Milestone 5] - 2026-10-15
 
 Artist profiles and real LoRA fine-tuning on hardware. Branch

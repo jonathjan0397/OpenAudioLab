@@ -26,7 +26,7 @@ Statuses:
 | `model` | str null | forwarded | pinned `acestep-v15-house-turbo` / `acestep-v15-turbo` |
 | `bpm` | int null | forwarded | |
 | `key_scale` | str "" | forwarded | upstream name `keyscale`/`key_scale` |
-| `time_signature` | str "" | not-wired | musical structure control |
+| `time_signature` | str "" | forwarded | accepted+forwarded (Phase 1); UI exposes "Time sig" in Advanced |
 | `vocal_language` | str "en" | forwarded | |
 | `inference_steps` | int 8 | forwarded | OAL "Quality" preset default 8 == upstream default |
 | `guidance_scale` | float 7.0 | forwarded | only when non-zero from UI |
@@ -55,7 +55,7 @@ Statuses:
 | `cfg_interval_start` | float 0.0 | not-wired | 3B |
 | `cfg_interval_end` | float 1.0 | not-wired | 3B |
 | `infer_method` | str "ode" (ode|sde) | not-wired | 3B |
-| `shift` | float 3.0 (1–5) | turbo-noop | documented "only effective for base models, not turbo"; UI disabled + relabeled off "Weirdness" |
+| `shift` | float 3.0 (1–5) | rejected-on-turbo | registry excludes it from Turbo `supported_controls`; API returns CONTROL_UNSUPPORTED for it on Turbo; UI disabled+relabeled; serializer only emits it when a model declares it applicable (base) |
 | `timesteps` | str null | not-wired | overrides inference_steps+shift; precedence to expose |
 | `dcw_enabled` | bool null | not-wired | model-resolved default; forced-on non-turbo distorts (issue #1259) |
 | `dcw_mode` | enum double {low,high,double,pix} | not-wired | expert |
@@ -109,10 +109,12 @@ worker bridge**; they cannot be shipped today and are marked **not-wired / needs
 ## OpenAudioLab control-bag contract (post-repair)
 
 The public `controls` map is validated against `app/registry.py::supported_controls` and must
-equal what the adapter forwards. For `ace-step-1.5` the accepted+forwarded set is:
-`bpm, key_scale, vocal_language, inference_steps, guidance_scale, shift(turbo-noop),
-variations`. `mood` and `gender` are accepted by the registry: `mood` is consumed by the
-auto-LoRA matcher, and both are now folded into the resolved non-lyric caption so they
-actually reach the model. Free-text song **idea** and raw **style** are first-class request
-fields (`song_idea`, `style_prompt`) — never control-bag keys — and persist independently in
-the recipe for recreation.
+equal what the adapter forwards. For `ace-step-1.5` (Turbo) the accepted+forwarded set is:
+`mood, gender, bpm, key_scale, time_signature, vocal_language, inference_steps,
+guidance_scale, variations`. `shift` is excluded and returns `CONTROL_UNSUPPORTED`
+on Turbo (it is base-family only). `mood` is consumed by the auto-LoRA matcher, and
+both `mood` and `gender` are folded into the resolved non-lyric caption so they
+actually reach the model. Free-text song **idea** and raw **style** are first-class
+request fields (`song_idea`, `style_prompt`) — never control-bag keys — and persist
+independently in the recipe for recreation. Control **values** are additionally range/
+type-validated (`CONTROL_INVALID`) so a slider can't ship an out-of-range number.

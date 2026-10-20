@@ -143,6 +143,8 @@ class AceStepAdapter:
             payload["bpm"] = int(controls["bpm"])
         if controls.get("key_scale"):
             payload["key_scale"] = str(controls["key_scale"])
+        if controls.get("time_signature"):
+            payload["time_signature"] = str(controls["time_signature"])
         if controls.get("vocal_language"):
             payload["vocal_language"] = str(controls["vocal_language"])
         if controls.get("inference_steps"):

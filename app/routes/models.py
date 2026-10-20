@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from ..errors import ApiError
-from ..registry import MODEL_RELEASES
+from ..registry import MODEL_RELEASES, control_capabilities
 from ..schemas import ModelDetail, ModelSummary
 
 router = APIRouter(tags=["models"])
@@ -38,6 +38,9 @@ def get_model(model_id: str) -> ModelDetail:
         revision=release.revision,
         license_status=release.license_status,
         supported_controls=list(release.supported_controls),
+        supported_task_types=list(release.supported_task_types),
+        model_family=release.model_family,
+        controls=control_capabilities(model_id),
         supports_seed=release.supports_seed,
         supports_duration=release.supports_duration,
         min_duration_seconds=release.min_duration_seconds,
