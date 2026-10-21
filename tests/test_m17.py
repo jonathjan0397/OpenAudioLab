@@ -41,14 +41,52 @@ def test_workspace_crud(client) -> None:
     ws_id = created.json()["workspace_id"]
 
     listed = client.get("/api/v1/workspaces", headers=auth(TOKEN_A)).json()["workspaces"]
-    assert [w["workspace_id"] for w in listed] == [ws_id]
+    by_name = {w["name"]: w for w in listed}
+    assert "Album drafts" in by_name and "My Default Space" in by_name  # default auto-created
+    default_id = by_name["My Default Space"]["workspace_id"]
+    assert by_name["My Default Space"]["is_default"] is True
 
     renamed = client.patch(f"/api/v1/workspaces/{ws_id}", json={"name": "EP drafts"}, headers=auth(TOKEN_A))
     assert renamed.json()["name"] == "EP drafts"
 
+    # default space is protected
+    assert client.delete(f"/api/v1/workspaces/{default_id}", headers=auth(TOKEN_A)).status_code == 409
+    assert client.patch(f"/api/v1/workspaces/{default_id}", json={"name": "x"}, headers=auth(TOKEN_A)).status_code == 409
+    assert client.post("/api/v1/workspaces", json={"name": "My Default Space"}, headers=auth(TOKEN_A)).status_code == 409
+
     deleted = client.delete(f"/api/v1/workspaces/{ws_id}", headers=auth(TOKEN_A))
     assert deleted.status_code == 204
-    assert client.get("/api/v1/workspaces", headers=auth(TOKEN_A)).json()["workspaces"] == []
+    names = [w["name"] for w in client.get("/api/v1/workspaces", headers=auth(TOKEN_A)).json()["workspaces"]]
+    assert names == ["My Default Space"]
+
+
+def test_workspace_move_and_delete_reassigns(client) -> None:
+    import uuid as _u
+    import sqlalchemy
+    from app.auth import token_sha256
+    from app.models import ApiKey, Asset, utcnow
+
+    with client.app.state.db.session() as session:
+        owner_id = session.execute(
+            sqlalchemy.select(ApiKey.owner_id).where(ApiKey.key_sha256 == token_sha256(TOKEN_A.removeprefix("Bearer ")))
+        ).scalar_one()
+    asset_id = str(_u.uuid4())
+    with client.app.state.db.session() as session:
+        session.add(Asset(id=asset_id, job_id="none", owner_id=owner_id,
+                          storage_key=f"owners/{owner_id}/jobs/{asset_id}/mix_wav.wav",
+                          role="mix_wav", kind="generated", mime="audio/wav", bytes=1, sha256="0" * 64,
+                          created_at=utcnow()))
+        session.commit()
+    hits = client.post("/api/v1/workspaces", json={"name": "Hits"}, headers=auth(TOKEN_A)).json()["workspace_id"]
+
+    mv = client.post("/api/v1/workspaces/move", json={"asset_ids": [asset_id], "workspace_id": hits}, headers=auth(TOKEN_A))
+    assert mv.status_code == 200 and mv.json()["moved"] == 1
+    with client.app.state.db.session() as session:
+        assert session.get(Asset, asset_id).workspace_id == hits
+
+    assert client.delete(f"/api/v1/workspaces/{hits}", headers=auth(TOKEN_A)).status_code == 204
+    with client.app.state.db.session() as session:
+        assert session.get(Asset, asset_id).workspace_id != hits
 
 
 def test_workspace_save_from_job(client) -> None:

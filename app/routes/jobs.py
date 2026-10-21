@@ -1233,21 +1233,28 @@ def public_tracks(
 def my_tracks(
     request: Request,
     limit: int = Query(default=50, ge=1, le=200),
+    workspace_id: str | None = Query(default=None, max_length=36),
     owner_id: str = Depends(owner_from_request),
 ) -> JSONResponse:
-    from ..models import Favorite
+    from sqlalchemy import or_
+
+    from ..models import Favorite, Workspace
 
     settings = request.app.state.settings
     now = utcnow()
     with request.app.state.db.session() as session:
-        rows = list(
-            session.execute(
-                select(Asset)
-                .where(Asset.owner_id == owner_id, Asset.deleted_at.is_(None), Asset.mime.like("audio/%"))
-                .order_by(Asset.created_at.desc())
-                .limit(limit)
-            ).scalars()
-        )
+        stmt = select(Asset).where(Asset.owner_id == owner_id, Asset.deleted_at.is_(None), Asset.mime.like("audio/%"))
+        if workspace_id is not None:
+            default_ws = session.execute(
+                select(Workspace.id).where(
+                    Workspace.owner_id == owner_id, Workspace.is_default, Workspace.deleted_at.is_(None)
+                )
+            ).scalars().first()
+            if default_ws is not None and default_ws == workspace_id:
+                stmt = stmt.where(or_(Asset.workspace_id == workspace_id, Asset.workspace_id.is_(None)))
+            else:
+                stmt = stmt.where(Asset.workspace_id == workspace_id)
+        rows = list(session.execute(stmt.order_by(Asset.created_at.desc()).limit(limit)).scalars())
         favorite_ids = set(
             session.execute(
                 select(Favorite.asset_id).where(Favorite.owner_id == owner_id)
@@ -1277,6 +1284,7 @@ def my_tracks(
                 "duration_seconds": asset.duration_seconds,
                 "job_id": asset.job_id,
                 "seed": seeds.get(asset.job_id),
+                "workspace_id": asset.workspace_id,
                 "created_at": asset.created_at.isoformat() if asset.created_at else None,
                 "expired": expired,
                 "url": f"/api/v1/artifacts/{asset.id}/content?token={token}",
