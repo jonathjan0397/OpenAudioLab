@@ -32,6 +32,7 @@ def expire_once(db: Db, storage: Storage, now=None) -> int:
     """
     now = now or utcnow()
     purged = 0
+    skipped = 0
     with db.session() as session:
         rows = list(
             session.execute(
@@ -45,7 +46,15 @@ def expire_once(db: Db, storage: Storage, now=None) -> int:
             ).scalars()
         )
         for asset in rows:
-            delete_asset_blobs(storage, asset.storage_key)
+            try:
+                delete_asset_blobs(storage, asset.storage_key)
+            except OSError as exc:
+                # Cross-host NFS writes can leave bytes owned by another uid; the
+                # storage user may not be able to unlink them. Never crash the
+                # reaper: leave purged_at unset (retry next pass) and keep going.
+                skipped += 1
+                print(f"purge skipped for asset {asset.id} ({asset.storage_key}): {exc}")
+                continue
             asset.purged_at = utcnow()
             if asset.deleted_at is None:
                 asset.deleted_at = utcnow()
@@ -54,6 +63,8 @@ def expire_once(db: Db, storage: Storage, now=None) -> int:
             if job is not None and asset.expires_at is not None:
                 job.assets_expired_at = asset.expires_at
         session.commit()
+    if skipped:
+        print(f"expire_once: purged {purged}, skipped {skipped} un-deletable object(s)")
     return purged
 
 

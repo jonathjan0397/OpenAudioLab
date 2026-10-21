@@ -228,3 +228,53 @@ def test_user_delete_opens_48h_trash_window(client) -> None:
     ids = {t["asset_id"] for t in client.get("/api/v1/tracks").json()["tracks"]}
     assert asset_id not in ids
 
+
+def _make_delete_raise(client, key):
+    real = client.app.state.storage.delete
+
+    def boom(k):
+        if k == key:
+            raise PermissionError(13, "Permission denied", k)
+        return real(k)
+
+    client.app.state.storage.delete = boom
+    return real
+
+
+def test_expire_once_survives_undeletable_object(client) -> None:
+    from app.maintenance import expire_once
+
+    owner = "usr_" + _login(client, "m18-undel@example.com")
+    asset_id, key = _put_asset(client, owner, title="Locked", state="trashed")
+    with client.app.state.db.session() as session:
+        asset = session.get(Asset, asset_id)
+        asset.purge_after = utcnow() - timedelta(minutes=1)
+        session.commit()
+
+    original = _make_delete_raise(client, key)
+    try:
+        assert expire_once(client.app.state.db, client.app.state.storage) == 0
+    finally:
+        client.app.state.storage.delete = original
+
+    with client.app.state.db.session() as session:
+        assert session.get(Asset, asset_id).purged_at is None  # retried next pass
+    assert client.app.state.storage.exists(key)
+
+
+def test_admin_purge_surfaces_permission_error(client) -> None:
+    owner = "usr_" + _login(client, "m18-perr@example.com")
+    _login(client, "m18-perr-admin@example.com", admin=True)
+    asset_id, key = _put_asset(client, owner, title="Locked")
+
+    original = _make_delete_raise(client, key)
+    try:
+        response = client.post(f"/api/v1/admin/assets/{asset_id}/purge")
+    finally:
+        client.app.state.storage.delete = original
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "PURGE_FAILED"
+    with client.app.state.db.session() as session:
+        assert session.get(Asset, asset_id).purged_at is None
+

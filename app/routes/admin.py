@@ -1869,7 +1869,10 @@ def admin_purge_asset(
             raise ApiError(404, "ASSET_NOT_FOUND", "Asset not found.")
         already = asset.purged_at is not None
         if not already:
-            delete_asset_blobs(request.app.state.storage, asset.storage_key)
+            try:
+                delete_asset_blobs(request.app.state.storage, asset.storage_key)
+            except OSError as exc:
+                raise ApiError(500, "PURGE_FAILED", f"Could not delete stored bytes: {exc}")
             asset.purged_at = now
             if asset.deleted_at is None:
                 asset.deleted_at = now
@@ -1892,6 +1895,7 @@ def admin_purge_user_content(
     owner_id = "usr_" + user_id
     now = utcnow()
     purged = 0
+    failed = 0
     with request.app.state.db.session() as session:
         if session.get(User, user_id) is None:
             raise ApiError(404, "USER_NOT_FOUND", "User not found.")
@@ -1899,16 +1903,26 @@ def admin_purge_user_content(
             session.execute(select(Asset).where(Asset.owner_id == owner_id, Asset.purged_at.is_(None))).scalars()
         )
         for asset in assets:
-            delete_asset_blobs(request.app.state.storage, asset.storage_key)
+            try:
+                delete_asset_blobs(request.app.state.storage, asset.storage_key)
+            except OSError:
+                # Cross-host ownership may block unlink; leave the row un-purged.
+                failed += 1
+                continue
             asset.purged_at = now
             if asset.deleted_at is None:
                 asset.deleted_at = now
             purged += 1
         record_admin_audit(
-            session, admin.id, "user.purge-content", "user", user_id, context_json={"assets_purged": purged}
+            session,
+            admin.id,
+            "user.purge-content",
+            "user",
+            user_id,
+            context_json={"assets_purged": purged, "assets_failed": failed},
         )
         session.commit()
-    return JSONResponse({"user_id": user_id, "owner_id": owner_id, "assets_purged": purged})
+    return JSONResponse({"user_id": user_id, "owner_id": owner_id, "assets_purged": purged, "assets_failed": failed})
 
 
 @router.get("/admin/users/{user_id}/assets")
