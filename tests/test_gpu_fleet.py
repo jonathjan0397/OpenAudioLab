@@ -470,3 +470,227 @@ def test_nonadmin_denied(client):
     with client.app.state.db.session() as session:
         session.get(User, r.json()["user"]["id"])
     client.post("/api/v1/auth/logout")
+
+
+# ------------------------------------------------- §19 completion (tests 21-40)
+
+def test_peek_window_uses_configured_size(client, orch, monkeypatch) -> None:
+    """§19.7: the scan window is bounded by scheduler_peek_window."""
+    monkeypatch.setattr(orch.settings, "scheduler_peek_window", 7)
+    _submit(client, orch, "w1-t1", "turbo")
+    orch.dispatcher.publish_once()
+    seen: list[int] = []
+    worker = _always_runnable(_worker(orch, FakeAdapter(_outcomes(1)), FakeEngineProcess(TURBO)))
+    real_peek = orch.queue.peek
+    monkeypatch.setattr(orch.queue, "peek",
+                        lambda q, n: seen.append(n) or real_peek(q, n))
+    assert worker.run_once() is True
+    assert seen and all(n == 7 for n in seen)
+
+
+def test_brpop_fallback_when_peek_empty(client, orch, monkeypatch) -> None:
+    """§19.7b: if the peek path finds nothing the worker still BRPOP-consumes."""
+    _submit(client, orch, "w2-t1", "turbo")
+    orch.dispatcher.publish_once()
+    monkeypatch.setattr(orch.queue, "peek", lambda q, n: [])
+    worker = _always_runnable(_worker(orch, FakeAdapter(_outcomes(1)), FakeEngineProcess(TURBO)))
+    assert worker.run_once() is True
+    assert _status(client, orch, "w2-t1") == "succeeded"
+
+
+def test_claim_removes_exactly_one_hint(client, orch) -> None:
+    """§19.8b: LREM removes one occurrence, never the whole queue."""
+    _submit(client, orch, "w3-t1", "turbo")
+    _submit(client, orch, "w3-t2", "turbo")
+    orch.dispatcher.publish_once()
+    worker = _always_runnable(_worker(orch, FakeAdapter(_outcomes(1)), FakeEngineProcess(TURBO)))
+    assert worker.run_once() is True
+    assert orch.queue.depth("oal:queue:ace-step-1.5") == 1
+
+
+def test_loaded_model_reported_on_worker_row(client, orch) -> None:
+    """§19.11: workers.loaded_model reflects the resident checkpoint family."""
+    from app.models import Worker
+
+    _submit(client, orch, "w4-t1", "turbo")
+    orch.dispatcher.publish_once()
+    worker = _always_runnable(_worker(orch, FakeAdapter(_outcomes(1)), FakeEngineProcess(TURBO)))
+    assert worker.run_once() is True
+    worker.register()
+    with orch.db.session() as session:
+        row = session.execute(select(Worker).where(Worker.id == "test-smqm")).scalar_one()
+    assert row.loaded_model == TURBO
+
+
+def test_priority_aging_forces_switch(client, orch, monkeypatch) -> None:
+    """§19.4b: an over-aged other-model job goes next even with work loaded."""
+    monkeypatch.setattr(orch.settings, "max_model_queue_wait_seconds", 0)
+    monkeypatch.setattr(orch.settings, "priority_aging_enabled", True)
+    _submit(client, orch, "w5-xl", "xl")
+    _submit(client, orch, "w5-t1", "turbo")
+    orch.dispatcher.publish_once()
+    worker = _always_runnable(_worker(orch, FakeAdapter(_outcomes(1)), FakeEngineProcess(TURBO)))
+    assert worker.run_once() is True
+    assert _status(client, orch, "w5-xl") == "succeeded"
+
+
+def test_priority_aging_disabled_keeps_affinity(client, orch, monkeypatch) -> None:
+    """§19.4c: with aging off, loaded-model affinity still wins."""
+    monkeypatch.setattr(orch.settings, "max_model_queue_wait_seconds", 0)
+    monkeypatch.setattr(orch.settings, "priority_aging_enabled", False)
+    _submit(client, orch, "w6-xl", "xl")
+    _submit(client, orch, "w6-t1", "turbo")
+    orch.dispatcher.publish_once()
+    worker = _always_runnable(_worker(orch, FakeAdapter(_outcomes(1)), FakeEngineProcess(TURBO)))
+    assert worker.run_once() is True
+    assert _status(client, orch, "w6-t1") == "succeeded"
+    assert _status(client, orch, "w6-xl") == "queued"
+
+
+def test_offer_normalize_maps_fields(client) -> None:
+    """§19.13: provider payload normalization (bytes->GB, geolocation split)."""
+    from app import vast_offers as vo
+
+    o = vo.normalize(_raw())
+    assert o["offer_id"] == "o1" and o["vram_gb"] == 24
+    assert o["country"] == "US" and o["region"] == "Los Angeles, US"
+    assert o["dph"] == 0.20 and o["disk_gb"] == 150.0
+
+
+def test_offer_checkpoint_size_affects_readiness(client) -> None:
+    """§19.14: bigger checkpoints take longer; family map is explicit."""
+    from app import vast_offers as vo
+
+    assert vo.CHECKPOINT_GB == {"turbo": 5.0, "sft": 5.0, "xl": 9.0, "merge": 9.0}
+    o = vo.normalize(_raw())
+    assert vo.est_ready_seconds(o, vo.CHECKPOINT_GB["xl"]) > vo.est_ready_seconds(o, vo.CHECKPOINT_GB["turbo"])
+
+
+def test_offer_score_deterministic_and_cost_aware(client) -> None:
+    """§19.15: ranking is reproducible and prefers cheaper eligible offers."""
+    from app import vast_offers as vo
+
+    crit = vo.criteria_defaults()
+    cheap = vo.normalize(_raw("cheap", dph_total=0.10))
+    pricey = vo.normalize(_raw("pricey", dph_total=0.24))
+    assert vo.score(cheap, crit) == vo.score(cheap, crit)
+    assert vo.score(cheap, crit) > vo.score(pricey, crit)
+
+
+def test_offer_weights_sum_to_one(client) -> None:
+    """§19.16: the documented ranking weights are complete."""
+    from app import vast_offers as vo
+
+    assert abs(sum(vo.DEFAULT_WEIGHTS.values()) - 1.0) < 1e-9
+
+
+def test_offer_search_offers_pipeline(client) -> None:
+    """§19.17: search_offers = fetch -> filter -> rank in one call."""
+    from app import vast_offers as vo
+
+    raws = [_raw("ok1"), _raw("ok2", dph_total=0.12), _raw("bad", dph_total=0.99)]
+    res = vo.rank(vo.search_offers(lambda crit: raws), limit=10)
+    assert [o["offer_id"] for o in res["offers"]] == ["ok2", "ok1"]
+    assert res["excluded"]["PRICE_ABOVE_CEILING"] == 1
+
+
+def test_settings_validate_bounds(client) -> None:
+    """§19.31: swappiness outside 0-100 is rejected."""
+    from app.fleet_settings import FleetSettingsError, validate
+
+    for bad in (125, -5):
+        try:
+            validate({"swappiness": bad})
+            raise AssertionError(f"swappiness={bad} accepted")
+        except FleetSettingsError:
+            pass
+    assert validate({"swappiness": 75})["swappiness"] == 75
+
+
+def test_settings_validate_unknown_key(client) -> None:
+    """§19.31b: unknown keys fail closed (no silent typos)."""
+    from app.fleet_settings import FleetSettingsError, validate
+
+    try:
+        validate({"swinesness": 50})
+        raise AssertionError("unknown key accepted")
+    except FleetSettingsError:
+        pass
+
+
+def test_settings_patch_invalid_400(client) -> None:
+    """§19.31c: the API surfaces validation failures as 400."""
+    _login_admin(client, "fleet5@example.com")
+    r = client.patch("/api/v1/admin/gpu-fleet/settings", json={"swappiness": 250})
+    assert r.status_code == 422
+    assert client.get("/api/v1/admin/gpu-fleet/settings").json()["settings"]["swappiness"] != 250
+
+
+def test_deployment_offer_revalidation_409(client, monkeypatch) -> None:
+    """§19.28b: deploy-time revalidation blocks changed/unavailable offers."""
+    _login_admin3(client)
+
+    def fake(request, method, path, body=None):
+        oid = body["search"]["id"]["eq"]
+        if oid == 404:
+            return {"matches": []}
+        return {"matches": [_raw(str(oid), dph_total=0.42)]}
+
+    monkeypatch.setattr("app.routes.admin._vast_request", fake)
+    r = client.post("/api/v1/admin/gpu-fleet/deployments",
+                    json={"offer_id": 404, "idempotency_key": "dep-404"})
+    assert r.status_code == 409 and r.json()["error"]["code"] == "OFFER_UNAVAILABLE"
+    r = client.post("/api/v1/admin/gpu-fleet/deployments",
+                    json={"offer_id": 7, "idempotency_key": "dep-7"})
+    assert r.status_code == 409 and r.json()["error"]["code"] == "OFFER_CHANGED"
+
+
+def test_deployment_detail_and_404(client) -> None:
+    """§19.33: deployment tracking by id; unknown ids are 404."""
+    _login_admin3(client)
+    r = client.post("/api/v1/admin/gpu-fleet/deployments", json={"idempotency_key": "dep-detail"})
+    did = r.json()["deployment"]["id"]
+    assert client.get(f"/api/v1/admin/gpu-fleet/deployments/{did}").status_code == 200
+    assert client.get("/api/v1/admin/gpu-fleet/deployments/nope").status_code == 404
+
+
+def test_worker_destroy_and_restart(client, monkeypatch) -> None:
+    """§19.36b: destroy/restart lifecycle calls the provider."""
+    from app.models import VastInstance
+
+    _login_admin3(client)
+    calls: list[tuple] = []
+    monkeypatch.setattr("app.routes.admin._vast_request",
+                        lambda request, method, path, body=None: calls.append((method, path, body)) or {})
+    with client.app.state.db.session() as session:
+        session.add(VastInstance(vast_instance_id="dc-1", hostname="gpu-node-8", dph=0.2, state="running"))
+        session.commit()
+    assert client.post("/api/v1/admin/gpu-fleet/workers/acestep-gpu-node-8-999/restart").status_code == 200
+    assert client.delete("/api/v1/admin/gpu-fleet/workers/acestep-gpu-node-8-999").status_code == 200
+    assert any((body or {}).get("action_type") == "destroy" for _, _, body in calls)
+
+
+def test_costs_endpoint_shape(client) -> None:
+    """§19.37: costs expose today, categories and running instances."""
+    _login_admin3(client)
+    r = client.get("/api/v1/admin/gpu-fleet/costs")
+    assert r.status_code == 200
+    data = r.json()
+    assert "today_usd" in data and "categories_usd" in data and "running" in data
+
+
+def test_events_endpoint_shape(client) -> None:
+    """§19.40b: events expose both the audit trail and swappiness decisions."""
+    _login_admin3(client)
+    r = client.get("/api/v1/admin/gpu-fleet/events")
+    assert r.status_code == 200
+    assert "events" in r.json() and "decisions" in r.json()
+
+
+def test_overview_endpoint_shape(client) -> None:
+    """§19.32b: fleet overview aggregates workers, deployments and spend."""
+    _login_admin3(client)
+    r = client.get("/api/v1/admin/gpu-fleet")
+    assert r.status_code == 200
+    for key in ("workers", "ready", "active_deployments", "spend_today_usd"):
+        assert key in r.json()

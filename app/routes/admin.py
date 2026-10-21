@@ -1038,7 +1038,7 @@ def gpu_fleet_events(request: Request, limit: int = 50) -> JSONResponse:
 @router.get("/admin/gpu-fleet")
 def gpu_fleet_overview(request: Request) -> JSONResponse:
     """Fleet overview: workers (local vs remote), waiting work, cost snapshot."""
-    from ..models import GpuDeployment, VastInstance, Worker
+    from ..models import GpuDeployment, Job, VastInstance, Worker
     from ..orchestration import as_utc
 
     now = utcnow()
@@ -1080,7 +1080,7 @@ def gpu_fleet_overview(request: Request) -> JSONResponse:
         "remote_gpus": len(remote_ids),
         "jobs_waiting_by_family": by_model,
         "active_deployments": len(active_deps),
-        "spend_today_usd": _burst_spend_today(request.app.state.db.session()),
+        "spend_today_usd": _burst_spend_today(session),
     })
 
 
