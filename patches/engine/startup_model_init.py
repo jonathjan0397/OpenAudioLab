@@ -67,8 +67,14 @@ def do_model_initialization(
     # w8a8_dynamic (validated in _apply_dit_quantization / _validate_quantization_setup).
     _quant_env = os.getenv("ACESTEP_QUANTIZATION")
     quantization = _quant_env.strip() if _quant_env and _quant_env.strip() else None
+    # Apply DiT quantization ONLY to the XL (4B) checkpoints: they need the VRAM
+    # headroom (DiT+planner+activations exceed 24GB in bf16). turbo/sft stay bf16 so
+    # their (2B) LoRAs remain loadable. XL never takes a 2B LoRA anyway (incompatible),
+    # so quantizing XL loses nothing. Unset env => bf16 everywhere (upstream default).
+    if quantization and "xl" not in (config_path or "").lower():
+        quantization = None
     if quantization:
-        print(f"[API Server] DiT quantization ENABLED (ACESTEP_QUANTIZATION={quantization})")
+        print(f"[API Server] DiT quantization ENABLED (ACESTEP_QUANTIZATION={quantization}) for {config_path}")
 
     checkpoint_dir = os.path.join(project_root, "checkpoints")
     os.makedirs(checkpoint_dir, exist_ok=True)

@@ -367,12 +367,16 @@ def worker_env(transport="wg", slot=None, role="engine_worker", tier=None, llm=F
                 f"-e OAL_ACESTEP_MODEL={ACESTEP_MODEL}",
             ]
         if os.environ.get("OAL_VAST_PREMIUM", "1") != "0":
-            # XL/SFT premium on 24GB+ Vast nodes: int8 weight-only DiT (halves the
-            # resident) + CPU offload so premium fits; checkpoints pull on demand.
-            # pick_offer already gates nodes to >=24GB, and profiles self-gate out
-            # below their vram_required_mb floor, so this is safe to enable broadly.
-            # Disable with OAL_VAST_PREMIUM=0 (turbo-only Vast).
+            # XL/SFT premium on 24GB+ Vast nodes: the 5Hz-LM planner (1.7B, pt
+            # backend) for coherent vocal/long audio; int8 applies ONLY to XL via the
+            # baked patch (turbo/SFT stay bf16 so their 2B LoRAs load); CPU offload;
+            # checkpoints pull from HuggingFace on first premium job. pick_offer gates
+            # nodes to >=24GB; profiles self-gate on vram_required_mb. Disable with
+            # OAL_VAST_PREMIUM=0 (turbo-only Vast).
             env += [
+                "-e ACESTEP_INIT_LLM=true",
+                "-e ACESTEP_LM_BACKEND=pt",
+                "-e ACESTEP_LM_MODEL_PATH=acestep-5Hz-lm-1.7B",
                 "-e ACESTEP_QUANTIZATION=int8_weight_only",
                 "-e ACESTEP_OFFLOAD_TO_CPU=1",
                 "-e OAL_PREMIUM_PROFILES_ENABLED=sft-quality-v1,xl-sft-quality-v1,xl-turbo-fast-v1",

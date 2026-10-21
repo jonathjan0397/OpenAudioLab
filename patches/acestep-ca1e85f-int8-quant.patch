@@ -1,6 +1,6 @@
 --- a/acestep/api/startup_model_init.py
 +++ b/acestep/api/startup_model_init.py
-@@ -61,6 +61,15 @@
+@@ -61,6 +61,21 @@
      offload_dit_to_cpu = env_bool("ACESTEP_OFFLOAD_DIT_TO_CPU", False)
      compile_model = env_bool("ACESTEP_COMPILE_MODEL", False)
  
@@ -10,13 +10,19 @@
 +    # w8a8_dynamic (validated in _apply_dit_quantization / _validate_quantization_setup).
 +    _quant_env = os.getenv("ACESTEP_QUANTIZATION")
 +    quantization = _quant_env.strip() if _quant_env and _quant_env.strip() else None
++    # Apply DiT quantization ONLY to the XL (4B) checkpoints: they need the VRAM
++    # headroom (DiT+planner+activations exceed 24GB in bf16). turbo/sft stay bf16 so
++    # their (2B) LoRAs remain loadable. XL never takes a 2B LoRA anyway (incompatible),
++    # so quantizing XL loses nothing. Unset env => bf16 everywhere (upstream default).
++    if quantization and "xl" not in (config_path or "").lower():
++        quantization = None
 +    if quantization:
-+        print(f"[API Server] DiT quantization ENABLED (ACESTEP_QUANTIZATION={quantization})")
++        print(f"[API Server] DiT quantization ENABLED (ACESTEP_QUANTIZATION={quantization}) for {config_path}")
 +
      checkpoint_dir = os.path.join(project_root, "checkpoints")
      os.makedirs(checkpoint_dir, exist_ok=True)
  
-@@ -85,6 +94,7 @@
+@@ -85,6 +100,7 @@
          compile_model=compile_model,
          offload_to_cpu=offload_to_cpu,
          offload_dit_to_cpu=offload_dit_to_cpu,
@@ -24,7 +30,7 @@
      )
      if not ok:
          app.state._init_error = status_msg
-@@ -103,6 +113,7 @@
+@@ -103,6 +119,7 @@
          "compile_model": compile_model,
          "offload_to_cpu": offload_to_cpu,
          "offload_dit_to_cpu": offload_dit_to_cpu,
@@ -32,7 +38,7 @@
      }
      app.state._checkpoint_dir = checkpoint_dir
      app.state._ensure_model_downloaded = ensure_model_downloaded
-@@ -125,6 +136,7 @@
+@@ -125,6 +142,7 @@
                  compile_model=compile_model,
                  offload_to_cpu=offload_to_cpu,
                  offload_dit_to_cpu=offload_dit_to_cpu,
@@ -40,7 +46,7 @@
              )
              app.state._initialized2 = ok2
              if ok2:
-@@ -152,6 +164,7 @@
+@@ -152,6 +170,7 @@
                  compile_model=compile_model,
                  offload_to_cpu=offload_to_cpu,
                  offload_dit_to_cpu=offload_dit_to_cpu,
