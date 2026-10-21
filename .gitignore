@@ -30,3 +30,6 @@ curation/selection_perfamily/tensors-*.tar.zst
 
 # House LoRA local review artifacts (audio + merged checkpoints; ~28GB; kept on hub/Cold-Archive, not in git)
 house-lora-ab/
+
+# TS incremental build cache
+*.tsbuildinfo
