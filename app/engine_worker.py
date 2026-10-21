@@ -357,6 +357,12 @@ class EngineWorker:
         # every model. Legacy/no-admission jobs fall back to the raw controls.
         admission = request.get("_admission") or {}
         controls = admission.get("resolved_controls") or request.get("controls")
+        # Per-job planner: premium (SFT/XL) renders run the 5Hz-LM CoT blueprint
+        # (thinking + lm_model_path) for coherent vocal/long audio; turbo stays None
+        # here and uses the adapter's DiT-only default. Verbatim lyrics preserved
+        # (build_payload keeps use_format=false).
+        thinking = bool(admission.get("use_cot")) if "use_cot" in admission else None
+        lm_model_path = admission.get("planner_model") or None
         return self.adapter.build_payload(
             music_description=request.get("music_description", ""),
             lyrics=job.lyrics,
@@ -365,6 +371,8 @@ class EngineWorker:
             duration_seconds=request.get("duration_seconds"),
             controls=controls,
             source=self._source_for(job, request),
+            thinking=thinking,
+            lm_model_path=lm_model_path,
         )
 
     def _source_for(self, job: Job, request: dict) -> dict | None:

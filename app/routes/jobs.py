@@ -524,6 +524,7 @@ def create_job(
                 "execution_profile_id": profile.profile_id,
                 "engine_model": profile.engine_model,
                 "planner_model": profile.planner_model,
+                "use_cot": profile.use_cot,
                 "family": profile.native_family,
                 "resolved_controls": resolved_controls,
                 "policy_version": _catalog.PRICE_POLICY_VERSION,

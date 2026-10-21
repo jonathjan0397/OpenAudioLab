@@ -87,6 +87,13 @@ class ExecutionProfile:
     shift_min: float = 1.0
     shift_max: float = 5.0
     shift_default: float = 1.0
+    # Run the 5 Hz lyric-LM planner (CoT audio-code blueprint). Premium (SFT/XL)
+    # needs it for coherent vocal/long audio; DiT-only turbo stays fast. Backed by
+    # planner_model (which LM to load). Without it the DiT gets only text conditioning
+    # and long renders collapse into a noise wash (engine issue #929).
+    use_cot: bool = False
+    # use_adg (Adaptive Dual Guidance) default -- base/SFT quality knob (turbo ignores it).
+    adg_default: bool = False
 
     def control_schema(self) -> dict[str, Any]:
         steps: dict[str, Any] = {"type": "integer", "minimum": self.steps_min, "maximum": self.steps_max}
@@ -180,7 +187,7 @@ def _sft() -> ModelRelease:
                 engine_model="acestep-v15-sft",
                 native_family="sft",
                 label="Quality",
-                quality_note="64 steps (50-100), CFG 7.0 (5-9), DCW off, shift 1.0 (safe non-turbo profile).",
+                quality_note="64 steps (50-100), CFG 7.0 (5-9), DCW off, shift 3.0, ADG + 5Hz-LM planner (coherent vocals/long).",
                 steps_min=50, steps_max=100, steps_default=64,
                 cfg_min=5.0, cfg_max=9.0, cfg_default=7.0, cfg_locked=False,
                 dcw_forced_off=True,
@@ -189,7 +196,8 @@ def _sft() -> ModelRelease:
                 max_duration_seconds=600, max_batch=2,
                 availability="available", multiplier=2.00,
                 vram_required_mb=15000,
-                shift_min=1.0, shift_max=3.0, shift_default=1.0,
+                shift_min=1.0, shift_max=3.0, shift_default=3.0,
+                use_cot=True, adg_default=True,
             ),
         ),
     )
@@ -211,16 +219,17 @@ def _xl() -> ModelRelease:
                 engine_model=ckpt or "acestep-v15-xl-sft",
                 native_family="xl",
                 label="Premium (XL 4B DiT)",
-                quality_note="XL 4B DiT (SFT); 100 steps, CFG 7.0 (5-9), DCW off, shift 1.0. int8 DiT fits a 24 GB worker.",
+                quality_note="XL 4B DiT (SFT); 100 steps, CFG 7.0 (5-9), DCW off, shift 3.0, ADG + 5Hz-LM planner. bf16 on a 24 GB worker (drafting LLM off-card).",
                 steps_min=50, steps_max=100, steps_default=100,
                 cfg_min=5.0, cfg_max=9.0, cfg_default=7.0, cfg_locked=False,
                 dcw_forced_off=True,
-                planner_model=None,
+                planner_model="acestep-5Hz-lm-1.7B",
                 tasks=("text2music", "cover", "repaint"),
                 max_duration_seconds=600, max_batch=1,
                 availability="available" if ckpt else "unconfigured", multiplier=4.00,
                 vram_required_mb=15000,
-                shift_min=1.0, shift_max=3.0, shift_default=1.0,
+                shift_min=1.0, shift_max=3.0, shift_default=3.0,
+                use_cot=True, adg_default=True,
             ),
         ),
     )
@@ -242,16 +251,17 @@ def _xl_turbo() -> ModelRelease:
                 engine_model=ckpt or "acestep-v15-xl-turbo",
                 native_family="xl",
                 label="Fast (XL 4B DiT)",
-                quality_note="XL 4B DiT (Turbo); CFG-distilled, 8 steps, DCW on, shift 3.0. Fast, higher fidelity than 2B turbo.",
+                quality_note="XL 4B DiT (Turbo); CFG-distilled, 8 steps, DCW on, shift 3.0, 5Hz-LM planner. Fast, higher fidelity than 2B turbo.",
                 steps_min=8, steps_max=8, steps_default=8,
                 cfg_min=1.0, cfg_max=1.0, cfg_default=1.0, cfg_locked=True,
                 dcw_forced_off=False,  # turbo-family distillation default (DCW on), matches 2B turbo
-                planner_model=None,
+                planner_model="acestep-5Hz-lm-1.7B",
                 tasks=("text2music", "cover", "repaint"),
                 max_duration_seconds=600, max_batch=1,
                 availability="available" if ckpt else "unconfigured", multiplier=2.00,
                 vram_required_mb=15000,
                 shift_min=1.0, shift_max=3.0, shift_default=3.0,
+                use_cot=True, adg_default=False,
             ),
         ),
     )
@@ -279,12 +289,13 @@ def _merge() -> ModelRelease:
                 steps_min=50, steps_max=100, steps_default=64,
                 cfg_min=5.0, cfg_max=9.0, cfg_default=7.0, cfg_locked=False,
                 dcw_forced_off=True,
-                planner_model=None,
+                planner_model="acestep-5Hz-lm-1.7B",
                 tasks=("text2music",) if ckpt else (),
                 max_duration_seconds=600, max_batch=1,
                 availability="available" if ckpt else "unconfigured", multiplier=1.50,
                 vram_required_mb=16000,
-                shift_min=1.0, shift_max=3.0, shift_default=1.0,
+                shift_min=1.0, shift_max=3.0, shift_default=3.0,
+                use_cot=True, adg_default=True,
             ),
         ),
     )
@@ -378,7 +389,7 @@ def validate_profile_controls(profile: ExecutionProfile, controls: dict[str, Any
     # Keys this function interprets directly (not all live in CONTROL_SPECS).
     profile_managed = {
         "inference_steps", "guidance_scale", "dcw_enabled", "infer_method",
-        "timesteps", "shift", "sampler_mode",
+        "timesteps", "shift", "sampler_mode", "use_adg",
     }
     allowed = set(CONTROL_SPECS) | profile_managed
     unknown = sorted(set(controls) - allowed)
@@ -435,9 +446,9 @@ def validate_profile_controls(profile: ExecutionProfile, controls: dict[str, Any
         raise CatalogError(422, "MODEL_PARAMETER_CONFLICT", "guidance_scale out of range for this model.",
                            {"control": "guidance_scale", "min": profile.cfg_min, "max": profile.cfg_max})
 
-    # Shift (profile-owned band). Fills the default when omitted so non-turbo
-    # inherits its training-appropriate value (1.0) rather than the REST 3.0, and
-    # turbo-family keeps its discrete-schedule default (3.0). Never clamps explicit.
+    # Shift (profile-owned band). Fills the default when omitted; non-turbo uses the
+    # documented best-quality 3.0, turbo-family keeps its discrete-schedule 3.0.
+    # Never clamps an explicit value.
     shift = controls.get("shift", profile.shift_default)
     if not isinstance(shift, (int, float)) or isinstance(shift, bool):
         raise CatalogError(422, "MODEL_PARAMETER_CONFLICT", "shift must be numeric.", {"control": "shift"})
@@ -445,6 +456,11 @@ def validate_profile_controls(profile: ExecutionProfile, controls: dict[str, Any
     if not profile.shift_min - 1e-6 <= shift <= profile.shift_max + 1e-6:
         raise CatalogError(422, "MODEL_PARAMETER_CONFLICT", "shift out of range for this model.",
                            {"control": "shift", "min": profile.shift_min, "max": profile.shift_max})
+
+    # Adaptive dual guidance (base/SFT quality; turbo ignores it). Profile default.
+    use_adg = controls.get("use_adg", profile.adg_default)
+    if not isinstance(use_adg, bool):
+        raise CatalogError(422, "MODEL_PARAMETER_CONFLICT", "use_adg must be boolean.", {"control": "use_adg"})
 
     # DCW: safe SFT/XL profiles force it off; explicit non-False is a conflict.
     if "dcw_enabled" in controls and controls["dcw_enabled"] is not None:
@@ -454,7 +470,7 @@ def validate_profile_controls(profile: ExecutionProfile, controls: dict[str, Any
             raise CatalogError(422, "MODEL_PARAMETER_CONFLICT", f"{profile.label} requires DCW off.",
                                {"control": "dcw_enabled", "required": False})
 
-    resolved = {**{"inference_steps": steps, "guidance_scale": cfg, "shift": shift}, **{k: v for k, v in controls.items() if k not in ("inference_steps", "guidance_scale", "shift")}}
+    resolved = {**{"inference_steps": steps, "guidance_scale": cfg, "shift": shift, "use_adg": use_adg}, **{k: v for k, v in controls.items() if k not in ("inference_steps", "guidance_scale", "shift", "use_adg")}}
 
     # Custom timesteps override steps (effective NFE must respect the budget).
     nfe = _effective_nfe(resolved)

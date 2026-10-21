@@ -127,18 +127,25 @@ class AceStepAdapter:
         duration_seconds: int | None,
         controls: dict[str, Any] | None = None,
         source: dict[str, Any] | None = None,
+        thinking: bool | None = None,
+        lm_model_path: str | None = None,
     ) -> dict[str, Any]:
         controls = controls or {}
+        thinking_eff = self.thinking if thinking is None else bool(thinking)
         payload: dict[str, Any] = {
             "prompt": music_description,
             "lyrics": "" if instrumental or lyrics is None else lyrics,
             "audio_format": "wav",
             "batch_size": 1,
-            "thinking": self.thinking,
-            # Never let the upstream LM rewrite or reformat approved lyrics.
+            # Per-job: premium (SFT/XL) uses the 5Hz-LM CoT planner for coherent
+            # vocal/long audio; turbo stays DiT-only. use_format stays false so the
+            # planner never rewrites approved lyrics (verbatim guaranteed downstream).
+            "thinking": thinking_eff,
             "use_format": False,
             "model": self.model,
         }
+        if thinking_eff and lm_model_path:
+            payload["lm_model_path"] = lm_model_path
         # M14c advanced controls (HTTP names per release_task_models).
         if controls.get("bpm"):
             payload["bpm"] = int(controls["bpm"])
@@ -154,6 +161,8 @@ class AceStepAdapter:
             payload["guidance_scale"] = float(controls["guidance_scale"])
         if controls.get("shift"):
             payload["shift"] = float(controls["shift"])
+        if "use_adg" in controls:
+            payload["use_adg"] = bool(controls["use_adg"])
         if controls.get("variations"):
             payload["batch_size"] = max(1, min(4, int(controls["variations"])))
         if seed is not None:
@@ -180,8 +189,8 @@ class AceStepAdapter:
         ):
             if source and source.get(key) is not None:
                 payload[key] = source[key]
-        if not self.thinking:
-            # Avoid implicit 5Hz LM metadata calls when running DiT-only.
+        if not thinking_eff:
+            # DiT-only: avoid implicit 5Hz LM metadata calls.
             payload["use_cot_caption"] = False
             payload["use_cot_language"] = False
         return payload

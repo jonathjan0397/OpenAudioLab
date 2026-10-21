@@ -192,7 +192,9 @@ def test_xl_turbo_profile_is_cfg_distilled_and_locked():
     assert p.cfg_locked is True
     assert p.dcw_forced_off is False  # turbo-family DCW default (on)
     assert (p.shift_min, p.shift_max, p.shift_default) == (1.0, 3.0, 3.0)
-    assert p.planner_model is None
+    assert p.planner_model == "acestep-5Hz-lm-1.7B"
+    assert p.use_cot is True
+    assert p.adg_default is False  # turbo-family distills guidance; ADG off
     assert p.multiplier == 2.00
     assert p.tasks == ("text2music", "cover", "repaint")
     # No operator checkpoint configured in tests -> unconfigured (503), not Turbo.
@@ -204,12 +206,15 @@ def test_xl_turbo_profile_is_cfg_distilled_and_locked():
     assert schema["shift"]["default"] == 3.0 and schema["shift"]["maximum"] == 3.0
 
 
-def test_xl_sft_profile_uses_xl_family_and_no_planner():
+def test_xl_sft_profile_uses_xl_family_and_planner():
     from app import catalog
     p = catalog.CATALOG["ace-step-1.5-xl-sft"].profiles[0]
     assert p.profile_id == "xl-sft-quality-v1"
     assert p.native_family == "xl"
-    assert p.planner_model is None
+    # XL-SFT now uses the 5 Hz planner (was None) for coherent vocal/long audio.
+    assert p.planner_model == "acestep-5Hz-lm-1.7B"
+    assert p.use_cot is True and p.adg_default is True
+    assert (p.shift_min, p.shift_max, p.shift_default) == (1.0, 3.0, 3.0)
     assert p.multiplier == 4.00
     assert p.tasks == ("text2music", "cover", "repaint")
 

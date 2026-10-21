@@ -229,3 +229,39 @@ def test_attempt_heartbeat_thread_beats_during_setup(monkeypatch, orch) -> None:
     thread.join(timeout=3)
     assert beats and beats[0] == "attempt-1"
     assert not thread.is_alive()
+
+
+def test_payload_for_premium_enables_cot_planner_and_adg(orch) -> None:
+    # Premium (use_cot) jobs must forward thinking + planner LM path; ADG comes from
+    # resolved_controls. FakeAdapter.build_payload echoes kwargs, so we assert them.
+    from types import SimpleNamespace
+    worker = _worker(orch, FakeAdapter([]))
+    job = SimpleNamespace(
+        request_json={
+            "music_description": "x", "instrumental": False, "duration_seconds": 240, "controls": {},
+            "_admission": {
+                "use_cot": True, "planner_model": "acestep-5Hz-lm-1.7B",
+                "resolved_controls": {"inference_steps": 100, "guidance_scale": 7.0, "shift": 3.0, "use_adg": True},
+            },
+        },
+        lyrics="la la", owner_id="usr_x",
+    )
+    payload = worker._payload_for(job)
+    assert payload["thinking"] is True
+    assert payload["lm_model_path"] == "acestep-5Hz-lm-1.7B"
+    assert payload["controls"]["use_adg"] is True
+
+
+def test_payload_for_turbo_stays_dit_only(orch) -> None:
+    # turbo-fast-v1 sets use_cot False -> thinking forwarded False (adapter DiT-only default).
+    from types import SimpleNamespace
+    worker = _worker(orch, FakeAdapter([]))
+    job = SimpleNamespace(
+        request_json={"music_description": "x", "controls": {},
+                      "_admission": {"use_cot": False, "planner_model": None, "resolved_controls": {"inference_steps": 8}}},
+        lyrics=None, owner_id="usr_x",
+    )
+    payload = worker._payload_for(job)
+    assert payload["thinking"] is False
+    # turbo has no planner LM -> None (build_payload omits lm_model_path from the real request)
+    assert payload.get("lm_model_path") is None

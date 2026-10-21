@@ -273,7 +273,7 @@ def test_model_selections_catalog_public(client) -> None:
     assert sft["requires_paid"] is True and sft["control_ranges"]["inference_steps"]["min"] == 50
     assert sft["control_ranges"]["inference_steps"]["default"] == 64
     assert sft["control_ranges"]["guidance_scale"] == {"min": 5.0, "max": 9.0, "default": 7.0, "locked": False}
-    assert sft["control_ranges"]["shift"] == {"min": 1.0, "max": 3.0, "default": 1.0}
+    assert sft["control_ranges"]["shift"] == {"min": 1.0, "max": 3.0, "default": 3.0}
     assert sft["control_ranges"]["dcw_forced_off"] is True
     # XL (both) are premium and unconfigured until the operator provisions them.
     xl_turbo = by_id["ace-step-1.5-xl-turbo"]["profiles"][0]
