@@ -79,7 +79,6 @@ def _clean(_migrate) -> None:
             "admin_audits",
             "quotes",
             "worker_capabilities",
-            "gpu_leases",
         ):
             session.execute(text(f"DELETE FROM {table}"))
         session.commit()

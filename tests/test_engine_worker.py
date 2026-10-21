@@ -352,3 +352,40 @@ def test_unhealthy_cooldown_defers_claims(client, orch) -> None:
     orch.dispatcher.publish_once()
     assert worker.run_once() is False
     assert orch.queue.depth("oal:queue:ace-step-1.5") == 1
+
+
+def test_can_run_profile_gates_premium(client, orch) -> None:
+    """R14: claim-time capability check (no allowlist entry / no checkpoint)."""
+    worker = _worker(orch, FakeAdapter([]))
+    assert worker._can_run_profile({})[0] is True
+    assert worker._can_run_profile({"execution_profile_id": "turbo-fast-v1", "family": "turbo"})[0] is True
+    premium = {"execution_profile_id": "xl-turbo-fast-v1", "family": "xl", "engine_model": "acestep-v15-xl-turbo"}
+    ok, why = worker._can_run_profile(premium)
+    assert ok is False and "not enabled" in why
+    orch.settings.premium_profiles_enabled = "xl-turbo-fast-v1"
+    ok, why = worker._can_run_profile(premium)
+    assert ok is False and "not installed" in why
+
+
+def test_premium_job_requeued_without_budget(client, orch) -> None:
+    """R14: a turbo-only worker releases a premium job like ENGINE_BUSY."""
+    from app.models import JobAttempt
+
+    worker = _worker(orch, FakeAdapter([]))
+    job_id = submit(client, key="eng-r14").json()["job_id"]
+    orch.dispatcher.publish_once()
+    with orch.db.session() as session:
+        job = session.execute(select(Job).where(Job.id == job_id)).scalar_one()
+        job.request_json = {
+            **(job.request_json or {}),
+            "_admission": {"execution_profile_id": "xl-turbo-fast-v1", "family": "xl",
+                           "engine_model": "acestep-v15-xl-turbo"},
+        }
+        session.commit()
+    assert worker.run_once() is True
+    assert _status(orch.db, job_id) == "queued"
+    with orch.db.session() as session:
+        attempts = session.execute(select(JobAttempt).where(JobAttempt.job_id == job_id)).scalars().all()
+    assert attempts == []  # attempt released, budget intact
+    assert orch.dispatcher.publish_once() == 1
+    assert orch.queue.depth("oal:queue:ace-step-1.5") == 1

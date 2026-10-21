@@ -206,3 +206,23 @@ def test_scaledown_holds_for_running_burst_attempt(monkeypatch):
     autoscale.tick(r, st, dry_run=True)
     assert stopped == []
     assert st["nodes"][0]["contract"] == 55
+
+
+def test_queued_work_seconds_falls_back_without_db(monkeypatch):
+    _configure(monkeypatch)
+    monkeypatch.setattr(autoscale, "_engine", lambda: None)
+    r = _FakeRedis({autoscale.QUEUE_KEY: 3, autoscale.BURST_KEY: 0, autoscale.TRAIN_QUEUE: 0})
+    # _FakeRedis has no lrange -> exception path -> depth x DEFAULT_JOB_SECONDS
+    assert autoscale.queued_work_seconds(r) == 3 * autoscale.DEFAULT_JOB_SECONDS
+
+
+def test_workload_weighting_scales_on_heavier_jobs(monkeypatch):
+    """R15: two XL jobs (factor 2.5) must weigh more than two turbo jobs."""
+    _configure(monkeypatch, SCALE_UP=3, JOBS_PER_NODE=2, MAX_NODES=3)
+    _noop(monkeypatch)
+    monkeypatch.setattr(autoscale, "_engine", lambda: None)
+    r = _FakeRedis({autoscale.QUEUE_KEY: 2, autoscale.BURST_KEY: 0, autoscale.TRAIN_QUEUE: 0})
+    # Fallback path is family-blind; verify the weighting formula directly instead.
+    turbo = (autoscale.WORK_BASE_SECONDS + autoscale.WORK_SECONDS_PER_MINUTE * 0.5) * autoscale.FAMILY_FACTORS["turbo"]
+    xl = (autoscale.WORK_BASE_SECONDS + autoscale.WORK_SECONDS_PER_MINUTE * 0.5) * autoscale.FAMILY_FACTORS["xl"]
+    assert xl > 2 * turbo

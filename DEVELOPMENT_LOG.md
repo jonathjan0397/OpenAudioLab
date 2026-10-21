@@ -909,3 +909,26 @@ Decisions:
 Validation evidence: backend suite 296 passed (7 recovery + 2 autoscale/worker + 2
 stats/allowance tests added); frontend `tsc -b && vite build` clean, 17 vitest tests
 pass. Hub DB still at 0033 — 0034 applies on next deploy.
+
+## 2026-10-21 — Remediation Phase 4 (P3: R14–R15, same branch)
+
+Decisions:
+1. **R14 — claim-time capability check (no queue split yet).** `EngineWorker._can_run_profile`
+   re-validates the job's `_admission` (profile allowlist, installed checkpoint, free VRAM
+   `total-used >= profile.vram_required_mb`) immediately after claiming. A worker that
+   cannot run the profile releases the attempt through the existing `_requeue` path
+   (budget intact, job back at queue tail, 1 s pause) instead of failing after an engine
+   swap — the turbo-only-worker/premium-job requeue loop is gone. Per-profile queue split
+   stays optional until hop-rate is measured on the mixed fleet (benchmark gate).
+2. **GpuLease removed.** The table was dead (no code path ever acquired it); migration
+   0035 drops `gpu_leases` (serialized claiming is the real GPU-ownership mechanism).
+3. **R15 — workload-aware autoscale.** `queued_work_seconds()` estimates queued demand as
+   `(45 s base + 30 s/min duration) x family factor` (turbo 1.0, sft 2.0, xl 2.5, merge 2.0 —
+   provisional constants, env-overridable via `OAL_SCALE_FAMILY_FACTORS` etc.) from the DB
+   job rows; `tick` scales on `depth_eff = max(depth, ceil(work/DEFAULT_JOB_SECONDS))`.
+   Falls back to raw depth when Redis/DB is unavailable, so existing depth-only behavior
+   remains the safety net. Tiered scale-down (hold → 1 → 0) unchanged.
+
+Validation evidence: 4 new tests (capability gating unit + requeue-without-budget +
+fallback/weighting) — 300 backend tests pass. XL benchmark (real GPU baselines) still
+pending owner Vast-spend approval; factors are provisional until recorded.

@@ -467,6 +467,40 @@ class EngineWorker:
         self._drain_checked_at = now
         return self._drain_flag
 
+    def _can_run_profile(self, admission: dict) -> tuple[bool, str]:
+        """R14: claim-time capability check. A worker that cannot run the job's
+        profile must release it without burning the attempt budget (same path as
+        ENGINE_BUSY) instead of failing/requeue-looping after an engine swap."""
+        from pathlib import Path as _Path
+
+        from . import catalog as _catalog
+
+        profile_id = admission.get("execution_profile_id")
+        family = admission.get("family")
+        if not profile_id or family == "turbo":
+            return True, ""
+        allow = {s.strip() for s in (self.settings.premium_profiles_enabled or "").split(",") if s.strip()}
+        if profile_id not in allow:
+            return False, "profile not enabled on this worker"
+        engine_model = admission.get("engine_model")
+        if not engine_model:
+            return False, "no engine model for profile"
+        ckpt_root = _Path(self.settings.acestep_checkpoints_dir)
+        if not (ckpt_root / engine_model).is_dir():
+            return False, f"checkpoint {engine_model} not installed"
+        required_mb = 0
+        for release in _catalog.CATALOG.values():
+            prof = release.profile(profile_id)
+            if prof is not None:
+                required_mb = prof.vram_required_mb
+                break
+        telemetry = _gpu_telemetry()
+        if telemetry and required_mb:
+            _util, used_mb, total_mb = telemetry
+            if total_mb and (total_mb - used_mb) < required_mb:
+                return False, f"free VRAM {total_mb - used_mb} MB < required {required_mb} MB"
+        return True, ""
+
     def _target_engine_model(self, request_json: dict) -> str:
         """Engine checkpoint this job needs. Turbo uses the worker's configured
         default (preserving the live baseline model); premium uses its release."""
@@ -570,7 +604,14 @@ class EngineWorker:
         try:
             with self.db.session() as session:
                 _claimed = get_job_by_id(session, claimed_job)
-                target_model = self._target_engine_model(dict(_claimed.request_json or {}))
+                _req = dict(_claimed.request_json or {})
+                target_model = self._target_engine_model(_req)
+                runnable, why = self._can_run_profile(dict(_req.get("_admission") or {}))
+            if not runnable:
+                log.info("job %s not runnable here (%s); requeueing without budget", job_id, why)
+                self._requeue(claimed_job, attempt_id, lease_token, reason="Profile not runnable here")
+                time.sleep(1)
+                return True
             # Start/swap the engine to the job's model AFTER claiming, so only the
             # requested checkpoint is ever resident (serialized GPU ownership).
             if self.engine_process is not None:
@@ -799,8 +840,8 @@ class EngineWorker:
         )
         return True
 
-    def _requeue(self, job_id: str, attempt_id: str, lease_token: str) -> None:
-        """Engine busy: release the attempt and requeue without burning budget."""
+    def _requeue(self, job_id: str, attempt_id: str, lease_token: str, reason: str = "Engine busy") -> None:
+        """Release the attempt and requeue without burning budget (busy or R14 hop)."""
         from sqlalchemy import delete, select as sa_select, update
 
         from .models import JobAttempt, OutboxRecord
@@ -822,7 +863,7 @@ class EngineWorker:
                 job.status = "queued"
                 job.stage = None
                 session.add(OutboxRecord(job_id=job.id, queue=self.queue_name))
-                append_event(session, job.id, "deferred", "queued", message="Engine busy; requeued.", attempt_id=attempt_id)
+                append_event(session, job.id, "deferred", "queued", message=f"{reason}; requeued.", attempt_id=attempt_id)
             session.commit()
 
     def run_forever(self) -> None:

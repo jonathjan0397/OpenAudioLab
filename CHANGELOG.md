@@ -6,6 +6,17 @@ feature branches; `master` remains the documentation/planning baseline until the
 owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_N.md`.
 
 ## [Unreleased]
+### Remediation Phase 4 (2026-10-21, feat/uais-artist-voice)
+- **Claim-time capability check (R14):** engine workers re-verify the job's execution
+  profile (allowlist, installed checkpoint, free VRAM) after claiming and release
+  incompatible jobs without burning the attempt budget — no more turbo/premium
+  requeue-loop on a mixed fleet.
+- **Dead `gpu_leases` table dropped** (migration 0035); serialized claiming is the
+  GPU-ownership mechanism.
+- **Workload-aware autoscale (R15):** scale decisions use estimated queued GPU-seconds
+  (duration x model-class factors, provisional pending XL benchmark) instead of raw
+  queue depth, with depth-only fallback.
+
 ### Remediation Phases 1–3 (2026-10-21, feat/uais-artist-voice)
 - **P0 job safety:** retryable failures requeue with capped backoff (`jobs.next_retry_at`),
   terminal failure refunds generation credits (explicit retry re-charges), upstream ACE-Step

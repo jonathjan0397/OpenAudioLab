@@ -44,6 +44,19 @@ REDIS_URL = os.environ.get("OAL_REDIS_URL", f"redis://{HUB}:6379/0")
 IMAGE = os.environ.get("OAL_WORKER_IMAGE", "stratastack/oal-worker:house-v1-070-int8")
 DISK = os.environ.get("OAL_VAST_DISK", "90")
 SCALE_UP = int(os.environ.get("OAL_SCALE_UP_DEPTH", "2"))
+# R15: workload-aware demand. A queued job's estimated GPU seconds is
+# (base + per-minute * duration) * family factor. Factors are PROVISIONAL
+# starting values until the XL benchmark records baselines (Phase 4 gate).
+WORK_BASE_SECONDS = float(os.environ.get("OAL_SCALE_WORK_BASE_SECONDS", "45"))
+WORK_SECONDS_PER_MINUTE = float(os.environ.get("OAL_SCALE_WORK_SECONDS_PER_MINUTE", "30"))
+DEFAULT_JOB_SECONDS = float(os.environ.get("OAL_SCALE_DEFAULT_JOB_SECONDS", "120"))
+FAMILY_FACTORS = {
+    k: float(v) for k, v in (
+        pair.split("=", 1) for pair in os.environ.get(
+            "OAL_SCALE_FAMILY_FACTORS", "turbo=1.0,sft=2.0,xl=2.5,merge=2.0"
+        ).split(",") if "=" in pair
+    )
+}
 JOBS_PER_NODE = int(os.environ.get("OAL_SCALE_JOBS_PER_NODE", "20"))
 MAX_NODES = int(os.environ.get("OAL_SCALE_MAX_NODES", "3"))
 BASELINE = int(os.environ.get("OAL_SCALE_BASELINE_WORKERS", "1"))
@@ -724,9 +737,12 @@ def desired_nodes(depth, low_since, now, current, effective_baseline=None):
 
 def tick(r, st, dry_run=False):
     depth = r.llen(QUEUE_KEY) + r.llen(BURST_KEY)
+    # R15: scale on estimated work, not raw count — a few XL jobs weigh more than
+    # many turbo jobs. depth_eff is the workload-equivalent job count.
+    depth_eff = max(depth, math.ceil(queued_work_seconds(r) / DEFAULT_JOB_SECONDS))
     now = time.time()
     nodes = st.get("nodes", [])
-    if depth >= SCALE_UP:
+    if depth_eff >= SCALE_UP:
         st["low_since"] = None
     elif st.get("low_since") is None:
         st["low_since"] = now
@@ -789,7 +805,7 @@ def tick(r, st, dry_run=False):
             log(f"fallback LLM endpoint -> {url}")
 
     effective_baseline = 1 if baseline_ok or fallback else 0
-    want = desired_nodes(depth, st.get("low_since"), now, len(nodes), effective_baseline)
+    want = desired_nodes(depth_eff, st.get("low_since"), now, len(nodes), effective_baseline)
 
     if len(nodes) < want:
         restarted = False
@@ -800,7 +816,7 @@ def tick(r, st, dry_run=False):
                 nodes.append(node)
                 registry_set(node["contract"], "running")
                 restarted = True
-                log(f"depth={depth} want={want} -> restarted stopped node {node['contract']} (now {len(nodes)})")
+                log(f"depth={depth_eff} want={want} -> restarted stopped node {node['contract']} (now {len(nodes)})")
             else:
                 registry_remove(node["contract"])
         if not restarted:
@@ -822,7 +838,7 @@ def tick(r, st, dry_run=False):
                     node.update({"wg_ip": slot["ip"], "wg_pubkey": slot["pubkey"],
                                  "wg_privkey": slot["privkey"]})
                 nodes.append(node)
-                log(f"depth={depth} want={want} -> +1 node {new} via {transport} (now {len(nodes)})")
+                log(f"depth={depth_eff} want={want} -> +1 node {new} via {transport} (now {len(nodes)})")
         st["nodes"] = nodes
     elif len(nodes) > want:
         removable = [n for n in nodes if now - n["created_at"] >= MIN_UPTIME]
@@ -836,7 +852,7 @@ def tick(r, st, dry_run=False):
         else:
             hold_reason = "all < min_uptime"
         if not removable:
-            log(f"depth={depth} want={want} nodes={len(nodes)} {hold_reason}; hold")
+            log(f"depth={depth_eff} want={want} nodes={len(nodes)} {hold_reason}; hold")
         else:
             victim = max(removable, key=lambda n: n["created_at"])  # newest first
             if REUSE:
@@ -849,7 +865,7 @@ def tick(r, st, dry_run=False):
                     if old.get("wg_pubkey") and not dry_run:
                         wg_remove_peer(old["wg_pubkey"])
                     registry_remove(old["contract"])
-                log(f"depth={depth} want={want} -> stopped node {victim['contract']} (now {len(nodes) - 1} hot)")
+                log(f"depth={depth_eff} want={want} -> stopped node {victim['contract']} (now {len(nodes) - 1} hot)")
             else:
                 destroy_instance(victim["contract"], dry_run)
                 if victim.get("wg_pubkey") and not dry_run:
@@ -857,10 +873,48 @@ def tick(r, st, dry_run=False):
                 registry_remove(victim["contract"])
             nodes.remove(victim)
             st["nodes"] = nodes
-            log(f"depth={depth} want={want} -> -1 node {victim['contract']} (now {len(nodes)})")
+            log(f"depth={depth_eff} want={want} -> -1 node {victim['contract']} (now {len(nodes)})")
 
     training_tick(r, st, now, dry_run)
-    return depth
+    return depth_eff
+
+
+def queued_work_seconds(r) -> float:
+    """R15: estimated GPU-seconds of queued work (duration x model class).
+
+    Falls back to depth x DEFAULT_JOB_SECONDS when Redis lacks lrange or the DB
+    is unreachable, so the depth-only behavior remains the safety net."""
+    try:
+        ids = []
+        for key in (QUEUE_KEY, BURST_KEY):
+            for item in r.lrange(key, 0, -1):
+                ids.append(item.decode() if isinstance(item, bytes) else str(item))
+        if not ids:
+            return 0.0
+        eng = _engine()
+        if eng is None:
+            return len(ids) * DEFAULT_JOB_SECONDS
+        import sqlalchemy
+
+        with eng.connect() as conn:
+            rows = conn.execute(
+                sqlalchemy.text(
+                    "select request_json from jobs where id = any(:ids) "
+                    "and status in ('queued','waiting_for_worker')"
+                ),
+                {"ids": ids},
+            ).fetchall()
+        total = 0.0
+        for (rj,) in rows:
+            rj = rj if isinstance(rj, dict) else json.loads(rj or "{}")
+            adm = rj.get("_admission") or {}
+            fam = adm.get("family") or "turbo"
+            dur = float(rj.get("duration_seconds") or rj.get("duration") or 30)
+            total += (WORK_BASE_SECONDS + WORK_SECONDS_PER_MINUTE * dur / 60.0) * FAMILY_FACTORS.get(fam, 1.0)
+        total += max(0, len(ids) - len(rows)) * DEFAULT_JOB_SECONDS
+        return total
+    except Exception:
+        return (r.llen(QUEUE_KEY) + r.llen(BURST_KEY)) * DEFAULT_JOB_SECONDS
 
 
 def burst_running() -> bool:

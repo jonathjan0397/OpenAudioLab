@@ -794,21 +794,3 @@ class WorkerCapability(Base):
     supports_staged_planner: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
-
-
-class GpuLease(Base):
-    """Fenced exclusive ownership of one physical GPU so only one heavy engine is
-    resident at a time (serial GPU-0 alternation). A lease is acquired before a
-    model load and released after unload/idle-stop."""
-
-    __tablename__ = "gpu_leases"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
-    gpu_id: Mapped[str] = mapped_column(String(40), index=True)  # e.g. "cuda:0"
-    holder: Mapped[str | None] = mapped_column(String(120), nullable=True)  # worker_id
-    model_selection: Mapped[str | None] = mapped_column(String(80), nullable=True)
-    fence_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    status: Mapped[str] = mapped_column(String(20), default="free", index=True)  # free|held
-    acquired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
