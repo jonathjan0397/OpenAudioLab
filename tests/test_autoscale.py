@@ -98,8 +98,8 @@ def test_training_tick_creates_training_node(monkeypatch):
     _noop(monkeypatch)
     created = []
 
-    def fake_create(slot=None, dry_run=False, transport="wg", role="engine_worker"):
-        created.append(role)
+    def fake_create(slot=None, dry_run=False, transport="wg", role="engine_worker", **kw):
+        created.append((role, kw.get("train_queue")))
         return 77
 
     monkeypatch.setattr(autoscale, "create_instance", fake_create)
@@ -107,7 +107,7 @@ def test_training_tick_creates_training_node(monkeypatch):
     st = {"train_pending_since": now}
     r = _FakeRedis({autoscale.TRAIN_QUEUE: 1})
     autoscale.training_tick(r, st, now, dry_run=True)
-    assert created == ["training_worker"]
+    assert created == [("training_worker", "training")]
     assert st["train_nodes"][0]["contract"] == 77
 
 
@@ -167,3 +167,26 @@ def test_training_tick_stops_idle_training_node(monkeypatch):
     assert stopped == [77]
     assert st["train_nodes"] == []
     assert st["train_stopped"][0]["contract"] == 77
+
+
+def test_training_tick_xl_pool_creates_separate_node(monkeypatch):
+    _configure(monkeypatch, VAST_TRANSPORT="public", REUSE=True, KEEP_STOPPED=2,
+               TRAIN_WAIT_LOCAL=0.0, TRAIN_DOWN_SECONDS=240,
+               TRAIN_MAX_NODES=1, TRAIN_XL_MAX_NODES=1,
+               TRAIN_XL_MIN_VRAM="32", TRAIN_XL_MAX_DPH=0.60)
+    _noop(monkeypatch)
+    created = []
+
+    def fake_create(slot=None, dry_run=False, transport="wg", role="engine_worker", **kw):
+        created.append((role, kw.get("train_queue"), kw.get("min_vram"), kw.get("max_dph")))
+        return 91
+
+    monkeypatch.setattr(autoscale, "create_instance", fake_create)
+    now = 10000.0
+    st = {"train_pending_since": now, "train_xl_pending_since": now}
+    r = _FakeRedis({autoscale.TRAIN_QUEUE: 1, autoscale.TRAIN_QUEUE_XL: 2})
+    autoscale.training_tick(r, st, now, dry_run=True)
+    assert created == [("training_worker", "training", None, None),
+                       ("training_worker", "training-xl", "32", 0.60)]
+    assert st["train_nodes"][0]["contract"] == 91
+    assert st["train_xl_nodes"][0]["contract"] == 91

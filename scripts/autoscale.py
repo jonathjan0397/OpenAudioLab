@@ -84,15 +84,25 @@ IMAGE_GB = float(os.environ.get("OAL_WORKER_IMAGE_GB", "13"))
 REUSE = os.environ.get("OAL_VAST_REUSE", "1") != "0"
 KEEP_STOPPED = int(os.environ.get("OAL_VAST_KEEP_STOPPED", "2"))
 RECONCILE_SECONDS = float(os.environ.get("OAL_VAST_RECONCILE_SECONDS", "120"))
-# Training tier: pending artist.train jobs get a dedicated Vast training node
+# Training tier: pending UAIS voice jobs get a dedicated Vast training node
 # after OAL_TRAIN_VAST_AFTER_SECONDS (giving the gated local worker first
-# claim); idle nodes are stopped after OAL_TRAIN_DOWN_SECONDS.
+# claim); idle nodes are stopped after OAL_TRAIN_DOWN_SECONDS. Two pools:
+# 2B adapters on cheap >=24 GB offers, XL (4B) adapters on larger offers with
+# a separate dph ceiling (all classes remote; first runs double as the XL
+# VRAM/time benchmark).
 TRAIN_QUEUE = os.environ.get("OAL_TRAIN_QUEUE_KEY", "oal:queue:training")
+TRAIN_QUEUE_XL = os.environ.get("OAL_TRAIN_XL_QUEUE_KEY", "oal:queue:training-xl")
 TRAIN_WAIT_LOCAL = float(os.environ.get("OAL_TRAIN_VAST_AFTER_SECONDS", "120"))
 TRAIN_DOWN_SECONDS = float(os.environ.get("OAL_TRAIN_DOWN_SECONDS", "240"))
 TRAIN_LOADING_STALL_SECONDS = float(os.environ.get("OAL_TRAIN_LOADING_STALL_SECONDS", "1200"))
 TRAIN_CREATE_GUARD_SECONDS = float(os.environ.get("OAL_TRAIN_CREATE_GUARD_SECONDS", "600"))
 TRAIN_MAX_NODES = int(os.environ.get("OAL_TRAIN_MAX_NODES", "1"))
+TRAIN_XL_MAX_NODES = int(os.environ.get("OAL_TRAIN_XL_MAX_NODES", "1"))
+TRAIN_XL_MIN_VRAM = os.environ.get("OAL_TRAIN_XL_MIN_VRAM", "32")
+TRAIN_XL_MAX_DPH = float(os.environ.get("OAL_TRAIN_XL_MAX_DPH", "0.60"))
+# Optional training-specific image (defaults to the engine worker image; the
+# UAIS decision is slim image + runtime checkpoint download).
+TRAIN_IMAGE = os.environ.get("OAL_TRAIN_WORKER_IMAGE", "")
 MAX_DPH = float(os.environ.get("OAL_SCALE_MAX_DPH", "0"))
 PRUNE_SECONDS = float(os.environ.get("OAL_PRUNE_SECONDS", "3600"))
 RETENTION_DAYS = int(os.environ.get("OAL_RETENTION_DAYS", "30"))
@@ -119,6 +129,7 @@ ACESTEP_MODEL = os.environ.get("OAL_ACESTEP_MODEL", "")
 OFFER_COOLDOWN_SECONDS = float(os.environ.get("OAL_OFFER_COOLDOWN_SECONDS", "10800"))
 OFFER_COOLDOWN = {}       # offer_id -> unix ts until which the offer is banned
 _OFFER_OF_CONTRACT = {}   # contract id -> offer id of the create that made it
+_OFFER_DPH = {}           # offer id -> $/hr at pick time (cost accounting)
 for _seed in os.environ.get("OAL_OFFER_COOLDOWN", "").split(","):
     _seed = _seed.strip()
     if "-" in _seed and _seed.replace("-", "").isdigit():
@@ -158,7 +169,7 @@ def _engine():
     return _DB
 
 
-def registry_upsert(cid, role, state, gpu=None):
+def registry_upsert(cid, role, state, gpu=None, dph=None):
     d = _engine()
     if d is None:
         return
@@ -168,12 +179,13 @@ def registry_upsert(cid, role, state, gpu=None):
         with d.begin() as conn:
             conn.execute(
                 text(
-                    "INSERT INTO vast_instances (id, vast_instance_id, role, gpu_model, state, created_at, last_used_at) "
-                    "VALUES (gen_random_uuid()::text, :cid, :role, :gpu, :state, now(), now()) "
+                    "INSERT INTO vast_instances (id, vast_instance_id, role, gpu_model, dph, state, created_at, last_used_at) "
+                    "VALUES (gen_random_uuid()::text, :cid, :role, :gpu, :dph, :state, now(), now()) "
                     "ON CONFLICT (vast_instance_id) DO UPDATE SET state = EXCLUDED.state, role = EXCLUDED.role, "
-                    "gpu_model = COALESCE(EXCLUDED.gpu_model, vast_instances.gpu_model), last_used_at = now()"
+                    "gpu_model = COALESCE(EXCLUDED.gpu_model, vast_instances.gpu_model), "
+                    "dph = COALESCE(EXCLUDED.dph, vast_instances.dph), last_used_at = now()"
                 ),
-                {"cid": str(cid), "role": role, "gpu": gpu, "state": state},
+                {"cid": str(cid), "role": role, "gpu": gpu, "dph": dph, "state": state},
             )
     except Exception as e:
         log(f"registry upsert failed: {e}")
@@ -311,7 +323,7 @@ def sh(args, stdin=None):
     return p.returncode, p.stdout, p.stderr
 
 
-def worker_env(transport="wg", slot=None, role="engine_worker", tier=None, llm=False):
+def worker_env(transport="wg", slot=None, role="engine_worker", tier=None, llm=False, train_queue=None):
     pw = os.environ["OAL_POSTGRES_PASSWORD"]
     secret = os.environ["OAL_SECRET_KEY"]
     base = HUB_TS if transport == "ts" else (HUB_TUNNEL if transport == "wg" else HUB)
@@ -350,6 +362,13 @@ def worker_env(transport="wg", slot=None, role="engine_worker", tier=None, llm=F
             # default kills 1000+-track jobs mid-preprocess.
             "-e OAL_TRAIN_HTTP_TIMEOUT_SECONDS=7200",
         ]
+        if train_queue:
+            # Pin the node to one training queue (2B pool: "training";
+            # XL pool: "training-xl") so pools never steal each other's jobs.
+            env += [
+                f"-e OAL_TRAIN_QUEUE_MODEL_ID={train_queue}",
+                f"-e OAL_TRAIN_XL_QUEUE_MODEL_ID={train_queue}",
+            ]
     else:
         # Burst tier: Vast nodes drain only the overflow queue, so the always-on
         # baseline worker keeps first claim on the main queue. Baseline fallback
@@ -481,6 +500,7 @@ def pick_offer(max_dph=None, min_compute=None, min_vram=None):
     if not best:
         return None
     o = best[1]
+    _OFFER_DPH[str(o.get("id"))] = float(o.get("dph_total") or 0.0)
     pull_min = IMAGE_GB * 8000 / (o.get("inet_down") or 1) / 60
     log(f"picked offer {o.get('id')} {o.get('gpu_name')} {o.get('geolocation')} "
         f"dph=${o.get('dph_total'):.3f}/hr inet_down={o.get('inet_down')}Mbps "
@@ -498,6 +518,8 @@ def create_instance(
     max_dph=None,
     min_compute=None,
     min_vram=None,
+    image=None,
+    train_queue=None,
 ):
     offer = pick_offer(max_dph=max_dph, min_compute=min_compute, min_vram=min_vram)
     if not offer:
@@ -506,10 +528,11 @@ def create_instance(
     if dry_run:
         log(f"[dry-run] would create instance on offer {offer}")
         return -1
-    env = ("--privileged " if transport == "wg" else "") + worker_env(transport, slot, role, tier=tier, llm=llm)
+    env = ("--privileged " if transport == "wg" else "") + worker_env(
+        transport, slot, role, tier=tier, llm=llm, train_queue=train_queue)
     if llm:
         env += f" -p {LLM_PORT}:{LLM_PORT}/tcp"
-    cmd = [VASTAI, "create", "instance", str(offer), "--image", IMAGE, "--disk", DISK, "--env", env]
+    cmd = [VASTAI, "create", "instance", str(offer), "--image", image or IMAGE, "--disk", DISK, "--env", env]
     cmd += ["--args", "run"]
     _, out, _ = sh(cmd)
     ok = "'success': True" in out
@@ -524,7 +547,8 @@ def create_instance(
     if cid and slot and transport == "wg":
         wg_add_peer(slot["pubkey"], slot["ip"])
     if cid:
-        registry_upsert(cid, "training" if role == "training_worker" else "engine", "running")
+        registry_upsert(cid, "training" if role == "training_worker" else "engine", "running",
+                        dph=_OFFER_DPH.get(str(offer)))
     return cid
 
 
@@ -837,7 +861,7 @@ def tick(r, st, dry_run=False):
 
 
 def train_running() -> bool:
-    """True while any artist.train job is claimed and running (best-effort)."""
+    """True while any UAIS voice job is claimed and running (best-effort)."""
     eng = _engine()
     if eng is None:
         return False
@@ -847,8 +871,8 @@ def train_running() -> bool:
         with eng.connect() as conn:
             n = conn.execute(
                 sqlalchemy.text(
-                    "select count(*) from jobs "
-                    "where operation='artist.train' and status='running'"
+                    "select count(*) from jobs where operation in "
+                    "('voice.analyze','voice.train','voice.validate') and status='running'"
                 )
             ).scalar()
         return bool(n)
@@ -856,56 +880,75 @@ def train_running() -> bool:
         return False
 
 
-def training_tick(r, st, now, dry_run=False):
-    """Keep up to OAL_TRAIN_MAX_NODES Vast training nodes while jobs are pending."""
-    train_depth = r.llen(TRAIN_QUEUE)
-    tnodes = st.get("train_nodes", [])
-    tstopped = st.get("train_stopped", [])
-    if train_depth > 0:
-        st["train_idle_since"] = None
-        since = st.get("train_pending_since") or now
-        st["train_pending_since"] = since
-        if len(tnodes) < TRAIN_MAX_NODES and now - since >= TRAIN_WAIT_LOCAL:
-            while len(tnodes) < TRAIN_MAX_NODES and REUSE and tstopped:
-                node = tstopped.pop(0)
+def _training_pool_tick(r, st, now, dry_run, pool):
+    depth = r.llen(pool["queue"])
+    nodes = st.get(pool["nodes"], [])
+    stopped = st.get(pool["stopped"], [])
+    if depth > 0:
+        st[pool["idle"]] = None
+        since = st.get(pool["pending"]) or now
+        st[pool["pending"]] = since
+        if len(nodes) < pool["max"] and now - since >= TRAIN_WAIT_LOCAL:
+            while len(nodes) < pool["max"] and REUSE and stopped:
+                node = stopped.pop(0)
                 if start_instance(node["contract"], dry_run):
                     node["created_at"] = now
-                    tnodes.append(node)
+                    nodes.append(node)
                     registry_set(node["contract"], "running")
-                    log(f"training pending={train_depth} -> restarted stopped training node {node['contract']}")
+                    log(f"{pool['name']} pending={depth} -> restarted stopped training node {node['contract']}")
                 else:
                     registry_remove(node["contract"])
-            if len(tnodes) < TRAIN_MAX_NODES:
-                last_created = st.get("train_last_created_at") or 0
+            if len(nodes) < pool["max"]:
+                last_created = st.get(pool["last"]) or 0
                 if now - last_created >= TRAIN_CREATE_GUARD_SECONDS:
-                    cid = create_instance(None, dry_run, VAST_TRANSPORT, role="training_worker")
+                    cid = create_instance(None, dry_run, VAST_TRANSPORT, role="training_worker",
+                                          image=pool["image"], min_vram=pool["min_vram"],
+                                          max_dph=pool["max_dph"], train_queue=pool["train_queue"])
                     if cid:
-                        st["train_last_created_at"] = now
-                        tnodes.append({"contract": cid, "created_at": now, "transport": VAST_TRANSPORT})
-                        log(f"training pending={train_depth} -> +1 training node {cid}")
+                        st[pool["last"]] = now
+                        nodes.append({"contract": cid, "created_at": now, "transport": VAST_TRANSPORT})
+                        log(f"{pool['name']} pending={depth} -> +1 training node {cid}")
                 else:
-                    log(f"training create guard active ({int(now - last_created)}s since last create)")
-            st["train_nodes"] = tnodes
+                    log(f"{pool['name']} create guard active ({int(now - last_created)}s since last create)")
+            st[pool["nodes"]] = nodes
     else:
-        st["train_pending_since"] = None
+        st[pool["pending"]] = None
         if train_running():
-            st["train_idle_since"] = None
+            st[pool["idle"]] = None
             return
-        if tnodes:
-            idle = st.get("train_idle_since") or now
-            st["train_idle_since"] = idle
+        if nodes:
+            idle = st.get(pool["idle"]) or now
+            st[pool["idle"]] = idle
             if now - idle >= TRAIN_DOWN_SECONDS:
-                for n in tnodes:
+                for n in nodes:
                     stop_instance(n["contract"], dry_run)
                     registry_set(n["contract"], "stopped")
-                    tstopped.insert(0, n)
-                st["train_nodes"] = []
-                while len(tstopped) > KEEP_STOPPED:
-                    old = tstopped.pop()
+                    stopped.insert(0, n)
+                st[pool["nodes"]] = []
+                while len(stopped) > KEEP_STOPPED:
+                    old = stopped.pop()
                     destroy_instance(old["contract"], dry_run)
                     registry_remove(old["contract"])
-                st["train_stopped"] = tstopped
-                log("training idle -> stopped training node(s)")
+                st[pool["stopped"]] = stopped
+                log(f"{pool['name']} idle -> stopped training node(s)")
+
+
+def training_tick(r, st, now, dry_run=False):
+    """Keep pool-sized Vast training nodes up while UAIS voice jobs are pending."""
+    pools = [
+        {"name": "train-2b", "queue": TRAIN_QUEUE, "max": TRAIN_MAX_NODES,
+         "nodes": "train_nodes", "stopped": "train_stopped", "pending": "train_pending_since",
+         "idle": "train_idle_since", "last": "train_last_created_at",
+         "image": TRAIN_IMAGE or None, "min_vram": None, "max_dph": None,
+         "train_queue": "training"},
+        {"name": "train-xl", "queue": TRAIN_QUEUE_XL, "max": TRAIN_XL_MAX_NODES,
+         "nodes": "train_xl_nodes", "stopped": "train_xl_stopped", "pending": "train_xl_pending_since",
+         "idle": "train_xl_idle_since", "last": "train_xl_last_created_at",
+         "image": TRAIN_IMAGE or None, "min_vram": TRAIN_XL_MIN_VRAM, "max_dph": TRAIN_XL_MAX_DPH,
+         "train_queue": "training-xl"},
+    ]
+    for pool in pools:
+        _training_pool_tick(r, st, now, dry_run, pool)
 
 
 def main():
