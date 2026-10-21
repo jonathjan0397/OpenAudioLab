@@ -6,6 +6,23 @@ feature branches; `master` remains the documentation/planning baseline until the
 owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_N.md`.
 
 ## [Unreleased]
+### My Tracks UX, workspaces, FAQ, and test-data cleanup (2026-10-21)
+- **Details** card now shows formatted generation info (model/engine/planner, task, duration,
+  seed, lyrics origin+hash, prompt/idea/style, controls, cover/repaint source, created) with
+  "Reuse recipe" + "Copy raw" instead of a JSON dump.
+- **Stems** export now produces a single ZIP (stems/*.wav + manifest.json); `/stems` returns a
+  `zip` and new `/stems/zip` serves the stored zip or builds one on demand; UI has one
+  "All stems (.zip)" button + optional individual links.
+- **Workspaces**: real asset membership (`assets.workspace_id`, migration 0029) with an
+  always-present, protected **"My Default Space"** per owner (backfilled); My Tracks workspace
+  filter chips; per-track move; create/rename/delete (delete reassigns to default); recipe-save
+  files the asset too.
+- **FAQ** page at `/faq` (models/tiers, workspaces, artist LoRA/training, lyrics, credits,
+  durations) + nav/footer.
+- **My Tracks overflow** fixed (base `.card`/`.track-row` wrap + shrinkable meta/actions; the
+  row no longer escapes its box at 1100–1900px).
+- **Cleanup**: hard-cascaded 21 test/seed accounts (xl-admin test + `test@` + disabled
+  `journey-*`) via `scripts/purge_users.py` (dry-run→execute) and reclaimed their storage dirs.
 
 ### Generation quality: 5Hz-LM planner for premium, LoRA compatibility, XL int8, drafting LLM to CPU (2026-10-21)
 - **Root-caused "SFT/XL garbled, only turbo usable."** Premium (SFT/XL) audio was a noise-wash
