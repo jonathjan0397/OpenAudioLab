@@ -163,6 +163,7 @@ class Settings(BaseSettings):
     train_min_free_mb: int = 12000
     vast_api_key: str = ""
     vast_api_url: str = "https://cloud.vast.ai/api/v1"
+    vast_search_url: str = "https://console.vast.ai/api/v0"
 
     # Remote workers / object storage (durable across hosts)
     storage_backend: str = "local"

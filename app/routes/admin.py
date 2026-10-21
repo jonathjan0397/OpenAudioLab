@@ -780,19 +780,27 @@ def gpu_fleet_offers(
     if not refresh and cache["key"] == key and time.time() - cache["at"] < 30:
         result = cache["result"]
         return JSONResponse({**result, "cached": True})
-    query = {"search": {
+    query = {
         "rentable": {"eq": True},
+        "external": {"eq": False},
+        "type": "on-demand",
         "cuda_max_good": {"gte": crit["min_cuda"]},
         "gpu_ram": {"gte": int(crit["min_vram_gb"] * 1024 * 1024 * 1024)},
         "num_gpus": {"eq": 1},
         "dph_total": {"lte": crit["max_dph"]},
-    }}
+        "order": [["dph_total", "asc"]],
+        "limit": 200,
+        "allocated_storage": 5.0,
+    }
     if crit["verified_only"]:
-        query["search"]["verification"] = {"eq": "verified"}
+        query["verified"] = {"eq": True}
     try:
-        resp = _requests.post(f"{settings.vast_api_url}/search/offers/", json=query, timeout=20)
+        resp = _requests.post(
+            f"{settings.vast_search_url.rstrip('/')}/bundles/", json=query,
+            headers={"Authorization": f"Bearer {settings.vast_api_key}"}, timeout=20)
         resp.raise_for_status()
-        raw = resp.json().get("matches", [])
+        body = resp.json()
+        raw = body.get("offers") or body.get("matches") or []
     except Exception as exc:
         raise ApiError(502, "VAST_SEARCH_FAILED", f"Vast.ai offer search failed: {exc}") from exc
     result = vo.rank(raw, crit, limit=10)
@@ -846,11 +854,17 @@ def gpu_fleet_deploy(payload: dict, request: Request, admin: User = Depends(requ
         snapshot = None
         if offer_id:
             try:
-                matches = _vast_request(
-                    request, "POST", "/search/offers/", {"search": {"id": {"eq": int(offer_id)}}}
-                ).get("matches", [])
-            except ApiError:
-                raise
+                import requests as _requests
+
+                st_conf = request.app.state.settings
+                resp = _requests.post(
+                    f"{st_conf.vast_search_url.rstrip('/')}/bundles/",
+                    json={"ask_contract_id": {"eq": int(offer_id)}, "type": "on-demand",
+                          "limit": 5, "allocated_storage": 5.0},
+                    headers={"Authorization": f"Bearer {st_conf.vast_api_key}"}, timeout=20)
+                resp.raise_for_status()
+                body = resp.json()
+                matches = body.get("offers") or body.get("matches") or []
             except Exception as exc:
                 raise ApiError(502, "VAST_SEARCH_FAILED", f"Offer revalidation failed: {exc}") from exc
             if not matches:

@@ -334,7 +334,7 @@ def test_fleet_offers_endpoint_mocked(client, monkeypatch):
             return {"matches": [_raw("a"), _raw("b", dph_total=0.15), _raw("c", dph_total=0.99)]}
 
     calls = []
-    monkeypatch.setattr(requests, "post", lambda url, json=None, timeout=None: calls.append(url) or Resp())
+    monkeypatch.setattr(requests, "post", lambda url, json=None, headers=None, timeout=None: calls.append(url) or Resp())
     import app.routes.admin as adm
     adm._OFFER_CACHE.update({"key": None, "at": 0.0, "result": None})
     r = client.get("/api/v1/admin/gpu-fleet/offers")
@@ -347,7 +347,7 @@ def test_fleet_offers_endpoint_mocked(client, monkeypatch):
     assert r2.json()["cached"] is True  # 30 s server cache
     assert len(calls) == 1
     # §19.30 provider failure surfaces as 502
-    def boom(url, json=None, timeout=None):
+    def boom(url, json=None, headers=None, timeout=None):
         raise RuntimeError("provider down")
     monkeypatch.setattr(requests, "post", boom)
     adm._OFFER_CACHE.update({"key": None, "at": 0.0, "result": None})
@@ -630,13 +630,25 @@ def test_deployment_offer_revalidation_409(client, monkeypatch) -> None:
     """§19.28b: deploy-time revalidation blocks changed/unavailable offers."""
     _login_admin3(client)
 
-    def fake(request, method, path, body=None):
-        oid = body["search"]["id"]["eq"]
-        if oid == 404:
-            return {"matches": []}
-        return {"matches": [_raw(str(oid), dph_total=0.42)]}
+    import requests as _rq
 
-    monkeypatch.setattr("app.routes.admin._vast_request", fake)
+    class Resp:
+        def __init__(self, body):
+            self._b = body
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._b
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        oid = json["ask_contract_id"]["eq"]
+        if oid == 404:
+            return Resp({"offers": []})
+        return Resp({"offers": [_raw(str(oid), dph_total=0.42)]})
+
+    monkeypatch.setattr(_rq, "post", fake_post)
     r = client.post("/api/v1/admin/gpu-fleet/deployments",
                     json={"offer_id": 404, "idempotency_key": "dep-404"})
     assert r.status_code == 409 and r.json()["error"]["code"] == "OFFER_UNAVAILABLE"
