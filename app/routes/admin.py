@@ -676,6 +676,70 @@ def admin_audit(
     )
 
 
+@router.get("/admin/gpu-fleet/queues")
+def gpu_fleet_queues(request: Request) -> JSONResponse:
+    """SMQM view: waiting jobs per model group (DB-authoritative), worker
+    loaded checkpoints, and Redis delivery-hint depths."""
+    from ..models import Job, Worker
+    from ..orchestration import as_utc
+
+    settings = request.app.state.settings
+    now = utcnow()
+    with request.app.state.db.session() as session:
+        rows = session.execute(
+            select(Job.request_json, Job.created_at).where(
+                Job.operation == "music.generate", Job.status == "queued"
+            )
+        ).all()
+        workers = list(
+            session.execute(
+                select(Worker).where(Worker.kind == "acestep").order_by(Worker.last_heartbeat.desc())
+            ).scalars()
+        )
+    by_model: dict[str, dict] = {}
+    for rjson, created in rows:
+        adm = (rjson or {}).get("_admission") or {}
+        fam = adm.get("family") or "turbo"
+        key = adm.get("execution_profile_id") or f"family:{fam}"
+        entry = by_model.setdefault(
+            key, {"model_group": key, "family": fam, "waiting": 0, "oldest_age_seconds": 0.0}
+        )
+        entry["waiting"] += 1
+        if created is not None:
+            age = (now - as_utc(created)).total_seconds()
+            entry["oldest_age_seconds"] = round(max(entry["oldest_age_seconds"], age), 1)
+    depths = None
+    try:
+        from ..queue import build_redis
+
+        r = build_redis(settings.redis_url)
+        try:
+            depths = {
+                "main": int(r.llen("oal:queue:ace-step-1.5")),
+                "burst": int(r.llen("oal:queue:ace-step-1.5:burst")),
+            }
+        finally:
+            r.close()
+    except Exception:
+        depths = None
+    return JSONResponse(
+        {
+            "models": sorted(by_model.values(), key=lambda m: -m["waiting"]),
+            "workers": [
+                {
+                    "id": w.id,
+                    "loaded_model": w.loaded_model,
+                    "drain": w.drain,
+                    "quarantined": w.unhealthy_until is not None and as_utc(w.unhealthy_until) > now,
+                    "last_heartbeat": w.last_heartbeat.isoformat() if w.last_heartbeat else None,
+                }
+                for w in workers
+            ],
+            "queue_depths": depths,
+        }
+    )
+
+
 @router.get("/admin/workers")
 def admin_workers(request: Request) -> JSONResponse:
     """All registered workers with derived status."""

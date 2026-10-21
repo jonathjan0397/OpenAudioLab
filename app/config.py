@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     heartbeat_interval_seconds: int = 10
     dispatcher_poll_seconds: float = 1.0
     worker_brpop_timeout_seconds: int = 5
+    # SMQM (GPU orchestration M1): model-aware selection window and fairness.
+    scheduler_peek_window: int = 20
+    model_batch_max_jobs: int = 4
+    model_batch_max_seconds: float = 600.0
+    max_model_queue_wait_seconds: float = 900.0
+    priority_aging_enabled: bool = True
     # Baseline-first tiering: the dispatcher fills the baseline queue up to this
     # many pending jobs before overflowing new jobs to the burst tier (Vast).
     # Keep in sync with the autoscaler's OAL_SCALE_JOBS_PER_NODE.

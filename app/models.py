@@ -168,6 +168,7 @@ class Worker(Base):
     vram_total_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
     unhealthy_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    loaded_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
     last_heartbeat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

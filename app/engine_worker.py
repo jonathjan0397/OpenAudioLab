@@ -26,6 +26,7 @@ from .engine_acestep import AceStepAdapter, EngineError, RequestsTransport, Subm
 from .models import Job, JobAttempt, Worker, utcnow
 from .orchestration import (
     append_event,
+    as_utc,
     claim_attempt,
     complete_attempt,
     fail_attempt,
@@ -223,6 +224,10 @@ class EngineWorker:
         self.engine_process = engine_process
         self._stop = False
         self._last_activity = time.monotonic()
+        # SMQM fairness batch (model affinity window)
+        self._batch_model: str | None = None
+        self._batch_jobs = 0
+        self._batch_started = 0.0
         self._caps_registered = False
 
     def register(self) -> None:
@@ -233,6 +238,7 @@ class EngineWorker:
                 worker = Worker(id=self.worker_id, kind="acestep")
                 session.add(worker)
             worker.last_heartbeat = utcnow()
+            worker.loaded_model = self._loaded_model()
             if telemetry is not None:
                 worker.gpu_util, worker.vram_used_mb, worker.vram_total_mb = telemetry
             session.commit()
@@ -467,6 +473,86 @@ class EngineWorker:
         self._drain_checked_at = now
         return self._drain_flag
 
+    def _telemetry_cached(self) -> tuple[int, int, int] | None:
+        now = time.monotonic()
+        if now - getattr(self, "_telemetry_at", 0.0) > 5.0:
+            self._telemetry_cache = _gpu_telemetry()
+            self._telemetry_at = now
+        return self._telemetry_cache
+
+    def _loaded_model(self) -> str | None:
+        if self.engine_process is not None and self.engine_process.is_running():
+            return self.engine_process.model
+        return None
+
+    def _note_batch(self, model: str) -> None:
+        if self._batch_model == model:
+            self._batch_jobs += 1
+        else:
+            self._batch_model = model
+            self._batch_jobs = 1
+            self._batch_started = time.monotonic()
+
+    def _select_candidate(self, cands: list[tuple], loaded: str | None) -> tuple | None:
+        """SMQM pick: prefer the loaded checkpoint's group; switch immediately
+        when it has no eligible work; leave the group when the batch window is
+        exhausted or another group has an aged job (fairness, never mid-job)."""
+        if not cands:
+            return None
+        same = [c for c in cands if loaded and c[2] == loaded]
+        other = [c for c in cands if not (loaded and c[2] == loaded)]
+        oldest = lambda lst: min(lst, key=lambda c: c[3])  # noqa: E731
+        if same and other:
+            st = self.settings
+            batch_expired = self._batch_model == loaded and (
+                self._batch_jobs >= st.model_batch_max_jobs
+                or (time.monotonic() - self._batch_started) >= st.model_batch_max_seconds
+            )
+            aged = st.priority_aging_enabled and any(
+                (utcnow() - as_utc(c[3])).total_seconds() >= st.max_model_queue_wait_seconds
+                for c in other
+            )
+            if not batch_expired and not aged:
+                return oldest(same)
+            return oldest(other)
+        return oldest(same or other)
+
+    def _peek_select(self) -> tuple[str | None, str | None]:
+        """Model-aware selection over the Redis head window. Returns
+        (job_id, source_queue) for a claimable job, or (None, None) to fall
+        back to blocking BRPOP (idle path keeps its efficiency)."""
+        w = self.settings.scheduler_peek_window
+        peeked: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for q in self.receive_queues:
+            for jid in self.queue.peek(q, w):
+                if jid not in seen:
+                    seen.add(jid)
+                    peeked.append((jid, q))
+        if not peeked:
+            return None, None
+        with self.db.session() as session:
+            rows = session.execute(
+                select(Job.id, Job.status, Job.next_retry_at, Job.created_at, Job.request_json)
+                .where(Job.id.in_([j for j, _ in peeked]))
+            ).all()
+        by_id = {r.id: r for r in rows}
+        now = utcnow()
+        cands: list[tuple] = []
+        for jid, q in peeked:
+            r = by_id.get(jid)
+            if r is None or r.status != "queued":
+                continue
+            if r.next_retry_at is not None and as_utc(r.next_retry_at) > now:
+                continue  # retry backoff not elapsed
+            rj = dict(r.request_json or {})
+            runnable, _why = self._can_run_profile(dict(rj.get("_admission") or {}))
+            if not runnable:
+                continue
+            cands.append((jid, q, self._target_engine_model(rj), as_utc(r.created_at)))
+        pick = self._select_candidate(cands, self._loaded_model())
+        return (pick[0], pick[1]) if pick else (None, None)
+
     def _can_run_profile(self, admission: dict) -> tuple[bool, str]:
         """R14: claim-time capability check. A worker that cannot run the job's
         profile must release it without burning the attempt budget (same path as
@@ -494,7 +580,7 @@ class EngineWorker:
             if prof is not None:
                 required_mb = prof.vram_required_mb
                 break
-        telemetry = _gpu_telemetry()
+        telemetry = self._telemetry_cached()
         if telemetry and required_mb:
             _util, _used, total_mb = telemetry
             # The worker is serialized: at claim time the engine is idle and its
@@ -584,7 +670,14 @@ class EngineWorker:
             self._touch_heartbeat()
             time.sleep(2)
             return False
-        job_id = self.queue.receive(self.receive_queues, self.settings.worker_brpop_timeout_seconds)
+        source_queue: str | None = None
+        try:
+            job_id, source_queue = self._peek_select()
+        except Exception:
+            log.warning("SMQM peek failed; falling back to BRPOP", exc_info=True)
+            job_id = None
+        if job_id is None:
+            job_id = self.queue.receive(self.receive_queues, self.settings.worker_brpop_timeout_seconds)
         if job_id is None:
             self.register()
             self._touch_heartbeat()
@@ -602,7 +695,11 @@ class EngineWorker:
         self._last_activity = time.monotonic()
         claim = claim_attempt(self.db, job_id, self.worker_id)
         if claim is None:
+            if source_queue:
+                self.queue.remove(source_queue, job_id)
             return True
+        if source_queue:
+            self.queue.remove(source_queue, job_id)
         claimed_job, attempt_id, lease_token = claim
         hb_thread, hb_stop = self._attempt_heartbeat_thread(attempt_id, lease_token)
         profile_path = None
@@ -611,6 +708,7 @@ class EngineWorker:
                 _claimed = get_job_by_id(session, claimed_job)
                 _req = dict(_claimed.request_json or {})
                 target_model = self._target_engine_model(_req)
+                self._note_batch(target_model)
                 runnable, why = self._can_run_profile(dict(_req.get("_admission") or {}))
             if not runnable:
                 log.info("job %s not runnable here (%s); requeueing without budget", job_id, why)
