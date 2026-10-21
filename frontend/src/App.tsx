@@ -17,6 +17,7 @@ import TrainingPage from "./pages/Training";
 import TrackPage from "./pages/Track";
 import StylesPage from "./pages/Styles";
 import PoliciesPage from "./pages/Policies";
+import FaqPage from "./pages/Faq";
 import RecoverPage from "./pages/Recover";
 import VerifyPage from "./pages/Verify";
 
@@ -61,6 +62,7 @@ export default function App() {
           <NavLink to="/artists">Artists</NavLink>
           <NavLink to="/studio">Studio</NavLink>
           <NavLink to="/pricing">Pricing</NavLink>
+          <NavLink to="/faq">Help</NavLink>
           {me.data?.user?.role === "admin" && <NavLink to="/admin">Admin</NavLink>}
         </nav>
         <span className="spacer" />
@@ -116,6 +118,7 @@ export default function App() {
         <Route path="/training" element={<TrainingPage />} />
         <Route path="/track/:assetId" element={<TrackPage />} />
         <Route path="/policies" element={<PoliciesPage />} />
+        <Route path="/faq" element={<FaqPage />} />
         <Route path="/verify" element={<VerifyPage />} />
         <Route path="/recover" element={<RecoverPage />} />
       </Routes>
@@ -124,6 +127,7 @@ export default function App() {
         <a className="link" href="/policies">Terms</a>
         <a className="link" href="/policies">Abuse Policy</a>
         <a className="link" href="/policies">Privacy</a>
+        <a className="link" href="/faq">Help / FAQ</a>
         <a className="link" href={site.data?.support_url || "/pricing"}>Support</a>
       </footer>
       <PlayerBar />
