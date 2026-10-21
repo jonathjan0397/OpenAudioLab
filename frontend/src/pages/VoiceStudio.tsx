@@ -38,7 +38,7 @@ interface VoiceStatus {
   dataset: { dataset_id: string; latest_version_number: number } | null;
   voice_profiles: { voice_profile_id: string; version_number: number; status: string; is_default: boolean }[];
   adapters: Adapter[];
-  analyses: { analysis_id: string; embedding_model: string; created_at: string }[];
+  analyses: { analysis_id: string; embedding_model: string; input_type: string; created_at: string }[];
   recent_jobs: { job_id: string; operation: string; status: string; stage: string | null; progress: number | null }[];
 }
 

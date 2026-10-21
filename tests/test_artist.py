@@ -8,7 +8,8 @@ from types import SimpleNamespace
 
 from sqlalchemy import select
 
-from app.models import Job, VoiceAdapter, VoiceProfile
+from app.models import Job, VoiceAdapter, VoiceProfile, VoiceRecording
+from app.separator import NullSeparator
 from app.training_worker import TrainingWorker
 from app.worker import generate_fixture_wav
 from conftest import TOKEN_A, TOKEN_B, auth
@@ -267,7 +268,38 @@ def test_analyze_worker_builds_voice_profile(client, orch) -> None:
     assert voice_profile.analysis_model == "mfcc-stats-v1"
     assert len(voice_profile.embeddings_json["recordings"]) == 2
     assert voice_profile.embeddings_json["centroid"]
+    assert voice_profile.embeddings_json["input_type"] == "vocal_stem"
     assert voice_profile.is_default is True
+    # Phase E: vocal stems are stored per recording with provenance.
+    with orch.db.session() as session:
+        recordings = list(session.execute(select(VoiceRecording)).scalars())
+    assert all(r.vocal_asset_id for r in recordings)
+    assert all(r.separation_json["separator"] == "fake-separator" for r in recordings)
+    # Phase F: identity summary is an explicit estimate, not a quality claim.
+    identity = voice_profile.identity_json
+    assert identity["input_type"] == "vocal_stem"
+    assert identity["genre_independence"]["estimate"] is not None
+    assert "proxy" in identity["genre_independence"]["basis"]
+
+
+def test_analyze_without_separator_falls_back_to_full_mix(client, orch) -> None:
+    profile = _profile(client)
+    profile_id = profile["profile_id"]
+    _library(client, profile_id, count=2)
+    _finalize(client, profile_id)
+    accepted = client.post(f"/api/v1/artist-profiles/{profile_id}/voice/analyze",
+                           headers=auth(TOKEN_A, **{"Idempotency-Key": "an1"}))
+    assert accepted.status_code == 202
+    orch.dispatcher.publish_once()
+    worker = _training_worker(orch)
+    worker.separator = NullSeparator()
+    worker.run_once()
+    with orch.db.session() as session:
+        voice_profile = session.execute(select(VoiceProfile)).scalar_one()
+        recordings = list(session.execute(select(VoiceRecording)).scalars())
+    assert voice_profile.embeddings_json["input_type"] == "full_mix"
+    assert voice_profile.identity_json["genre_independence"]["separator"].startswith("unavailable")
+    assert all(r.vocal_asset_id is None for r in recordings)
 
 
 def test_validate_worker_validates_adapter(client, orch) -> None:

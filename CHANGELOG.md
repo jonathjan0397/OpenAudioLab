@@ -26,6 +26,10 @@ owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_
 - **Frontend**: new Voice Studio page (`/voice`), create widget binds the workspace artist's
   default adapter when model-compatible, Training page lists voice jobs, Admin training/LoRA
   surfaces moved to job-id/adapter-id.
+- **Phases E/F**: `voice.analyze` separates vocal stems per recording when a worker separator
+  exists (stored as derived `training_stem` assets; `input_type: vocal_stem`, honest
+  `full_mix` fallback), and writes a genre-independence **estimate** (cross-recording
+  embedding consistency) into `voice_profile.identity_json`.
 
 ### My Tracks UX, workspaces, FAQ, and test-data cleanup (2026-10-21)
 - **Details** card now shows formatted generation info (model/engine/planner, task, duration,

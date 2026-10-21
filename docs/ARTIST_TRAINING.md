@@ -29,8 +29,17 @@ dropped in migration `0033_uais`; no customer data existed). Current truth:
   adapters and the compatibility matrix; the create widget binds the workspace artist's
   default adapter when it matches the selected model.
 
-Deferred phases: SVC/VIPE vocal separation (phase E) and genre-independent identity
-(phase F). The sections below are the original capability planning; where they mention
+Phases E/F (implemented 2026-10-21): `voice.analyze` now separates vocals per recording
+when the worker has a separator (Demucs adapter today; VIPE/SVC can replace it behind the
+same `Separator` interface) — the vocal stem is stored as a derived `training_stem` asset,
+recorded on the recording (`vocal_asset_id`, `separation_json`), and used as the embedding
+input (`input_type: vocal_stem`; honest `full_mix` fallback with reason when no separator
+is configured). Training itself still conditions on full mixes (ACE-Step distribution);
+separation serves identity analysis/validation, not a relabeled training input. The
+resulting `voice_profile.identity_json` carries a **genre-independence estimate**: mean
+cross-recording embedding consistency (different songs as a genre/style proxy) — an
+estimate with its basis recorded, never a quality score or a measured genre transform.
+The sections below are the original capability planning; where they mention
 `datasets`/`training_runs`/`evaluations` tables or `/activate`, UAIS supersedes them.
 
 ## Purpose and truthful capability reporting

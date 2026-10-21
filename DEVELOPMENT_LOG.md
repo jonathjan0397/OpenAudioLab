@@ -851,5 +851,26 @@ Decisions:
 Validation evidence: backend suite 284 passed (13 UAIS API tests in tests/test_artist.py;
 autoscale pool tests in tests/test_autoscale.py); frontend `tsc -b && vite build` clean and
 vitest 17 passed. Commits 56c188e (backend), f35498f (Vast worker), 2c32f23 (frontend+docs).
-Still open: real-GPU training run (first XL VRAM/time benchmark), SVC/VIPE phase E,
-genre-independence phase F, and owner review before merge.
+Still open: real-GPU training run (first XL VRAM/time benchmark) and owner review before
+merge.
+
+## 2026-10-21 — UAIS phases E+F (same branch)
+
+Decisions:
+1. **Phase E — separation inside `voice.analyze`.** No new job operation: the worker
+   separates vocals per recording through the existing `Separator` interface (Demucs
+   adapter; VIPE/SVC can replace it later), stores each stem as a derived
+   `training_stem` Asset, and records `vocal_asset_id` + `separation_json` on the
+   recording. Embeddings switch to `input_type: vocal_stem`; with no separator the run
+   stays `full_mix` and the reason is recorded (fail-open on availability, fail-closed
+   on silent relabeling). Training keeps conditioning on full mixes — separation serves
+   identity analysis/validation, not a rebranded training input.
+2. **Phase F — genre independence as an estimate.** `voice_profile.identity_json` gains
+   `genre_independence {estimate, basis, separator}` from mean/min cross-recording
+   embedding consistency (different songs = genre/style proxy). Explicitly an estimate
+   with recorded basis; not a quality score, not a measured genre transform.
+
+Validation evidence: tests/test_artist.py extended (vocal-stem provenance + identity
+summary assertions; new full-mix fallback test with NullSeparator) — 14 UAIS tests pass;
+full backend suite and frontend build re-run below. Commits follow on
+feat/uais-artist-voice.

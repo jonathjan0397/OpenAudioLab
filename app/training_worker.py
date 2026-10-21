@@ -38,6 +38,7 @@ from .models import (
     VoiceDataset,
     VoiceDatasetVersion,
     VoiceProfile,
+    VoiceRecording,
     Worker,
     WorkerCapability,
     new_uuid,
@@ -497,22 +498,60 @@ class TrainingWorker:
             assets = {m["recording_id"]: session.get(Asset, m["asset_id"]) for m in manifest}
 
         embeddings: dict[str, list[float]] = {}
+        input_types: dict[str, str] = {}
+        vocal_stems: dict[str, dict] = {}
+        separator_note: str | None = None
         for recording_id, asset in assets.items():
             if asset is None:
                 continue
             heartbeat(self.db, attempt_id, lease_token)
+            body = self._asset_bytes(asset)
+            stem_body: bytes | None = None
+            if separator_note is None:
+                try:
+                    stem_body = self.separator.separate(body)["vocals"]
+                except SeparatorUnavailable as exc:
+                    separator_note = str(exc)
+            source = stem_body if stem_body is not None else body
             with tempfile.TemporaryDirectory(prefix="oal-an-") as tmp:
                 path = Path(tmp) / "audio"
-                path.write_bytes(self._asset_bytes(asset))
+                path.write_bytes(source)
                 samples = decode_pcm16_mono(self.settings.ffmpeg_bin, path,
                                             self.settings.voice_max_recording_seconds)
             embeddings[recording_id] = embedding.embed_pcm16(samples)
+            input_types[recording_id] = "vocal_stem" if stem_body is not None else "full_mix"
+            if stem_body is not None:
+                key = f"owners/{owner_id}/voice/{dataset.id}/{recording_id}-vocals.wav"
+                sha256 = self.storage.put(key, stem_body)
+                vocal_stems[recording_id] = {"key": key, "sha256": sha256, "bytes": len(stem_body)}
         if not embeddings:
             raise EngineError("VOICE_NO_AUDIO", "No analyzable recordings in the dataset version.")
+        types = set(input_types.values())
+        input_type = types.pop() if len(types) == 1 else "mixed"
         vectors = list(embeddings.values())
         centroid = embedding.centroid(vectors)
         pairwise = [embedding.cosine(a, b) for i, a in enumerate(vectors) for b in vectors[i + 1:]]
         mean_pairwise = round(sum(pairwise) / len(pairwise), 4) if pairwise else None
+        min_pairwise = round(min(pairwise), 4) if pairwise else None
+        # Phase F: genre-independence is *estimated* from cross-recording
+        # embedding consistency (different songs, ideally different genres);
+        # it is not a measured genre-transform and not a quality score.
+        basis = ("cross-recording embedding consistency on separated vocal stems"
+                 if input_type == "vocal_stem"
+                 else "cross-recording embedding consistency on full mixes")
+        identity = {
+            "embedding_model": self.settings.voice_embedding_model,
+            "input_type": input_type,
+            "recordings": len(embeddings),
+            "mean_pairwise_similarity": mean_pairwise,
+            "min_pairwise_similarity": min_pairwise,
+            "genre_independence": {
+                "estimate": mean_pairwise,
+                "basis": basis + " (proxy, not a measured genre transform)",
+                "separator": self.separator.name if input_type == "vocal_stem" else
+                             f"unavailable ({separator_note})" if separator_note else "none",
+            },
+        }
 
         with self.db.session() as session:
             latest = session.execute(
@@ -534,19 +573,37 @@ class TrainingWorker:
                 profile = latest
             profile.embeddings_json = {
                 "model": self.settings.voice_embedding_model,
-                "input_type": "full_mix",
+                "input_type": input_type,
                 "recordings": embeddings,
                 "centroid": centroid,
             }
+            profile.identity_json = identity
             profile.analysis_model = self.settings.voice_embedding_model
             profile.status = "analyzed"
+            for recording_id, stem in vocal_stems.items():
+                recording = session.get(VoiceRecording, recording_id)
+                if recording is None:
+                    continue
+                stem_asset = Asset(
+                    id=new_uuid(), job_id=job_id, owner_id=owner_id, storage_key=stem["key"],
+                    role="training_stem", kind="derived", mime="audio/wav",
+                    bytes=stem["bytes"], sha256=stem["sha256"],
+                    title=f"{recording.filename} (vocal stem)", finalized_at=utcnow(),
+                )
+                session.add(stem_asset)
+                session.flush()
+                recording.vocal_asset_id = stem_asset.id
+                recording.separation_json = {"separator": self.separator.name,
+                                             "separated_at": utcnow().isoformat()}
             session.add(VoiceAnalysis(
                 id=new_uuid(), artist_profile_id=artist_id, owner_id=owner_id,
                 dataset_version_id=version.id, job_id=job_id,
                 embedding_model=self.settings.voice_embedding_model,
-                input_type="full_mix",
+                input_type=input_type,
                 result_json={"recordings": len(embeddings), "dim": embedding.DIM,
-                             "mean_pairwise_similarity": mean_pairwise},
+                             "mean_pairwise_similarity": mean_pairwise,
+                             "min_pairwise_similarity": min_pairwise,
+                             "separator": identity["genre_independence"]["separator"]},
             ))
             artist = session.get(ArtistProfile, artist_id)
             if artist is not None and artist.default_voice_profile_id is None:
