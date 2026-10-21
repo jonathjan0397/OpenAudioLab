@@ -38,6 +38,15 @@ interface Workspace {
   is_default: boolean;
   song_count: number;
   asset_count: number;
+  artist_profile_id?: string | null;
+  artist?: {
+    profile_id: string;
+    name: string;
+    applicable: boolean;
+    base_model_id: string | null;
+    active_version_id: string | null;
+    is_main?: boolean;
+  } | null;
 }
 interface WorkspaceSong {
   song_id: string;
@@ -59,6 +68,8 @@ interface ArtistRow {
   bio: string | null;
   sharing_policy: string;
   etag: string;
+  is_main: boolean;
+  active_version_id: string | null;
 }
 
 const SIDEBAR = [
@@ -230,6 +241,14 @@ export default function StudioPage() {
     onSuccess: () => {
       setWsRenaming(null);
       qc.invalidateQueries({ queryKey: ["workspaces"] });
+    },
+  });
+  const wsAttach = useMutation({
+    mutationFn: ({ id, profileId }: { id: string; profileId: string | null }) =>
+      api.patch(`/api/v1/workspaces/${id}/artist`, { artist_profile_id: profileId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["workspaces"] });
+      qc.invalidateQueries({ queryKey: ["workspaces-active"] });
     },
   });
   const wsRemove = useMutation({
@@ -773,6 +792,34 @@ export default function StudioPage() {
               </div>
               {wsActive && (
                 <div style={{ marginTop: 10 }}>
+                  {(() => {
+                    const cur = (workspaces.data?.workspaces || []).find((w) => w.workspace_id === wsActive);
+                    const profileList = artists.data || [];
+                    if (!cur) return null;
+                    return (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                        <span className="sub" style={{ fontSize: 12 }}>Artist for this space:</span>
+                        {profileList.length > 0 ? (
+                          <select
+                            value={cur.artist_profile_id || ""}
+                            disabled={wsAttach.isPending}
+                            onChange={(e) => wsAttach.mutate({ id: cur.workspace_id, profileId: e.target.value || null })}
+                          >
+                            <option value="">— none (no voice/style) —</option>
+                            {profileList.map((a) => (
+                              <option key={a.profile_id} value={a.profile_id}>
+                                {`${a.is_main ? "★ " : ""}${a.name}${a.active_version_id ? "" : "  (no trained version)"}`}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="sub" style={{ fontSize: 12 }}>Train an artist profile first, then attach it here.</span>
+                        )}
+                        {cur.artist?.applicable && <span className="pill ok">♪ applied to new songs (Standard model)</span>}
+                        {cur.artist && !cur.artist.applicable && <span className="pill warn">needs an active, trained version</span>}
+                      </div>
+                    );
+                  })()}
                   {(wsSongs.data?.songs || []).length === 0 && (
                     <p style={{ color: "var(--muted)", fontSize: 13 }}>No saved recipes here yet — use the “♪ space” move control on a track, or “+ Add” above.</p>
                   )}

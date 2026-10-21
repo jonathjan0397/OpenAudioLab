@@ -73,6 +73,11 @@ a { color: var(--accent); }
   border: 0; background: transparent; color: var(--text); font: inherit;
   max-width: 160px; cursor: pointer;
 }
+.ws-artist-note {
+  margin: 6px 0 0; font-size: 12px; color: var(--muted);
+}
+.ws-artist-note.on { color: var(--accent); }
+.ws-artist-note.off { color: var(--warn, #b45309); }
 .bell { position: relative; cursor: pointer; color: var(--muted); font-size: 17px; }
 .bell .dot {
   position: absolute; top: -2px; right: -3px; width: 8px; height: 8px;

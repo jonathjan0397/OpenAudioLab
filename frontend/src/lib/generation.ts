@@ -43,6 +43,10 @@ export interface GenerationDraft {
   // Active workspace: routes new generations into this collection. Left
   // undefined for guests / no selection so the backend files into the default.
   workspaceId?: string;
+  // Explicit artist (voice/style LoRA) selection — pre-filled from the active
+  // workspace's attached artist when model-compatible. Mutually exclusive with
+  // loraId; the backend validates compatibility and ownership.
+  artistProfileVersionId?: string;
 }
 
 // Default capability set for the deployed ACE-Step 1.5 Turbo release. Callers
@@ -161,6 +165,7 @@ export function buildGenerationRequest(
     body.lyrics_origin = d.lyricsProvided ? "human" : "frontend_llm";
   }
   if (d.loraId) body.lora_id = d.loraId;
+  if (!d.loraId && d.artistProfileVersionId) body.artist_profile_version_id = d.artistProfileVersionId;
   if (typeof d.seed === "number") body.seed = d.seed;
   if (d.taskType) body.task_type = d.taskType;
   if (d.srcAssetId) body.src_asset_id = d.srcAssetId;

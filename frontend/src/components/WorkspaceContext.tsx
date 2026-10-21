@@ -2,10 +2,24 @@ import { createContext, ReactNode, useCallback, useContext } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, AuthUser } from "../api";
 
+export interface WorkspaceArtist {
+  profile_id: string;
+  name: string;
+  slug: string | null;
+  is_main: boolean;
+  sharing_policy: string;
+  active_version_id: string | null;
+  base_model_id: string | null;
+  version_state: string | null;
+  applicable: boolean;
+}
+
 export interface WorkspaceRow {
   workspace_id: string;
   name: string;
   is_default: boolean;
+  artist_profile_id?: string | null;
+  artist?: WorkspaceArtist | null;
   song_count?: number;
   asset_count?: number;
 }
@@ -19,6 +33,8 @@ interface WorkspaceValue {
   activeId: string | null;
   isDefault: boolean;
   workspaces: WorkspaceRow[];
+  activeWorkspace: WorkspaceRow | null;
+  activeArtist: WorkspaceArtist | null;
   setActive: (id: string | null) => void;
 }
 
@@ -26,6 +42,8 @@ const WorkspaceCtx = createContext<WorkspaceValue>({
   activeId: null,
   isDefault: true,
   workspaces: [],
+  activeWorkspace: null,
+  activeArtist: null,
   setActive: () => {},
 });
 
@@ -65,12 +83,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [loggedIn, qc]
   );
 
+  const workspaces = spaces.data?.workspaces ?? [];
+  const activeId = loggedIn ? active.data?.workspace_id ?? null : null;
+  const activeWorkspace = workspaces.find((w) => w.workspace_id === activeId) ?? null;
+
   return (
     <WorkspaceCtx.Provider
       value={{
-        activeId: loggedIn ? active.data?.workspace_id ?? null : null,
+        activeId,
         isDefault: active.data?.is_default ?? true,
-        workspaces: spaces.data?.workspaces ?? [],
+        workspaces,
+        activeWorkspace,
+        activeArtist: activeWorkspace?.artist ?? null,
         setActive,
       }}
     >

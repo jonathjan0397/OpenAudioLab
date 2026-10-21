@@ -99,7 +99,7 @@ export default function CreateWidget({
 }) {
   const player = usePlayer();
   const qc = useQueryClient();
-  const { activeId } = useWorkspace();
+  const { activeId, activeArtist } = useWorkspace();
   const me = useQuery({
     queryKey: ["me"],
     queryFn: () => api.get<{ user: AuthUser }>("/api/v1/auth/me"),
@@ -158,6 +158,13 @@ export default function CreateWidget({
   const [mood, setMood] = useState(String(saved.mood || ""));
   const [gender, setGender] = useState(String(saved.gender || ""));
   const [loraId, setLoraId] = useState(String(saved.loraId || ""));
+
+  const wsArtistCompatible =
+    !isGuest && !premiumSelected && !loraId &&
+    !!activeArtist && activeArtist.applicable && activeArtist.base_model_id === "ace-step-1.5";
+  const workspaceArtistVersion = wsArtistCompatible ? activeArtist!.active_version_id || undefined : undefined;
+  const wsArtistBlocked =
+    !isGuest && !!activeArtist && !wsArtistCompatible && (!!loraId || premiumSelected || !activeArtist.applicable);
   const [bpm, setBpm] = useState(String(saved.bpm || ""));
   const [keyScale, setKeyScale] = useState(String(saved.keyScale || ""));
   const [timeSignature, setTimeSignature] = useState(String(saved.timeSignature || ""));
@@ -337,6 +344,7 @@ export default function CreateWidget({
           executionProfileId: premiumSelected ? selectedProfile!.execution_profile_id : undefined,
           seed: mode === "remix" ? Math.floor(Math.random() * 1_000_000_000) : undefined,
           workspaceId: isGuest ? undefined : activeId || undefined,
+          artistProfileVersionId: workspaceArtistVersion,
         },
         { supportedControls: caps.data?.supported_controls, controlRanges: selectedProfile?.control_ranges },
       );
@@ -601,6 +609,13 @@ export default function CreateWidget({
               <button type="button" className="chip chip-shuffle" title="Shuffle tags" onClick={() => setChipSeed(Math.floor(Math.random() * 1e9))}>♻</button>
             </div>
           </div>
+          {(wsArtistCompatible || wsArtistBlocked) && (
+            <div className={`ws-artist-note${wsArtistCompatible ? " on" : " off"}`}>
+              {wsArtistCompatible
+                ? `♪ ${activeArtist!.name} — this workspace's artist will be applied`
+                : `${activeArtist!.name} — artist not applied (needs the Standard model and an active, trained version)`}
+            </div>
+          )}
           <div className="create-bottom-row">
             <button type="button" className="more-toggle" onClick={() => setMoreOpen((o) => !o)}>More controls {moreOpen ? "▴" : "▾"}</button>
             <span className="spacer" />

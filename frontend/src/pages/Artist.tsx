@@ -23,6 +23,8 @@ interface Profile {
   avatar_key?: string | null;
   sharing_policy: string;
   etag: string;
+  is_main: boolean;
+  active_version_id: string | null;
 }
 interface ProfileSong {
   song_id: string;
@@ -95,6 +97,11 @@ export default function ArtistPage() {
   const patch = useMutation({
     mutationFn: ({ id, etag, body }: { id: string; etag: string; body: Record<string, unknown> }) =>
       api.patch(`/api/v1/artist-profiles/${id}`, body, { "If-Match": etag }),
+    onSuccess: invalidateProfiles,
+    onError: (e: Error) => setError(e.message),
+  });
+  const setMain = useMutation({
+    mutationFn: (id: string) => api.post<Profile>(`/api/v1/artist-profiles/${id}/set-main`, {}),
     onSuccess: invalidateProfiles,
     onError: (e: Error) => setError(e.message),
   });
@@ -187,15 +194,20 @@ export default function ArtistPage() {
             </button>
             {error && <span className="pill err">{error}</span>}
           </div>
-          {(profiles.data || []).map((p) => (
+          {[...(profiles.data || [])].sort((a, b) => (b.is_main ? 1 : 0) - (a.is_main ? 1 : 0)).map((p) => (
             <div key={p.profile_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid color-mix(in srgb, var(--border) 40%, transparent)" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="title" style={{ fontSize: 14 }}>{p.name}</div>
-                <div className="sub" style={{ fontSize: 12 }}>/{p.slug} · {p.sharing_policy}{p.bio ? ` · ${p.bio.slice(0, 48)}` : ""}</div>
+                <div className="title" style={{ fontSize: 14 }}>{p.is_main && <span title="Main profile" style={{ color: "var(--accent)" }}>★ </span>}{p.name}{p.is_main && <span className="sub" style={{ fontWeight: 400 }}> · Main</span>}{!p.is_main && <span className="sub" style={{ fontWeight: 400 }}> · sub-artist</span>}</div>
+                <div className="sub" style={{ fontSize: 12 }}>/{p.slug} · {p.sharing_policy}{p.active_version_id ? "" : " · no trained version"}{p.bio ? ` · ${p.bio.slice(0, 48)}` : ""}</div>
               </div>
               <button className="btn" onClick={() => setSelected(selected === p.profile_id ? null : p.profile_id)}>
                 {selected === p.profile_id ? "Hide songs" : "Songs"}
               </button>
+              {!p.is_main && (
+                <button className="btn btn-ghost" title="Make this the Main profile" disabled={setMain.isPending} onClick={() => setMain.mutate(p.profile_id)}>
+                  Set main
+                </button>
+              )}
               <button className="btn" onClick={() => patch.mutate({ id: p.profile_id, etag: p.etag, body: { sharing: p.sharing_policy === "public" ? "private" : "public" } })}>
                 {p.sharing_policy === "public" ? "Make private" : "Make public"}
               </button>
