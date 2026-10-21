@@ -99,6 +99,23 @@ def test_worker_purge_stale(client) -> None:
     assert remaining == {"w-new"}
 
 
+def test_maintenance_tick_purges_stale_workers(client) -> None:
+    """The maintenance loop (600 s tick on the hub) self-cleans stale workers."""
+    from app.maintenance import purge_stale_workers
+
+    _seed_admin(client, "m11-mt@example.com")
+
+    now = utcnow()
+    with client.app.state.db.session() as session:
+        session.add(Worker(id="w-mt-old", kind="acestep", last_heartbeat=now - timedelta(hours=25)))
+        session.add(Worker(id="w-mt-null", kind="acestep"))  # heartbeat defaults to now
+        session.add(Worker(id="w-mt-new", kind="acestep", last_heartbeat=now))
+        session.commit()
+    assert purge_stale_workers(client.app.state.db) == 1
+    remaining = {w["id"] for w in client.get("/api/v1/admin/workers").json()["workers"]}
+    assert remaining == {"w-mt-new", "w-mt-null"}
+
+
 def test_job_detail_with_events(client) -> None:
     from conftest import submit
 

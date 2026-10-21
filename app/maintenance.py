@@ -14,9 +14,35 @@ from sqlalchemy import and_, or_, select
 
 from .config import Settings, get_settings
 from .db import Db
-from .models import Asset, Job, utcnow
+from .models import Asset, Job, Worker, utcnow
 from .orchestration import get_job_by_id
 from .storage import Storage, build_storage, delete_asset_blobs
+
+STALE_WORKER_HOURS = 24
+
+
+def purge_stale_workers(db: Db, now=None) -> int:
+    """Delete worker rows whose last heartbeat is older than 24 hours (or null).
+
+    Runs on every maintenance tick (the hub schedules the loop at 600 s, so the
+    admin GPU Workers page self-cleans every 10 minutes without a manual click).
+    """
+    from datetime import timedelta
+
+    now = now or utcnow()
+    cutoff = now - timedelta(hours=STALE_WORKER_HOURS)
+    with db.session() as session:
+        rows = list(
+            session.execute(
+                select(Worker).where(
+                    or_(Worker.last_heartbeat.is_(None), Worker.last_heartbeat < cutoff)
+                )
+            ).scalars()
+        )
+        for worker in rows:
+            session.delete(worker)
+        session.commit()
+    return len(rows)
 
 
 def expire_once(db: Db, storage: Storage, now=None) -> int:
@@ -81,6 +107,9 @@ def main() -> None:
         count = expire_once(db, storage)
         if count:
             print(f"expired {count} asset(s)")
+        purged = purge_stale_workers(db)
+        if purged:
+            print(f"purged {purged} stale worker(s)")
         if args.once:
             break
         time.sleep(args.interval)

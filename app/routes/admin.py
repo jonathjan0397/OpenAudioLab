@@ -1277,26 +1277,14 @@ def admin_worker_drain(worker_id: str, request: Request) -> JSONResponse:
 
 @router.delete("/admin/workers/stale")
 def admin_workers_purge(request: Request) -> JSONResponse:
-    """Remove workers whose last heartbeat is older than 24 hours."""
-    from datetime import timedelta
+    """Remove workers whose last heartbeat is older than 24 hours.
 
-    from sqlalchemy import or_
+    The maintenance loop runs the same purge every tick (10 minutes on the
+    hub), so the GPU Workers page self-cleans; this endpoint is the manual
+    override."""
+    from ..maintenance import purge_stale_workers
 
-    from ..models import Worker
-
-    cutoff = utcnow() - timedelta(hours=24)
-    with request.app.state.db.session() as session:
-        rows = list(
-            session.execute(
-                select(Worker).where(
-                    or_(Worker.last_heartbeat.is_(None), Worker.last_heartbeat < cutoff)
-                )
-            ).scalars()
-        )
-        for worker in rows:
-            session.delete(worker)
-        session.commit()
-    return JSONResponse({"purged": len(rows)})
+    return JSONResponse({"purged": purge_stale_workers(request.app.state.db)})
 
 
 @router.get("/admin/jobs/{job_id}")
