@@ -7,6 +7,28 @@ owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_
 
 ## [Unreleased]
 
+### Generation quality: 5Hz-LM planner for premium, LoRA compatibility, XL int8, drafting LLM to CPU (2026-10-21)
+- **Root-caused "SFT/XL garbled, only turbo usable."** Premium (SFT/XL) audio was a noise-wash
+  because the **5 Hz lyric-LM planner was disabled** (`ACESTEP_INIT_LLM=false` + global
+  `thinking=false`) — the DiT had no duration-locked audio-code blueprint (engine issue #929) —
+  compounded by `shift=1.0`. Now enabled **per-job for premium** (`use_cot` + `lm_model_path`
+  through `build_payload`; `use_format=false` keeps user lyrics verbatim). Non-turbo **shift
+  → 3.0**, + **`use_adg`**, steps/CFG as set. Verified: SFT 240 s spectral-flatness 0.33→0.17,
+  envelope-CV 0.19→0.43.
+- **XL "crash" was a LoRA/architecture mismatch, not OOM.** The mood/auto-LoRA (2 B base
+  `ace-step-1.5`) was force-applied to the 4 B XL DiT → PeftModel `state_dict` error →
+  MAX_ATTEMPTS. Added `_lora_compatible` (skip cross-family LoRAs, keep style tags, render
+  anyway) + non-fatal `load_lora` guard. Turbo/SFT (bf16) keep their compatible LoRAs.
+- **XL memory:** even with the 1.7 B planner, bf16 XL-SFT 120 s OOMs on 24 GB, so int8 is
+  now **gated to XL only** (`config_path` contains `xl`) in the baked worker patch — turbo/SFT
+  stay bf16 (their 2 B LoRAs load). XL-SFT 120 s then renders (peak ~20 GB vs 24 GB cap).
+- **Drafting LLM moved to its own CPU worker.** Qwen3-4B llama now runs as a separate CPU
+  container (`oal-llm`, `--n-gpu-layers 0`) on ai-server01, freeing the GPU worker for
+  DiT+planner. The hub VM was rejected after a speed test (15–20 s style / 120 s lyrics ≈
+  timeout); ai-server01's 32-core Threadripper does style in ~1.4–2 s.
+- Kept the earlier worker fixes: heartbeat-across-setup + attempt-heartbeat leak stop +
+  resolved-controls forwarding. Vast premium nodes get the same planner/int8/pt env.
+
 ### Vast remote workers: int8 image + XL/SFT premium capability (2026-10-20)
 - Published the int8 worker images to Docker Hub (`house-v1-070-int8`, and a lighter
   `ca1e85f-torch2.10-cu128-wg-int8` overlay), backing up the previously local-only artifact.

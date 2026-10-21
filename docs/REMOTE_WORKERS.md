@@ -45,14 +45,26 @@ is a lighter `ca1e85f-torch2.10-cu128-wg` overlay for a hypothetical turbo-only 
 does **not** need the House model.
 
 `autoscale.py::worker_env` gives engine nodes the premium/XL env (gated by
-`OAL_VAST_PREMIUM`, default on): `ACESTEP_QUANTIZATION=int8_weight_only`,
+`OAL_VAST_PREMIUM`, default on): `ACESTEP_INIT_LLM=true`, `ACESTEP_LM_BACKEND=pt`,
+`ACESTEP_LM_MODEL_PATH=acestep-5Hz-lm-1.7B` (the 5 Hz lyric-LM **planner** — required for
+coherent vocal/long audio), `ACESTEP_QUANTIZATION=int8_weight_only` (the baked patch applies
+it **only to XL** checkpoints; turbo/SFT stay bf16 so their 2 B LoRAs load),
 `ACESTEP_OFFLOAD_TO_CPU=1`, `OAL_PREMIUM_PROFILES_ENABLED`, and the
 `OAL_XL_CHECKPOINT_ID`/`OAL_XL_TURBO_CHECKPOINT_ID` ids. Nodes are already ≥24 GB
 (`pick_offer` min_vram), profiles self-gate on `vram_required_mb`, and XL/SFT checkpoints
 download from HuggingFace on the first premium job (Vast cannot bind-mount them), so
-`OAL_VAST_DISK` is sized generously (160). Validated: a launched RTX 3090 (24576 MB)
-pulled `house-v1-070-int8`, booted the int8 engine, fetched the app bundle, and registered
-as a live worker before teardown.
+`OAL_VAST_DISK` is sized generously (160).
+
+**Drafting LLM (Qwen3-4B) placement:** it runs as its **own CPU-only container**
+(`oal-llm`, `--n-gpu-layers 0`) on the worker host (ai-server01), NOT on the GPU worker
+(frees the card for DiT+planner) and NOT on the hub VM (a speed test showed the hub is a
+~2010 Xeon, load ~16: style ~15-20 s, lyrics ~120 s/timeout; ai-server01's 32-core
+Threadripper does style in ~1.4-2 s). `run_house_workers.sh` starts the container; the
+backend's `site_settings.llm_base_url` (+ `OAL_PRIMARY_LLM_BASE_URL`) points at
+`http://10.203.0.2:8082/v1`.
+
+Validated: a launched RTX 3090 (24576 MB) pulled `house-v1-070-int8`, booted the int8
+engine, fetched the app bundle, and registered as a live worker before teardown.
 
 ## Code bundle (container-initiated over the tunnel)
 

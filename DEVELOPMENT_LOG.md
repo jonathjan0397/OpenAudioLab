@@ -792,3 +792,38 @@ operator-approved exact checkpoint/revision/license.
  - **Secrets hygiene:** the Docker Hub PAT and (incidentally) the ssh push key /
    secret-key were surfaced in-session; **rotate the `stratastack` PAT** and treat the
    push key as exposed.
+
+ ## 2026-10-21 — premium audio root-caused: the disabled 5 Hz lyric-LM (not int8/LLM)
+
+ The earlier "only turbo is usable; SFT garbled; XL crashes" was NOT the int8/llama/memory
+ thread I first chased. Listening-driven root cause, per checkpoint:
+
+ 1. **SFT/XL noise-wash = missing planner.** OAL runs with `ACESTEP_INIT_LLM=false` +
+    global `thinking=false` → the 5 Hz audio-code "blueprint" never ran; the DiT had only
+    text conditioning. The engine's own comment (`padding_utils.py:78`, issue #929) says
+    exactly this yields garbage, worse with duration. My `shift=1.0` (from the "training
+    uses 1.0" note) compounded it — serving wants **shift 3.0** + ADG (per INFERENCE.md
+    best-quality). Fix: per-job `use_cot`+`lm_model_path` for premium (`build_payload`),
+    shift→3.0, `use_adg`, verbatim lyrics kept (`use_format=false`; `inference.py:833`
+    restores user lyrics). Verified: SFT 240 s flat 0.33→0.17, envCV 0.19→0.43 — clean.
+ 2. **XL "crash" was a LoRA mismatch, not OOM.** The mood→auto-LoRA (2 B base
+    `ace-step-1.5`) was force-loaded onto the 4 B XL DiT → `PeftModel` state_dict error →
+    MAX_ATTEMPTS. Fixed with `_lora_compatible` (skip cross-family adapters, keep style
+    tags, render anyway) + non-fatal `load_lora`. XL peak was ~20 GB — never a memory issue.
+ 3. **XL planner genuinely needs the VRAM → int8 only for XL.** bf16 XL-SFT + 1.7 B planner
+    OOMs at 120 s (~24 GB), so the baked int8 patch is gated to `config_path` containing
+    `xl`; turbo/SFT stay bf16 (their compatible LoRAs load). XL-SFT 120 s then succeeds
+    (peak ~20 GB). Also: the "int8 byte-identical" I saw earlier was Pass B running with
+    `ACESTEP_COMPILE_MODEL=1` — quantize-after-compile FQNs are `_orig_mod.decoder…` so the
+    `"decoder"` filter no-ops; with compile OFF int8 truly applies.
+ 4. **Drafting LLM to its own CPU worker.** Moved Qwen3-4B llama-server off the GPU card
+    to a separate CPU container (`oal-llm`, `--n-gpu-layers 0`) on ai-server01. Chose
+    ai-server01 over the hub after a real speed test: hub is a 2010 Xeon VM, load 16,
+    drafts ~15-20 s style / 120 s (timeout); ai-server01 (32-core Threadripper) does style
+    in ~1.4-2 s. Backend `llm_base_url` repointed to `http://10.203.0.2:8082/v1`.
+
+ Worker: init_lm=true, LM backend pt + 1.7 B, int8 (XL-gated), offload; premium/Vast get
+ the same. Commits d4e1acc/a1df04f/d8fcd1a/a755ced; 256 tests. Still open: the two users'
+ failed XL jobs can now be retried (LoRA skipped + int8 XL); and the earlier XL int8 note
+ in gpu_config/docs says compile "required for quantization" which is the opposite of what
+ actually happens (compile breaks it) — flagged, not yet corrected upstream-side.
