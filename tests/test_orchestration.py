@@ -273,3 +273,138 @@ def test_dispatcher_routes_overflow_to_burst(client, orch) -> None:
     assert orch.dispatcher.publish_once(reserve=2) == 5
     assert orch.queue.depth("oal:queue:ace-step-1.5") == 2
     assert orch.queue.depth("oal:queue:ace-step-1.5:burst") == 3
+
+
+# --- recovery policy (docs/REMEDIATION_PLAN.md R1-R4) --------------------------
+
+
+def _usr_job(client, key: str) -> tuple[str, dict]:
+    """Submit as a credit-bearing ``usr_`` owner; return (job_id, auth headers)."""
+    from app.auth import token_sha256
+    from app.models import ApiKey, User
+
+    raw = "usr-" + key
+    token = "Bearer " + raw
+    with client.app.state.db.session() as session:
+        user = User(id=None, email=f"{key}@e.io", username=key, password_hash="x",
+                    role="user", state="active", plan="free", credits_balance=1000)
+        session.add(user)
+        session.flush()
+        session.add(ApiKey(owner_id="usr_" + user.id, name="t",
+                           key_sha256=token_sha256(raw), key_prefix=raw[:8]))
+        session.commit()
+    response = submit(client, token=token, key=key)
+    assert response.status_code == 202
+    return response.json()["job_id"], auth(token)
+
+
+def test_transient_failure_retries_with_backoff(client, orch) -> None:
+    from app.orchestration import fail_attempt
+
+    job_id = _job_id(client)
+    orch.dispatcher.publish_once()
+    _, attempt_id, token = claim_attempt(orch.db, job_id, "test-fixture")
+    assert fail_attempt(orch.db, orch.settings, job_id, attempt_id, token,
+                        "ENGINE_TIMEOUT", "upstream timeout") == "requeued"
+    with orch.db.session() as session:
+        job = session.execute(select(Job).where(Job.id == job_id)).scalar_one()
+        assert job.status == "queued"
+        assert job.attempt_number == 2
+        assert job.next_retry_at is not None
+    assert orch.dispatcher.publish_once() == 0  # backoff not elapsed
+    with orch.db.session() as session:
+        job = session.execute(select(Job).where(Job.id == job_id)).scalar_one()
+        job.next_retry_at = utcnow() - timedelta(seconds=1)
+        session.commit()
+    assert orch.dispatcher.publish_once() == 1
+    orch.worker.run_once()
+    assert _status(orch.db, job_id) == "succeeded"
+
+
+def test_permanent_failure_is_terminal_and_refunds(client, orch) -> None:
+    from app.models import CreditEntry
+    from app.orchestration import fail_attempt
+
+    job_id, _ = _usr_job(client, "perm-1")
+    orch.dispatcher.publish_once()
+    _, attempt_id, token = claim_attempt(orch.db, job_id, "test-fixture")
+    assert fail_attempt(orch.db, orch.settings, job_id, attempt_id, token,
+                        "ENGINE_GENERATION_FAILED", "bad params") == "failed"
+    assert _status(orch.db, job_id) == "failed"
+    with orch.db.session() as session:
+        entries = list(session.execute(
+            select(CreditEntry).where(CreditEntry.job_id == job_id)
+        ).scalars())
+    assert sorted(e.reason for e in entries) == ["generation", "generation-refund"]
+    assert sum(e.delta for e in entries) == 0
+
+
+def test_retry_recharges_and_refund_pairs_per_charge(client, orch) -> None:
+    from app.models import CreditEntry
+    from app.orchestration import fail_attempt
+
+    job_id, headers = _usr_job(client, "pair-1")
+    orch.dispatcher.publish_once()
+    _, attempt_id, token = claim_attempt(orch.db, job_id, "test-fixture")
+    fail_attempt(orch.db, orch.settings, job_id, attempt_id, token,
+                 "ENGINE_GENERATION_FAILED", "x")
+    response = client.post(f"/api/v1/jobs/{job_id}/retry", headers=headers)
+    assert response.status_code == 200
+    with orch.db.session() as session:
+        entries = list(session.execute(
+            select(CreditEntry).where(CreditEntry.job_id == job_id)
+        ).scalars())
+    assert sorted(e.reason for e in entries) == ["generation", "generation", "generation-refund"]
+    orch.dispatcher.publish_once()
+    _, attempt_id2, token2 = claim_attempt(orch.db, job_id, "test-fixture")
+    fail_attempt(orch.db, orch.settings, job_id, attempt_id2, token2,
+                 "ENGINE_GENERATION_FAILED", "x")
+    with orch.db.session() as session:
+        entries = list(session.execute(
+            select(CreditEntry).where(CreditEntry.job_id == job_id)
+        ).scalars())
+    assert sum(e.delta for e in entries) == 0
+
+
+def test_retry_budget_exhaustion_refunds(client, orch) -> None:
+    from app.models import CreditEntry
+    from app.orchestration import fail_attempt
+
+    job_id, _ = _usr_job(client, "budg-1")
+    orch.dispatcher.publish_once()
+    _, attempt_id, token = claim_attempt(orch.db, job_id, "test-fixture")
+    assert fail_attempt(orch.db, orch.settings, job_id, attempt_id, token,
+                        "ENGINE_TIMEOUT", "t") == "requeued"
+    with orch.db.session() as session:
+        job = session.execute(select(Job).where(Job.id == job_id)).scalar_one()
+        job.next_retry_at = utcnow() - timedelta(seconds=1)
+        session.commit()
+    orch.dispatcher.publish_once()
+    _, attempt_id2, token2 = claim_attempt(orch.db, job_id, "test-fixture")
+    two = orch.settings.model_copy(update={"max_attempts": 2})
+    assert fail_attempt(orch.db, two, job_id, attempt_id2, token2,
+                        "ENGINE_TIMEOUT", "t") == "failed"
+    assert _status(orch.db, job_id) == "failed"
+    with orch.db.session() as session:
+        entries = list(session.execute(
+            select(CreditEntry).where(CreditEntry.job_id == job_id)
+        ).scalars())
+    assert sum(e.delta for e in entries) == 0
+
+
+def test_stranded_queued_job_is_republished(client, orch) -> None:
+    from app.queue import RedisQueue
+
+    job_id = _job_id(client)
+    orch.dispatcher.publish_once()
+    # Simulate BRPOP message loss: the message leaves Redis, no claim follows.
+    orch.queue.receive([RedisQueue.queue_name("ace-step-1.5")], 1)
+    with orch.db.session() as session:
+        job = session.execute(select(Job).where(Job.id == job_id)).scalar_one()
+        job.updated_at = utcnow() - timedelta(seconds=orch.settings.dispatcher_stranded_grace_seconds + 5)
+        session.commit()
+    assert orch.dispatcher.republish_stranded_once() == 1
+    assert orch.dispatcher.publish_once() == 1
+    assert orch.queue.depth("oal:queue:ace-step-1.5") == 1
+    orch.worker.run_once()
+    assert _status(orch.db, job_id) == "succeeded"

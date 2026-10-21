@@ -22,8 +22,8 @@ from sqlalchemy import select
 
 from .config import Settings, get_settings
 from .db import Db
-from .engine_acestep import AceStepAdapter, EngineError, RequestsTransport
-from .models import Job, Worker, utcnow
+from .engine_acestep import AceStepAdapter, EngineError, RequestsTransport, SubmitResult
+from .models import Job, JobAttempt, Worker, utcnow
 from .orchestration import (
     append_event,
     claim_attempt,
@@ -33,6 +33,7 @@ from .orchestration import (
     heartbeat,
     is_cancelling,
     set_job_stage,
+    set_upstream_task,
 )
 from .queue import RedisQueue, build_redis
 from .storage import Storage, build_storage
@@ -633,6 +634,14 @@ class EngineWorker:
                                  message="Style adapter failed to load; rendering without it.")
                     profile_path = None
 
+            recovered = self._recover_upstream(claimed_job)
+            if recovered is not None:
+                submit, recovered_results = recovered
+                if recovered_results is not None:
+                    set_job_stage(self.db, claimed_job, "collecting recovered result")
+                    return self._finalize_generation(claimed_job, attempt_id, lease_token, submit, payload, recovered_results)
+                set_job_stage(self.db, claimed_job, "generating audio")
+                return self._run_generation(claimed_job, attempt_id, lease_token, submit, payload)
             try:
                 submit = self.adapter.submit(payload)
             except EngineError as exc:
@@ -643,6 +652,7 @@ class EngineWorker:
                     self._mark_unhealthy(exc.code, exc.message)
                 fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token, exc.code, exc.message)
                 return True
+            set_upstream_task(self.db, attempt_id, lease_token, submit.task_id)
 
             set_job_stage(self.db, claimed_job, "generating audio")
             return self._run_generation(claimed_job, attempt_id, lease_token, submit, payload)
@@ -657,6 +667,38 @@ class EngineWorker:
                     self.adapter.unload_lora()
                 except EngineError:
                     log.warning("failed to unload profile adapter after job %s", claimed_job)
+
+    def _recover_upstream(self, job_id: str) -> tuple[SubmitResult, list | None] | None:
+        """Reuse a previous attempt's upstream task instead of paying twice.
+
+        Returns (submit, results) when the finished output can be recovered,
+        (submit, None) to resume polling the same task, or None to submit new.
+        The engine is co-located, so recovery only succeeds while the same
+        engine process still knows the task; otherwise we submit fresh.
+        """
+        with self.db.session() as session:
+            job = get_job_by_id(session, job_id)
+            prior = session.execute(
+                select(JobAttempt.upstream_task_id)
+                .where(
+                    JobAttempt.job_id == job_id,
+                    JobAttempt.upstream_task_id.is_not(None),
+                    JobAttempt.attempt_number < job.attempt_number,
+                )
+                .order_by(JobAttempt.attempt_number.desc())
+                .limit(1)
+            ).scalars().first()
+        if not prior:
+            return None
+        try:
+            state, result = self.adapter.poll(prior)
+        except EngineError:
+            return None
+        if state == "succeeded" and result:
+            return SubmitResult(task_id=prior), result
+        if state == "pending":
+            return SubmitResult(task_id=prior), None
+        return None
 
     def _run_generation(
         self, claimed_job: str, attempt_id: str, lease_token: str, submit, payload: dict
@@ -701,7 +743,11 @@ class EngineWorker:
                 return True
             time.sleep(poll_interval)
 
-        results = result or []
+        return self._finalize_generation(claimed_job, attempt_id, lease_token, submit, payload, result or [])
+
+    def _finalize_generation(
+        self, claimed_job: str, attempt_id: str, lease_token: str, submit, payload: dict, results: list
+    ) -> bool:
         file_urls = [r.get("file") for r in results if r.get("file")]
         if not file_urls:
             fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token, "ENGINE_NO_AUDIO", "Upstream returned no audio file.")

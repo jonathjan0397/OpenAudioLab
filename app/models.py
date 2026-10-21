@@ -58,6 +58,7 @@ class Job(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     assets_expired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (Index("ix_jobs_owner_seq", "owner_id", "seq"),)
@@ -88,6 +89,7 @@ class JobAttempt(Base):
     lease_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="running")
     error_code: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    upstream_task_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     engine_version: Mapped[str | None] = mapped_column(String(120), nullable=True)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

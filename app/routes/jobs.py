@@ -816,6 +816,31 @@ def retry_job(
                 requested_takes(job.request_json.get("controls")),
                 request.app.state.settings,
             )
+        if owner_id.startswith("usr_") and job.operation in GENERATION_OPERATIONS:
+            # Terminal failures refund the original debit, so an explicit
+            # retry must re-charge it (idempotent per charged attempt).
+            from ..models import CreditEntry, User
+
+            charge = session.execute(
+                select(CreditEntry)
+                .where(CreditEntry.job_id == job.id, CreditEntry.reason == "generation")
+                .order_by(CreditEntry.id)
+                .limit(1)
+            ).scalars().first()
+            cost = -charge.delta if charge is not None else 0
+            if cost > 0:
+                user = session.get(User, owner_id[4:])
+                if user is None:
+                    raise ApiError(401, "USER_NOT_FOUND", "Account not found for session owner.")
+                if user.credits_balance < cost:
+                    raise ApiError(
+                        402,
+                        "INSUFFICIENT_CREDITS",
+                        "Not enough credits to retry this generation.",
+                        {"cost": cost, "balance": user.credits_balance},
+                    )
+                user.credits_balance -= cost
+                session.add(CreditEntry(owner_id=owner_id, delta=-cost, reason="generation", job_id=job.id))
         enqueue(session, job, request.app.state.settings)
         append_event(session, job.id, "requeued", "queued", message="Explicit retry.")
         session.commit()

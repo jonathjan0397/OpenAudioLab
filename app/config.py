@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     # many pending jobs before overflowing new jobs to the burst tier (Vast).
     # Keep in sync with the autoscaler's OAL_SCALE_JOBS_PER_NODE.
     dispatcher_baseline_reserve: int = 20
+    dispatcher_stranded_grace_seconds: float = 120.0
     # Worker queue tier: "baseline" consumes [main, burst] (the always-on dev
     # worker); "burst" consumes [burst] only (ephemeral Vast nodes, overflow).
     worker_tier: str = "baseline"
