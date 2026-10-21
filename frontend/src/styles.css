@@ -139,6 +139,7 @@ textarea { resize: vertical; }
 .card {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow);
+  overflow-wrap: break-word; overflow-x: auto;
 }
 .card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .card-header h2, .card-header h3 { margin: 0; }
@@ -208,13 +209,13 @@ textarea { resize: vertical; }
 .waveform canvas { width: 100%; height: 100%; display: block; }
 
 /* ---------- track rows ---------- */
-.track-row { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.track-row { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border); min-width: 0; flex-wrap: wrap; }
 .track-row:last-child { border-bottom: 0; }
-.track-row .meta { min-width: 0; width: 220px; flex: none; }
+.track-row .meta { min-width: 0; max-width: 220px; flex: 0 1 220px; }
 .track-row .meta .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.track-row .meta .sub { font-size: 12px; color: var(--muted); }
-.track-row .wave { flex: 1; min-width: 80px; }
-.track-row .actions { display: flex; gap: 8px; align-items: center; flex: none; }
+.track-row .meta .sub { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.track-row .wave { flex: 1 1 80px; min-width: 80px; }
+.track-row .actions { display: flex; gap: 8px; align-items: center; flex: 0 1 auto; min-width: 0; flex-wrap: wrap; }
 .heart { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 16px; padding: 4px; }
 .heart.on { color: var(--accent); }
 
@@ -302,7 +303,7 @@ textarea { resize: vertical; }
 }
 .table td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .table tr:last-child td { border-bottom: 0; }
-.mono { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); }
+.mono { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
 
 @media (max-width: 900px) {
   .dash { grid-template-columns: 1fr; }

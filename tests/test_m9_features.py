@@ -77,6 +77,12 @@ def test_export_artifact(client) -> None:
     response = client.post(f"/api/v1/artifacts/{asset_id}/export", json={"format": "stems"})
     assert response.status_code == 202  # M13: stems now queue a real export job
     assert response.json()["format"] == "stems"
+    stems_job_id = response.json()["job_id"]
+    with client.app.state.db.session() as session:
+        from app.models import Job
+
+        _sjob = session.execute(select(Job).where(Job.id == stems_job_id)).scalar_one()
+        assert _sjob.request_json["outputs"] == ["stems_wav", "stems_zip"]
 
     response = client.post(f"/api/v1/artifacts/{asset_id}/export", json={"format": "mp3"})
     assert response.status_code == 202

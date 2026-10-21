@@ -11,7 +11,7 @@ from datetime import timedelta
 import secrets
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import Field
 from sqlalchemy import func, select
 
@@ -134,7 +134,7 @@ def export_artifact(
         )
         session.add(version)
         session.flush()
-        outputs = ["mix_mp3"] if payload.format == "mp3" else ["stems_wav"]
+        outputs = ["mix_mp3"] if payload.format == "mp3" else ["stems_wav", "stems_zip"]
         request_json = {
             "source_version_id": version.id,
             "outputs": outputs,
@@ -453,4 +453,57 @@ def artifact_stems(asset_id: str, request: Request, owner_id: str = Depends(owne
                     "url": f"/api/v1/artifacts/{stem.id}/content?token={token}",
                 }
             )
-    return JSONResponse({"asset_id": asset_id, "stems": items})
+        zip_asset = session.execute(
+            select(Asset)
+            .where(Asset.source_asset_id == asset_id, Asset.role == "stems_zip", Asset.deleted_at.is_(None))
+            .order_by(Asset.created_at.desc())
+            .limit(1)
+        ).scalars().first()
+        zip_info: dict | None = None
+        if zip_asset is not None:
+            ztok = make_token(settings.secret_key, zip_asset.id, now + timedelta(hours=24))
+            zip_info = {"asset_id": zip_asset.id, "bytes": zip_asset.bytes,
+                        "url": f"/api/v1/artifacts/{zip_asset.id}/content?token={ztok}"}
+        elif items:
+            zip_info = {"asset_id": None, "url": f"/api/v1/artifacts/{asset_id}/stems/zip"}
+    return JSONResponse({"asset_id": asset_id, "stems": items, "zip": zip_info})
+
+
+@router.get("/artifacts/{asset_id}/stems/zip")
+def artifact_stems_zip(asset_id: str, request: Request, owner_id: str = Depends(owner_from_request)) -> Response:
+    """Single ZIP of a source asset's stems. Prefers a stored ``stems_zip`` asset and
+    otherwise assembles one on the fly (covers tracks separated before auto-zip)."""
+    from urllib.parse import quote
+
+    from ..audio_processing import build_stems_zip
+
+    storage = request.app.state.storage
+    with request.app.state.db.session() as session:
+        source = session.get(Asset, asset_id)
+        if source is None or source.deleted_at is not None:
+            raise ApiError(404, "NOT_FOUND", "Asset not found.")
+        if source.owner_id != owner_id:
+            raise ApiError(403, "FORBIDDEN", "Not your asset.")
+        zip_asset = session.execute(
+            select(Asset)
+            .where(Asset.source_asset_id == asset_id, Asset.role == "stems_zip", Asset.deleted_at.is_(None))
+            .order_by(Asset.created_at.desc())
+            .limit(1)
+        ).scalars().first()
+        stems = list(
+            session.execute(
+                select(Asset)
+                .where(Asset.source_asset_id == asset_id, Asset.stem_category.isnot(None), Asset.deleted_at.is_(None))
+                .order_by(Asset.stem_category)
+            ).scalars()
+        )
+    if zip_asset is not None:
+        body = storage.get(zip_asset.storage_key).body
+    elif stems:
+        bundle = {s.stem_category: storage.get(s.storage_key).body for s in stems}
+        body = build_stems_zip(bundle, {"source_asset_id": asset_id, "title": source.title, "stems": sorted(bundle)})
+    else:
+        raise ApiError(404, "NO_STEMS", "No separated stems for this asset.")
+    filename = quote(f"stems-{(source.title or asset_id)[:60]}.zip")
+    return Response(content=body, media_type="application/zip",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"})

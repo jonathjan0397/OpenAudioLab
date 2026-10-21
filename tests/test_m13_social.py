@@ -186,4 +186,6 @@ def test_stems_listing(client) -> None:
     response = client.get(f"/api/v1/artifacts/{asset_id}/stems")
     assert response.status_code == 200
     assert response.json()["stems"] == []
+    assert response.json()["zip"] is None  # no zip when no stems
+    assert client.get(f"/api/v1/artifacts/{asset_id}/stems/zip").status_code == 404  # nothing to zip
     assert client.get("/api/v1/artifacts/nonexistent/stems").status_code == 404

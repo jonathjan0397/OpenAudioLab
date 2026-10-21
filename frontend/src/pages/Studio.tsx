@@ -70,6 +70,42 @@ function tokenOf(url: string): string | undefined {
   return url.split("token=")[1];
 }
 
+// Turn a raw generation manifest into labelled rows for the Details card.
+const CONTROL_LABELS: Record<string, string> = {
+  bpm: "BPM", key_scale: "Key", time_signature: "Time signature", vocal_language: "Language",
+  mood: "Mood", gender: "Vocal", inference_steps: "Steps", guidance_scale: "Guidance",
+  shift: "Shift", use_adg: "Adaptive guidance",
+};
+function formatDetails(m: Record<string, any> | undefined): [string, string][] {
+  if (!m) return [];
+  const r = m.requested || {}, e = m.effective || {}, c = r.controls || {};
+  const s = (v: unknown) => (v == null || v === "" ? undefined : String(v));
+  const rows: ([string, string | undefined] | undefined)[] = [
+    ["Model", s(r.model_selection || r.model_id)],
+    ["Profile", s(r.execution_profile_id)],
+    ["Engine", s(r.engine_model || e.engine_version)],
+    r.planner_model ? ["Planner", s(r.planner_model)] : undefined,
+    r.model_revision ? ["Revision", s(r.model_revision)] : undefined,
+    ["Task", s(r.task_type || "text2music")],
+    r.duration_seconds != null ? ["Duration", `${r.duration_seconds} s`] : undefined,
+    r.instrumental != null ? ["Instrumental", r.instrumental ? "yes" : "no"] : undefined,
+    e.seed != null || r.seed != null ? ["Seed", s(e.seed ?? r.seed)] : undefined,
+    r.lyrics_sha256 ? ["Lyrics", `${s(r.lyrics_origin) || "provided"} · ${r.lyrics_sha256.slice(0, 10)}`] : undefined,
+    ["Description", s(r.music_description)],
+    s(r.song_idea) ? ["Song idea", s(r.song_idea)] : undefined,
+    s(r.style_prompt) ? ["Style", s(r.style_prompt)] : undefined,
+    ...Object.entries(c).map(([k, v]) => [CONTROL_LABELS[k] || k, s(v)] as [string, string | undefined]),
+    s(r.src_asset_id) ? ["Source track", s(r.src_asset_id!.slice(0, 8)) + "…"] : undefined,
+    s(r.reference_asset_id) ? ["Reference", s(r.reference_asset_id!.slice(0, 8)) + "…"] : undefined,
+    r.audio_cover_strength != null ? ["Cover strength", s(r.audio_cover_strength)] : undefined,
+    r.cover_noise_strength != null ? ["Cover noise", s(r.cover_noise_strength)] : undefined,
+    r.repaint_mode ? ["Repaint", `${s(r.repaint_mode)}${r.repaint_strength != null ? ` @ ${r.repaint_strength}` : ""}`] : undefined,
+    s(r.lora_id) ? ["LoRA", s(r.lora_id!.slice(0, 8)) + "…"] : undefined,
+    m.created_at ? ["Created", String(m.created_at).slice(0, 19).replace("T", " ")] : undefined,
+  ];
+  return rows.filter((x): x is [string, string] => !!x && !!x[1] && x[1] !== "");
+}
+
 export default function StudioPage() {
   const qc = useQueryClient();
   const player = usePlayer();
@@ -109,7 +145,9 @@ export default function StudioPage() {
   const [newArtistName, setNewArtistName] = useState("");
   const [wsActive, setWsActive] = useState<string | null>(null);
   const [wsNewName, setWsNewName] = useState("");
-  const stemsQuery = useQuery<{ asset_id: string; stems: { category: string | null; asset_id: string; url: string }[] }>({
+  const [showIndivStems, setShowIndivStems] = useState(false);
+  const [copiedRaw, setCopiedRaw] = useState(false);
+  const stemsQuery = useQuery<{ asset_id: string; stems: { category: string | null; asset_id: string; url: string }[]; zip: { asset_id: string | null; url: string; bytes?: number } | null }>({
     queryKey: ["stems", stemsFor],
     queryFn: () => api.get(`/api/v1/artifacts/${stemsFor}/stems`),
     enabled: !!stemsFor,
@@ -597,47 +635,56 @@ export default function StudioPage() {
                      )}
                    </div>
                  )}
-                 {stemsFor === t.asset_id && (
-                  <div className="card" style={{ padding: "10px 14px", margin: "-6px 0 10px", background: "color-mix(in srgb, var(--surface) 70%, transparent)" }}>
-                    {(stemsQuery.isLoading || stemsQuery.isFetching) && <span style={{ color: "var(--muted)", fontSize: 12 }}>Loading stems…</span>}
-                    {stemsQuery.data && stemsQuery.data.stems.length === 0 && (
-                      <span style={{ display: "inline-flex", gap: 10, alignItems: "center", fontSize: 12, color: "var(--muted)" }}>
-                        No stems yet.
-                        <button className="btn" onClick={() => exportArtifact(t.asset_id, "stems")}>Separate now (Demucs)</button>
-                      </span>
-                    )}
-                    {stemsQuery.data && stemsQuery.data.stems.length > 0 && (
-                      <span style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12 }}>
-                        {stemsQuery.data.stems.map((s) => (
-                          <a key={s.asset_id} className="btn" href={s.url} download style={{ fontSize: 12 }}>
-                            ↓ {s.category}
-                          </a>
-                        ))}
-                      </span>
-                    )}
-                  </div>
-                )}
-                {detailsFor === t.asset_id && (
-                  <div className="card" style={{ padding: "10px 14px", margin: "-6px 0 10px", background: "color-mix(in srgb, var(--surface) 70%, transparent)" }}>
-                    {(manifestQuery.isLoading || manifestQuery.isFetching) && <span style={{ color: "var(--muted)", fontSize: 12 }}>Loading generation details…</span>}
-                    {manifestQuery.data && (
-                      <div style={{ display: "grid", gap: 8, fontSize: 12 }}>
-                        <div className="sub">
-                          seed {manifestQuery.data.manifest?.effective?.seed ?? "unknown"} ·
-                          engine {manifestQuery.data.manifest?.effective?.engine_version ?? "unknown"} ·
-                          lyrics {manifestQuery.data.manifest?.requested?.lyrics_sha256?.slice(0, 12) ?? "none"}
-                        </div>
-                        <pre className="mono" style={{ margin: 0, whiteSpace: "pre-wrap", color: "var(--muted)" }}>
-                          {JSON.stringify(manifestQuery.data.manifest?.requested?.controls || {}, null, 2)}
-                        </pre>
-                        <div>
-                          <button className="btn" onClick={() => reuseFromManifest(manifestQuery.data.manifest)}>Reuse recipe</button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
+                  {stemsFor === t.asset_id && (
+                   <div className="card" style={{ padding: "10px 14px", margin: "-6px 0 10px", background: "color-mix(in srgb, var(--surface) 70%, transparent)", minWidth: 0 }}>
+                     {(stemsQuery.isLoading || stemsQuery.isFetching) && <span style={{ color: "var(--muted)", fontSize: 12 }}>Loading stems…</span>}
+                     {stemsQuery.data && stemsQuery.data.stems.length === 0 && (
+                       <span style={{ display: "inline-flex", gap: 10, alignItems: "center", fontSize: 12, color: "var(--muted)" }}>
+                         No stems yet.
+                         <button className="btn" onClick={() => exportArtifact(t.asset_id, "stems")}>Separate now (Demucs)</button>
+                       </span>
+                     )}
+                     {stemsQuery.data && stemsQuery.data.stems.length > 0 && (
+                       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", fontSize: 12, minWidth: 0 }}>
+                         {stemsQuery.data.zip && (
+                           <a className="btn btn-primary" href={stemsQuery.data.zip.url} download style={{ fontSize: 12 }}>↓ All stems (.zip)</a>
+                         )}
+                         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setShowIndivStems((v) => !v)}>
+                           {showIndivStems ? "hide individual" : "show individual"}
+                         </button>
+                         {showIndivStems && stemsQuery.data.stems.map((s) => (
+                           <a key={s.asset_id} className="btn" href={s.url} download style={{ fontSize: 12 }}>↓ {s.category}</a>
+                         ))}
+                       </div>
+                     )}
+                   </div>
+                 )}
+                 {detailsFor === t.asset_id && (
+                   <div className="card" style={{ padding: "10px 14px", margin: "-6px 0 10px", background: "color-mix(in srgb, var(--surface) 70%, transparent)", minWidth: 0 }}>
+                     {(manifestQuery.isLoading || manifestQuery.isFetching) && <span style={{ color: "var(--muted)", fontSize: 12 }}>Loading generation details…</span>}
+                     {manifestQuery.data && (
+                       <div style={{ minWidth: 0 }}>
+                         <dl style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "4px 14px", margin: "0 0 10px", fontSize: 12 }}>
+                           {formatDetails(manifestQuery.data.manifest).map(([k, v]) => (
+                             <div key={k} style={{ display: "contents" }}>
+                               <dt style={{ color: "var(--muted)", whiteSpace: "nowrap" }}>{k}</dt>
+                               <dd style={{ margin: 0, color: "var(--text, inherit)", overflowWrap: "anywhere" }}>{v}</dd>
+                             </div>
+                           ))}
+                         </dl>
+                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                           <button className="btn" onClick={() => reuseFromManifest(manifestQuery.data.manifest)}>Reuse recipe</button>
+                           <button className="btn btn-ghost" onClick={() => {
+                             navigator.clipboard?.writeText(JSON.stringify(manifestQuery.data.manifest, null, 2)).then(() => {
+                               setCopiedRaw(true); setTimeout(() => setCopiedRaw(false), 1500);
+                             });
+                           }}>{copiedRaw ? "Copied ✓" : "Copy raw"}</button>
+                         </div>
+                       </div>
+                     )}
+                    </div>
+                  )}
+                </>
               ))}
             </div>
 
