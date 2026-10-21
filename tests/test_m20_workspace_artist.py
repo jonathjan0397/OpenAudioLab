@@ -50,9 +50,9 @@ def test_workspace_artist_attach_and_listing(client) -> None:
     ws = next(w for w in client.get(WS).json()["workspaces"] if w["workspace_id"] == wid)
     assert ws["artist"]["profile_id"] == prof["profile_id"]
     assert ws["artist"]["name"] == "Composer"
-    # no active version yet => not applicable, no base model
+    # no trained adapter yet => not applicable, no default adapter
     assert ws["artist"]["applicable"] is False
-    assert ws["artist"]["base_model_id"] is None
+    assert ws["artist"]["default_adapter_id"] is None
 
     # detach
     assert client.patch(f"{WS}/{wid}/artist", json={"artist_profile_id": None}).json()["artist_profile_id"] is None

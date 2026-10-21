@@ -57,6 +57,7 @@ services:
         condition: service_healthy
 
   api:
+    restart: unless-stopped
     build: .
     profiles: ["core"]
     ports:
@@ -79,6 +80,9 @@ services:
         condition: service_completed_successfully
 
   dispatcher:
+    healthcheck:
+      disable: true
+    restart: unless-stopped
     build: .
     profiles: ["core"]
     command: python -m app.dispatcher
@@ -95,6 +99,9 @@ services:
         condition: service_completed_successfully
 
   maintenance:
+    healthcheck:
+      disable: true
+    restart: unless-stopped
     build: .
     profiles: ["core"]
     command: python -m app.maintenance --interval 600
@@ -112,6 +119,9 @@ services:
   # Opt-in deterministic WAV fixture worker (synthetic test audio, never real
   # engine output). Enable with: docker compose --profile core --profile test up
   fixture-worker:
+    healthcheck:
+      disable: true
+    restart: unless-stopped
     build: .
     profiles: ["test"]
     command: python -m app.worker
@@ -131,6 +141,7 @@ services:
   # Image build is the deployment deliverable; host-venv runtime is what was
   # benchmarked in milestone 3 (see docs/MILESTONE_3.md).
   acestep-server:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile.acestep
@@ -150,6 +161,9 @@ services:
               capabilities: [gpu]
 
   engine-worker:
+    healthcheck:
+      disable: true
+    restart: unless-stopped
     build: .
     profiles: ["ace"]
     command: python -m app.engine_worker
@@ -172,6 +186,9 @@ services:
   # needs a separator runtime in this container (OAL_DEMUCS_PYTHON); without
   # it, stem exports fail closed with SEPARATOR_UNAVAILABLE.
   audio-worker:
+    healthcheck:
+      disable: true
+    restart: unless-stopped
     build: .
     profiles: ["ace"]
     command: python -m app.audio_worker
@@ -192,6 +209,9 @@ services:
   # artifacts (same-host deployment; remote training workers are a later
   # deployment concern).
   training-worker:
+    healthcheck:
+      disable: true
+    restart: unless-stopped
     build: .
     profiles: ["ace"]
     command: python -m app.training_worker

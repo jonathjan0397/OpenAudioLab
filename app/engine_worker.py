@@ -22,8 +22,8 @@ from sqlalchemy import select
 
 from .config import Settings, get_settings
 from .db import Db
-from .engine_acestep import AceStepAdapter, EngineError, RequestsTransport
-from .models import Job, Worker, utcnow
+from .engine_acestep import AceStepAdapter, EngineError, RequestsTransport, SubmitResult
+from .models import Job, JobAttempt, Worker, utcnow
 from .orchestration import (
     append_event,
     claim_attempt,
@@ -33,6 +33,7 @@ from .orchestration import (
     heartbeat,
     is_cancelling,
     set_job_stage,
+    set_upstream_task,
 )
 from .queue import RedisQueue, build_redis
 from .storage import Storage, build_storage
@@ -256,6 +257,7 @@ class EngineWorker:
                 session.commit()
         except Exception:
             log.exception("could not mark worker %s unhealthy", self.worker_id)
+        self._unhealthy_gate = time.time() + cooldown
 
     def _touch_heartbeat(self) -> None:
         path = self.settings.worker_heartbeat_file
@@ -302,7 +304,7 @@ class EngineWorker:
         """
         import json
 
-        for model_id in (self.settings.train_queue_model_id, self.settings.evaluate_queue_model_id):
+        for model_id in (self.settings.train_queue_model_id,):
             try:
                 if self.queue.length(RedisQueue.queue_name(model_id)) > 0:
                     return True
@@ -311,12 +313,15 @@ class EngineWorker:
         try:
             from sqlalchemy import select
 
-            from .models import TrainingRun
+            from .models import Job
 
             with self.db.session() as session:
                 row = session.execute(
-                    select(TrainingRun.id)
-                    .where(TrainingRun.status.in_(("queued", "running")))
+                    select(Job.id)
+                    .where(
+                        Job.operation.in_(("voice.analyze", "voice.train", "voice.validate")),
+                        Job.status.in_(("queued", "waiting_for_worker", "running")),
+                    )
                     .limit(1)
                 ).first()
             if row is not None:
@@ -462,6 +467,40 @@ class EngineWorker:
         self._drain_checked_at = now
         return self._drain_flag
 
+    def _can_run_profile(self, admission: dict) -> tuple[bool, str]:
+        """R14: claim-time capability check. A worker that cannot run the job's
+        profile must release it without burning the attempt budget (same path as
+        ENGINE_BUSY) instead of failing/requeue-looping after an engine swap."""
+        from pathlib import Path as _Path
+
+        from . import catalog as _catalog
+
+        profile_id = admission.get("execution_profile_id")
+        family = admission.get("family")
+        if not profile_id or family == "turbo":
+            return True, ""
+        allow = {s.strip() for s in (self.settings.premium_profiles_enabled or "").split(",") if s.strip()}
+        if profile_id not in allow:
+            return False, "profile not enabled on this worker"
+        engine_model = admission.get("engine_model")
+        if not engine_model:
+            return False, "no engine model for profile"
+        ckpt_root = _Path(self.settings.acestep_checkpoints_dir)
+        if not (ckpt_root / engine_model).is_dir():
+            return False, f"checkpoint {engine_model} not installed"
+        required_mb = 0
+        for release in _catalog.CATALOG.values():
+            prof = release.profile(profile_id)
+            if prof is not None:
+                required_mb = prof.vram_required_mb
+                break
+        telemetry = _gpu_telemetry()
+        if telemetry and required_mb:
+            _util, used_mb, total_mb = telemetry
+            if total_mb and (total_mb - used_mb) < required_mb:
+                return False, f"free VRAM {total_mb - used_mb} MB < required {required_mb} MB"
+        return True, ""
+
     def _target_engine_model(self, request_json: dict) -> str:
         """Engine checkpoint this job needs. Turbo uses the worker's configured
         default (preserving the live baseline model); premium uses its release."""
@@ -533,6 +572,13 @@ class EngineWorker:
             self._touch_heartbeat()
             time.sleep(2)
             return False
+        if time.time() < getattr(self, "_unhealthy_gate", 0.0):
+            # Quarantine (R5): an OOM/failed-start worker must not keep
+            # claiming ordinary jobs during its cooldown window.
+            self.register()
+            self._touch_heartbeat()
+            time.sleep(2)
+            return False
         job_id = self.queue.receive(self.receive_queues, self.settings.worker_brpop_timeout_seconds)
         if job_id is None:
             self.register()
@@ -558,7 +604,14 @@ class EngineWorker:
         try:
             with self.db.session() as session:
                 _claimed = get_job_by_id(session, claimed_job)
-                target_model = self._target_engine_model(dict(_claimed.request_json or {}))
+                _req = dict(_claimed.request_json or {})
+                target_model = self._target_engine_model(_req)
+                runnable, why = self._can_run_profile(dict(_req.get("_admission") or {}))
+            if not runnable:
+                log.info("job %s not runnable here (%s); requeueing without budget", job_id, why)
+                self._requeue(claimed_job, attempt_id, lease_token, reason="Profile not runnable here")
+                time.sleep(1)
+                return True
             # Start/swap the engine to the job's model AFTER claiming, so only the
             # requested checkpoint is ever resident (serialized GPU ownership).
             if self.engine_process is not None:
@@ -576,13 +629,16 @@ class EngineWorker:
                 job = get_job_by_id(session, claimed_job)
                 payload = self._payload_for(job)
                 profile_artifacts: dict | None = None
-                profile_version_id = dict(job.request_json).get("artist_profile_version_id")
-                if profile_version_id:
-                    from .models import ArtistProfileVersion
+                voice = dict(job.request_json or {}).get("_voice") or {}
+                if voice.get("voice_method") == "native" and voice.get("adapter_id"):
+                    from .models import VoiceAdapter
 
-                    version = session.get(ArtistProfileVersion, profile_version_id)
-                    if version is not None:
-                        profile_artifacts = dict(version.artifacts_json or {})
+                    adapter_row = session.get(VoiceAdapter, voice["adapter_id"])
+                    if adapter_row is not None and adapter_row.storage_prefix and adapter_row.files_json:
+                        profile_artifacts = {
+                            "adapter_object_prefix": adapter_row.storage_prefix,
+                            "adapter_files": list(adapter_row.files_json),
+                        }
                 lora_artifacts: dict | None = None
                 lora_id = dict(job.request_json).get("lora_id")
                 if lora_id:
@@ -627,6 +683,14 @@ class EngineWorker:
                                  message="Style adapter failed to load; rendering without it.")
                     profile_path = None
 
+            recovered = self._recover_upstream(claimed_job)
+            if recovered is not None:
+                submit, recovered_results = recovered
+                if recovered_results is not None:
+                    set_job_stage(self.db, claimed_job, "collecting recovered result")
+                    return self._finalize_generation(claimed_job, attempt_id, lease_token, submit, payload, recovered_results)
+                set_job_stage(self.db, claimed_job, "generating audio")
+                return self._run_generation(claimed_job, attempt_id, lease_token, submit, payload)
             try:
                 submit = self.adapter.submit(payload)
             except EngineError as exc:
@@ -637,6 +701,7 @@ class EngineWorker:
                     self._mark_unhealthy(exc.code, exc.message)
                 fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token, exc.code, exc.message)
                 return True
+            set_upstream_task(self.db, attempt_id, lease_token, submit.task_id)
 
             set_job_stage(self.db, claimed_job, "generating audio")
             return self._run_generation(claimed_job, attempt_id, lease_token, submit, payload)
@@ -651,6 +716,48 @@ class EngineWorker:
                     self.adapter.unload_lora()
                 except EngineError:
                     log.warning("failed to unload profile adapter after job %s", claimed_job)
+
+    def _restart_engine_after_stall(self) -> None:
+        """Escalation L3 (R7): recycle a hung/timed-out engine so the next
+        attempt starts from a clean GPU state; the process starts lazily."""
+        if self.engine_process is None:
+            return
+        try:
+            self.engine_process.stop()
+        except Exception:
+            log.exception("engine stop after stall failed")
+
+    def _recover_upstream(self, job_id: str) -> tuple[SubmitResult, list | None] | None:
+        """Reuse a previous attempt's upstream task instead of paying twice.
+
+        Returns (submit, results) when the finished output can be recovered,
+        (submit, None) to resume polling the same task, or None to submit new.
+        The engine is co-located, so recovery only succeeds while the same
+        engine process still knows the task; otherwise we submit fresh.
+        """
+        with self.db.session() as session:
+            job = get_job_by_id(session, job_id)
+            prior = session.execute(
+                select(JobAttempt.upstream_task_id)
+                .where(
+                    JobAttempt.job_id == job_id,
+                    JobAttempt.upstream_task_id.is_not(None),
+                    JobAttempt.attempt_number < job.attempt_number,
+                )
+                .order_by(JobAttempt.attempt_number.desc())
+                .limit(1)
+            ).scalars().first()
+        if not prior:
+            return None
+        try:
+            state, result = self.adapter.poll(prior)
+        except EngineError:
+            return None
+        if state == "succeeded" and result:
+            return SubmitResult(task_id=prior), result
+        if state == "pending":
+            return SubmitResult(task_id=prior), None
+        return None
 
     def _run_generation(
         self, claimed_job: str, attempt_id: str, lease_token: str, submit, payload: dict
@@ -692,10 +799,15 @@ class EngineWorker:
                     self.db, self.settings, claimed_job, attempt_id, lease_token,
                     "ENGINE_TIMEOUT", "Upstream generation exceeded the timeout.",
                 )
+                self._restart_engine_after_stall()
                 return True
             time.sleep(poll_interval)
 
-        results = result or []
+        return self._finalize_generation(claimed_job, attempt_id, lease_token, submit, payload, result or [])
+
+    def _finalize_generation(
+        self, claimed_job: str, attempt_id: str, lease_token: str, submit, payload: dict, results: list
+    ) -> bool:
         file_urls = [r.get("file") for r in results if r.get("file")]
         if not file_urls:
             fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token, "ENGINE_NO_AUDIO", "Upstream returned no audio file.")
@@ -728,8 +840,8 @@ class EngineWorker:
         )
         return True
 
-    def _requeue(self, job_id: str, attempt_id: str, lease_token: str) -> None:
-        """Engine busy: release the attempt and requeue without burning budget."""
+    def _requeue(self, job_id: str, attempt_id: str, lease_token: str, reason: str = "Engine busy") -> None:
+        """Release the attempt and requeue without burning budget (busy or R14 hop)."""
         from sqlalchemy import delete, select as sa_select, update
 
         from .models import JobAttempt, OutboxRecord
@@ -751,7 +863,7 @@ class EngineWorker:
                 job.status = "queued"
                 job.stage = None
                 session.add(OutboxRecord(job_id=job.id, queue=self.queue_name))
-                append_event(session, job.id, "deferred", "queued", message="Engine busy; requeued.", attempt_id=attempt_id)
+                append_event(session, job.id, "deferred", "queued", message=f"{reason}; requeued.", attempt_id=attempt_id)
             session.commit()
 
     def run_forever(self) -> None:

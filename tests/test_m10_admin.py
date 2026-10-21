@@ -23,7 +23,7 @@ def test_admin_services(client) -> None:
     response = client.get("/api/v1/admin/services")
     assert response.status_code == 200
     services = response.json()["services"]
-    assert [s["operation"] for s in services] == ["music.generate", "audio.export", "artist.train"]
+    assert [s["operation"] for s in services] == ["music.generate", "audio.export", "voice.train"]
     assert all(s["status"] in ("healthy", "busy") for s in services)
 
 

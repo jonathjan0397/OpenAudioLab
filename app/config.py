@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     # many pending jobs before overflowing new jobs to the burst tier (Vast).
     # Keep in sync with the autoscaler's OAL_SCALE_JOBS_PER_NODE.
     dispatcher_baseline_reserve: int = 20
+    dispatcher_stranded_grace_seconds: float = 120.0
     # Worker queue tier: "baseline" consumes [main, burst] (the always-on dev
     # worker); "burst" consumes [burst] only (ephemeral Vast nodes, overflow).
     worker_tier: str = "baseline"
@@ -133,15 +134,22 @@ class Settings(BaseSettings):
     demucs_device: str = "cpu"
     separator_timeout_seconds: float = 900.0
 
-    # Milestone 5: artist training
+    # UAIS: artist voice training (queue-integrated, GPU-isolated)
     train_queue_model_id: str = "training"
-    evaluate_queue_model_id: str = "evaluation"
+    train_xl_queue_model_id: str = "training-xl"
     train_max_epochs: int = 2000
     train_max_wall_seconds: int = 7200
     train_poll_seconds: float = 5.0
     train_http_timeout_seconds: float = 1800.0
     train_workdir: str = "./training-data"
     train_recipe_revision: str = "acestep-lora@ca1e85f"
+    credit_cost_training: int = 50
+    credit_cost_validation: int = 10
+    voice_embedding_model: str = "mfcc-stats-v1"
+    # Calibration default, not a scientifically established voice-accuracy claim.
+    voice_similarity_threshold: float = 0.5
+    voice_max_recording_seconds: int = 600
+    voice_max_upload_bytes: int = 200 * 1024 * 1024
 
     # M16: auto-tagging + training placement
     audio_analysis_enabled: bool = True

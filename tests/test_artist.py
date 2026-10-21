@@ -1,3 +1,5 @@
+"""UAIS artist voice tests: dataset QC, finalize, worker flows, resolver."""
+
 from __future__ import annotations
 
 import tempfile
@@ -6,7 +8,8 @@ from types import SimpleNamespace
 
 from sqlalchemy import select
 
-from app.models import ArtistProfileVersion, DatasetVersion, Evaluation, Job, TrainingRun
+from app.models import Job, VoiceAdapter, VoiceProfile, VoiceRecording
+from app.separator import NullSeparator
 from app.training_worker import TrainingWorker
 from app.worker import generate_fixture_wav
 from conftest import TOKEN_A, TOKEN_B, auth
@@ -47,6 +50,7 @@ class FakeTrainAdapter:
         self.calls.append(("export", export_path))
         Path(export_path).mkdir(parents=True, exist_ok=True)
         (Path(export_path) / "adapter_config.json").write_text("{}")
+        (Path(export_path) / "adapter_model.safetensors").write_bytes(b"weights")
         return {"export_path": export_path}
 
     def load_lora(self, path, adapter_name=None):
@@ -80,62 +84,77 @@ class FakeGenAdapter:
         return generate_fixture_wav(str(self.submitted), 1, 1)
 
 
+class FakeSeparator:
+    name = "fake-separator"
+
+    def separate(self, wav_body: bytes) -> dict[str, bytes]:
+        return {"vocals": wav_body, "drums": wav_body, "bass": wav_body, "other": wav_body}
+
+
 def _profile(client, token=TOKEN_A, name="Artist") -> dict:
     response = client.post("/api/v1/artist-profiles", json={"name": name}, headers=auth(token))
     assert response.status_code == 201
     return response.json()
 
 
-def _upload_asset(client, body: bytes, token=TOKEN_A) -> str:
-    session = client.post("/api/v1/assets/uploads", json={"filename": "t.wav"}, headers=auth(token)).json()
-    client.put(f"/api/v1/assets/uploads/{session['upload_id']}/data", content=body, headers=auth(token))
-    complete = client.post(f"/api/v1/assets/uploads/{session['upload_id']}/complete", headers=auth(token))
-    assert complete.status_code == 201
-    return complete.json()["asset"]["asset_id"]
+def _upload_recording(client, profile_id: str, body: bytes, token=TOKEN_A,
+                      filename="take.wav", key=None) -> dict:
+    response = client.post(
+        f"/api/v1/artist-profiles/{profile_id}/voice/dataset/recordings",
+        files={"file": (filename, body, "audio/wav")},
+        data={"consent": "own voice, own recordings"},
+        headers=auth(token),
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
 
 
-def _dataset_with_tracks(client, profile_id: str, count: int = 3) -> dict:
-    dataset = client.post(f"/api/v1/artist-profiles/{profile_id}/datasets", json={"name": "songs"},
-                          headers=auth(TOKEN_A)).json()
+def _library(client, profile_id: str, count: int = 2, token=TOKEN_A) -> dict:
+    created = client.post(f"/api/v1/artist-profiles/{profile_id}/voice/dataset", headers=auth(token))
+    assert created.status_code == 201
     for index in range(count):
-        asset_id = _upload_asset(client, generate_fixture_wav(f"seed{index}", index, 2))
-        added = client.post(f"/api/v1/datasets/{dataset['dataset_id']}/tracks",
-                            json={"asset_id": asset_id, "lyrics": f"line {index}",
-                                  "labels": {"caption": "custom artist track"}},
-                            headers=auth(TOKEN_A))
-        assert added.status_code == 201
-    return dataset
+        _upload_recording(client, profile_id, generate_fixture_wav(f"seed{index}", index, 2),
+                          token=token, filename=f"take{index}.wav")
+    return created.json()
+
+
+def _finalize(client, profile_id: str, token=TOKEN_A) -> dict:
+    response = client.post(f"/api/v1/artist-profiles/{profile_id}/voice/dataset/finalize",
+                           headers=auth(token))
+    assert response.status_code == 201, response.text
+    return response.json()
 
 
 def _training_worker(orch) -> TrainingWorker:
     workdir = Path(tempfile.mkdtemp(prefix="oal-train-"))
-    settings = orch.settings.model_copy(update={"train_workdir": str(workdir)})
+    settings = orch.settings.model_copy(update={
+        "train_workdir": str(workdir),
+        "adapter_cache_dir": str(workdir / "adapter-cache"),
+    })
     return TrainingWorker(orch.db, orch.queue, orch.storage, settings,
-                          adapter=FakeTrainAdapter(), gen_adapter=FakeGenAdapter(), worker_id="test-train")
+                          adapter=FakeTrainAdapter(), gen_adapter=FakeGenAdapter(),
+                          separator=FakeSeparator(), worker_id="test-train")
 
 
-def _train_to_candidate(client, orch) -> tuple[TrainingWorker, str]:
-    profile = _profile(client)
-    dataset = _dataset_with_tracks(client, profile["profile_id"])
-    version = client.post(f"/api/v1/datasets/{dataset['dataset_id']}/finalize", headers=auth(TOKEN_A)).json()
-    accepted = client.post("/api/v1/trainings",
-                           json={"profile_id": profile["profile_id"],
-                                 "dataset_version_id": version["dataset_version_id"],
-                                 "budget": {"max_epochs": 5}},
+def _train_to_ready(client, orch, profile_id: str) -> tuple[TrainingWorker, str]:
+    accepted = client.post(f"/api/v1/artist-profiles/{profile_id}/voice/train",
+                           json={"model_selection": "ace-step-1.5-turbo", "max_epochs": 5},
                            headers=auth(TOKEN_A, **{"Idempotency-Key": "tr1"}))
-    assert accepted.status_code == 202
+    assert accepted.status_code == 202, accepted.text
+    adapter_id = accepted.json()["adapter_id"]
     orch.dispatcher.publish_once()
     worker = _training_worker(orch)
     worker.run_once()
-    return worker, profile["profile_id"]
+    return worker, adapter_id
 
 
-# --- profiles / rights ------------------------------------------------------
+# --- profiles -----------------------------------------------------------------
 
 
 def test_profile_crud_and_ownership(client) -> None:
     profile = _profile(client)
     profile_id = profile["profile_id"]
+    assert profile["default_voice_profile_id"] is None
     assert client.get(f"/api/v1/artist-profiles/{profile_id}", headers=auth(TOKEN_B)).status_code == 404
     stale = client.patch(f"/api/v1/artist-profiles/{profile_id}", json={"name": "X"},
                          headers=auth(TOKEN_A, **{"If-Match": '"9"'}))
@@ -146,170 +165,288 @@ def test_profile_crud_and_ownership(client) -> None:
     assert client.delete(f"/api/v1/artist-profiles/{profile_id}", headers=auth(TOKEN_A)).status_code == 204
 
 
-def test_rights_records(client) -> None:
+# --- dataset + QC ---------------------------------------------------------------
+
+
+def test_recording_upload_qc_and_duplicate(client) -> None:
     profile = _profile(client)
-    record = client.post(f"/api/v1/artist-profiles/{profile['profile_id']}/rights",
-                         json={"purpose": "singer_identity", "declaration": "own voice, own recordings"},
-                         headers=auth(TOKEN_A))
-    assert record.status_code == 201
-    bad = client.post(f"/api/v1/artist-profiles/{profile['profile_id']}/rights",
-                      json={"purpose": "vibes", "declaration": "x"}, headers=auth(TOKEN_A))
-    assert bad.status_code == 422
-    listed = client.get(f"/api/v1/artist-profiles/{profile['profile_id']}/rights", headers=auth(TOKEN_A)).json()
-    assert len(listed) == 1
-
-
-# --- datasets ---------------------------------------------------------------
-
-
-def test_dataset_finalize_splits_and_freezes(client) -> None:
-    profile = _profile(client)
-    dataset = _dataset_with_tracks(client, profile["profile_id"], count=3)
-    version = client.post(f"/api/v1/datasets/{dataset['dataset_id']}/finalize", headers=auth(TOKEN_A)).json()
-    assert version["split"]["train"] == 1 and version["split"]["validation"] == 1 and version["split"]["holdout"] == 1
-    assert len(version["frozen_sha256"]) == 64
-    again = client.post(f"/api/v1/datasets/{dataset['dataset_id']}/finalize", headers=auth(TOKEN_A))
-    assert again.status_code == 409
-
-
-def test_dataset_duplicate_track_rejected(client) -> None:
-    profile = _profile(client)
-    dataset = client.post(f"/api/v1/artist-profiles/{profile['profile_id']}/datasets", json={"name": "d"},
-                          headers=auth(TOKEN_A)).json()
-    asset_id = _upload_asset(client, generate_fixture_wav("dup", 1, 1))
-    client.post(f"/api/v1/datasets/{dataset['dataset_id']}/tracks", json={"asset_id": asset_id}, headers=auth(TOKEN_A))
-    duplicate = client.post(f"/api/v1/datasets/{dataset['dataset_id']}/tracks", json={"asset_id": asset_id},
-                            headers=auth(TOKEN_A))
+    profile_id = profile["profile_id"]
+    recording = _upload_recording(client, profile_id, generate_fixture_wav("a", 1, 2))
+    assert recording["qc"]["verdict"] == "usable"
+    assert recording["duration_seconds"] and recording["duration_seconds"] > 0.5
+    duplicate = client.post(
+        f"/api/v1/artist-profiles/{profile_id}/voice/dataset/recordings",
+        files={"file": ("again.wav", generate_fixture_wav("a", 1, 2), "audio/wav")},
+        headers=auth(TOKEN_A))
     assert duplicate.status_code == 409
+    assert duplicate.json()["error"]["code"] == "RECORDING_DUPLICATE"
+    bad_format = client.post(
+        f"/api/v1/artist-profiles/{profile_id}/voice/dataset/recordings",
+        files={"file": ("notes.txt", b"not audio", "text/plain")},
+        headers=auth(TOKEN_A))
+    assert bad_format.status_code == 422
+    corrupt = client.post(
+        f"/api/v1/artist-profiles/{profile_id}/voice/dataset/recordings",
+        files={"file": ("bad.wav", b"not really a wav file at all", "audio/wav")},
+        headers=auth(TOKEN_A))
+    assert corrupt.status_code == 422 and corrupt.json()["error"]["code"] in ("QC_CORRUPT", "QC_PROBE_FAILED")
 
 
-# --- training admission -------------------------------------------------------
+def test_recording_isolation_between_users(client) -> None:
+    mine = _profile(client)
+    _upload_recording(client, mine["profile_id"], generate_fixture_wav("a", 1, 2))
+    other = _profile(client, token=TOKEN_B, name="Other")
+    listing = client.get(f"/api/v1/artist-profiles/{other['profile_id']}/voice/dataset",
+                         headers=auth(TOKEN_B))
+    assert listing.status_code == 404  # other user has no library yet
 
 
-def test_training_admission_guards(client) -> None:
+def test_finalize_freezes_and_marks_stale(client, orch) -> None:
     profile = _profile(client)
-    dataset = _dataset_with_tracks(client, profile["profile_id"])
-    body = {"profile_id": profile["profile_id"], "dataset_version_id": "nope"}
-    missing = client.post("/api/v1/trainings", json=body, headers=auth(TOKEN_A, **{"Idempotency-Key": "a1"}))
-    assert missing.status_code == 404
-    version = client.post(f"/api/v1/datasets/{dataset['dataset_id']}/finalize", headers=auth(TOKEN_A)).json()
-    over = client.post("/api/v1/trainings",
-                       json={"profile_id": profile["profile_id"], "dataset_version_id": version["dataset_version_id"],
-                             "budget": {"max_epochs": 999999}},
-                       headers=auth(TOKEN_A, **{"Idempotency-Key": "a2"}))
-    assert over.status_code == 422 and over.json()["error"]["code"] == "BUDGET_EXCEEDED"
-
-
-def test_training_requires_finalized_dataset(client) -> None:
-    profile = _profile(client)
-    dataset = _dataset_with_tracks(client, profile["profile_id"])
-    accepted = client.post("/api/v1/trainings",
-                           json={"profile_id": profile["profile_id"],
-                                 "dataset_version_id": _open_version(client, dataset["dataset_id"])},
-                           headers=auth(TOKEN_A, **{"Idempotency-Key": "a3"}))
-    assert accepted.status_code == 409
-
-
-def _open_version(client, dataset_id: str) -> str:
-    # A dataset version id that exists but whose dataset is still open.
-    version = client.post(f"/api/v1/datasets/{dataset_id}/finalize", headers=auth(TOKEN_A)).json()
-    with client.app.state.db.session() as session:
-        row = session.get(DatasetVersion, version["dataset_version_id"])
-        from app.models import Dataset
-
-        session.get(Dataset, row.dataset_id).status = "open"
-        session.commit()
-    return version["dataset_version_id"]
-
-
-# --- workers --------------------------------------------------------------
-
-
-def test_training_worker_registers_candidate(client, orch) -> None:
-    worker, profile_id = _train_to_candidate(client, orch)
+    profile_id = profile["profile_id"]
+    _library(client, profile_id, count=2)
+    version = _finalize(client, profile_id)
+    assert version["version_number"] == 1 and len(version["frozen_sha256"]) == 64
+    assert version["report"]["recordings"] == 2
+    worker, adapter_id = _train_to_ready(client, orch, profile_id)
     with orch.db.session() as session:
-        job = session.execute(select(Job).where(Job.operation == "artist.train")).scalar_one()
-        run = session.execute(select(TrainingRun).where(TrainingRun.job_id == job.id)).scalar_one()
-        version = session.execute(select(ArtistProfileVersion)).scalar_one()
+        adapter = session.get(VoiceAdapter, adapter_id)
+        assert adapter.state == "ready"
+        assert adapter.storage_prefix.startswith("owners/")
+        assert "adapter_model.safetensors" in adapter.files_json
+    # adding a recording and re-finalizing creates v2 and marks the adapter stale
+    _upload_recording(client, profile_id, generate_fixture_wav("c", 3, 2))
+    version2 = _finalize(client, profile_id)
+    assert version2["version_number"] == 2
+    assert version2["adapters_marked_stale"] == 1
+    with orch.db.session() as session:
+        adapter = session.get(VoiceAdapter, adapter_id)
+        assert adapter.state == "stale"
+
+
+def test_finalize_requires_usable_recordings(client) -> None:
+    profile = _profile(client)
+    client.post(f"/api/v1/artist-profiles/{profile['profile_id']}/voice/dataset", headers=auth(TOKEN_A))
+    empty = client.post(f"/api/v1/artist-profiles/{profile['profile_id']}/voice/dataset/finalize",
+                        headers=auth(TOKEN_A))
+    assert empty.status_code == 422 and empty.json()["error"]["code"] == "DATASET_EMPTY"
+
+
+# --- worker flows ---------------------------------------------------------------
+
+
+def test_training_worker_registers_ready_adapter(client, orch) -> None:
+    profile = _profile(client)
+    _library(client, profile["profile_id"], count=2)
+    _finalize(client, profile["profile_id"])
+    worker, adapter_id = _train_to_ready(client, orch, profile["profile_id"])
+    with orch.db.session() as session:
+        job = session.execute(select(Job).where(Job.operation == "voice.train")).scalar_one()
+        adapter = session.get(VoiceAdapter, adapter_id)
     assert job.status == "succeeded"
-    assert run.status == "succeeded" and run.metrics_json["steps"] == 42
-    assert version.mechanism == "fine_tuned_adapter"
-    assert version.state == "candidate" and version.evaluation_status == "none"
-    assert version.artifacts_json["adapter_path"].endswith("adapter")
+    assert adapter.state == "ready"
+    assert adapter.metrics_json["steps"] == 42
+    assert adapter.adapter_sha256 and len(adapter.adapter_sha256) == 64
     assert ("start", 5, 42) in worker.adapter.calls
+    assert ("scan", True) in [(c[0], c[2]) for c in worker.adapter.calls if c[0] == "scan"]
 
 
-def test_evaluation_worker_measures_and_marks(client, orch) -> None:
-    worker, profile_id = _train_to_candidate(client, orch)
+def test_analyze_worker_builds_voice_profile(client, orch) -> None:
+    profile = _profile(client)
+    profile_id = profile["profile_id"]
+    _library(client, profile_id, count=2)
+    _finalize(client, profile_id)
+    accepted = client.post(f"/api/v1/artist-profiles/{profile_id}/voice/analyze",
+                           headers=auth(TOKEN_A, **{"Idempotency-Key": "an1"}))
+    assert accepted.status_code == 202
+    orch.dispatcher.publish_once()
+    worker = _training_worker(orch)
+    worker.run_once()
     with orch.db.session() as session:
-        version = session.execute(select(ArtistProfileVersion)).scalar_one()
-        version_id = version.id
-    accepted = client.post("/api/v1/evaluations",
-                           json={"profile_version_id": version_id, "prompts": ["bright country rock"]},
-                           headers=auth(TOKEN_A, **{"Idempotency-Key": "ev1"}))
+        voice_profile = session.execute(select(VoiceProfile)).scalar_one()
+    assert voice_profile.status == "analyzed"
+    assert voice_profile.analysis_model == "mfcc-stats-v1"
+    assert len(voice_profile.embeddings_json["recordings"]) == 2
+    assert voice_profile.embeddings_json["centroid"]
+    assert voice_profile.embeddings_json["input_type"] == "vocal_stem"
+    assert voice_profile.is_default is True
+    # Phase E: vocal stems are stored per recording with provenance.
+    with orch.db.session() as session:
+        recordings = list(session.execute(select(VoiceRecording)).scalars())
+    assert all(r.vocal_asset_id for r in recordings)
+    assert all(r.separation_json["separator"] == "fake-separator" for r in recordings)
+    # Phase F: identity summary is an explicit estimate, not a quality claim.
+    identity = voice_profile.identity_json
+    assert identity["input_type"] == "vocal_stem"
+    assert identity["genre_independence"]["estimate"] is not None
+    assert "proxy" in identity["genre_independence"]["basis"]
+
+
+def test_analyze_without_separator_falls_back_to_full_mix(client, orch) -> None:
+    profile = _profile(client)
+    profile_id = profile["profile_id"]
+    _library(client, profile_id, count=2)
+    _finalize(client, profile_id)
+    accepted = client.post(f"/api/v1/artist-profiles/{profile_id}/voice/analyze",
+                           headers=auth(TOKEN_A, **{"Idempotency-Key": "an1"}))
+    assert accepted.status_code == 202
+    orch.dispatcher.publish_once()
+    worker = _training_worker(orch)
+    worker.separator = NullSeparator()
+    worker.run_once()
+    with orch.db.session() as session:
+        voice_profile = session.execute(select(VoiceProfile)).scalar_one()
+        recordings = list(session.execute(select(VoiceRecording)).scalars())
+    assert voice_profile.embeddings_json["input_type"] == "full_mix"
+    assert voice_profile.identity_json["genre_independence"]["separator"].startswith("unavailable")
+    assert all(r.vocal_asset_id is None for r in recordings)
+
+
+def test_validate_worker_validates_adapter(client, orch) -> None:
+    profile = _profile(client)
+    profile_id = profile["profile_id"]
+    _library(client, profile_id, count=2)
+    _finalize(client, profile_id)
+    accepted = client.post(f"/api/v1/artist-profiles/{profile_id}/voice/analyze",
+                           headers=auth(TOKEN_A, **{"Idempotency-Key": "an1"}))
+    assert accepted.status_code == 202
+    orch.dispatcher.publish_once()
+    worker = _training_worker(orch)
+    worker.run_once()
+    _train_to_ready(client, orch, profile_id)
+    with orch.db.session() as session:
+        adapter = session.execute(select(VoiceAdapter)).scalar_one()
+        adapter_id = adapter.id
+    accepted = client.post(f"/api/v1/artist-profiles/{profile_id}/voice/validate",
+                           json={"adapter_id": adapter_id},
+                           headers=auth(TOKEN_A, **{"Idempotency-Key": "va1"}))
     assert accepted.status_code == 202
     orch.dispatcher.publish_once()
     worker.run_once()
     with orch.db.session() as session:
-        evaluation = session.execute(select(Evaluation)).scalar_one()
-        version = session.get(ArtistProfileVersion, version_id)
-    assert evaluation.measurements_json["prompt_0"]["candidate"]["sample_rate"] == 44100
-    assert evaluation.measurements_json["prompt_0"]["base"]["bytes"] > 0
-    assert version.evaluation_status == "measured"
+        adapter = session.get(VoiceAdapter, adapter_id)
+    assert adapter.state == "validated"
+    assert adapter.validation_json["passed"] is True
+    assert adapter.validation_json["separator"] == "fake-separator"
 
 
-# --- activation -------------------------------------------------------------
+# --- resolver / compatibility ------------------------------------------------------
 
 
-def test_activation_requires_measurement_and_supports_rollback(client, orch) -> None:
-    worker, profile_id = _train_to_candidate(client, orch)
-    with orch.db.session() as session:
-        version = session.execute(select(ArtistProfileVersion)).scalar_one()
-        version_id = version.id
-    profile = client.get(f"/api/v1/artist-profiles/{profile_id}", headers=auth(TOKEN_A)).json()
-    early = client.post(f"/api/v1/artist-profiles/{profile_id}/activate", json={"version_id": version_id},
-                        headers=auth(TOKEN_A, **{"If-Match": profile["etag"]}))
-    assert early.status_code == 409 and early.json()["error"]["code"] == "PROFILE_NOT_EVALUATED"
-
-    client.post("/api/v1/evaluations", json={"profile_version_id": version_id, "prompts": ["p"]},
-                headers=auth(TOKEN_A, **{"Idempotency-Key": "ev2"}))
-    orch.dispatcher.publish_once()
-    worker.run_once()
-
-    profile = client.get(f"/api/v1/artist-profiles/{profile_id}", headers=auth(TOKEN_A)).json()
-    activated = client.post(f"/api/v1/artist-profiles/{profile_id}/activate", json={"version_id": version_id},
-                            headers=auth(TOKEN_A, **{"If-Match": profile["etag"]}))
-    assert activated.status_code == 200
-    assert activated.json()["active_version_id"] == version_id
-
-    review = client.post(f"/api/v1/evaluations/{_evaluation_id(orch)}/review",
-                         json={"review": "accept"}, headers=auth(TOKEN_A))
-    assert review.status_code == 200
+def test_compatibility_states(client, orch) -> None:
+    profile = _profile(client)
+    profile_id = profile["profile_id"]
+    response = client.get(f"/api/v1/artist-profiles/{profile_id}/voice/compatibility", headers=auth(TOKEN_A))
+    assert response.status_code == 200
+    states = {m["model_selection"]: m["state"] for m in response.json()["models"]}
+    assert states["ace-step-1.5-turbo"] == "REFERENCE_CONDITIONING_AVAILABLE"
+    _library(client, profile_id, count=1)
+    _finalize(client, profile_id)
+    states = {m["model_selection"]: m["state"]
+              for m in client.get(f"/api/v1/artist-profiles/{profile_id}/voice/compatibility",
+                                  headers=auth(TOKEN_A)).json()["models"]}
+    assert states["ace-step-1.5-turbo"] == "ADAPTER_TRAINING_REQUIRED"
+    _train_to_ready(client, orch, profile_id)
+    states = {m["model_selection"]: m["state"]
+              for m in client.get(f"/api/v1/artist-profiles/{profile_id}/voice/compatibility",
+                                  headers=auth(TOKEN_A)).json()["models"]}
+    assert states["ace-step-1.5-turbo"] == "ADAPTER_VALIDATION_REQUIRED"
 
 
-def _evaluation_id(orch) -> str:
-    with orch.db.session() as session:
-        return session.execute(select(Evaluation)).scalar_one().id
-
-
-# --- generation admission -----------------------------------------------------
-
-
-def test_generation_profile_admission(client, orch) -> None:
-    worker, profile_id = _train_to_candidate(client, orch)
-    with orch.db.session() as session:
-        version = session.execute(select(ArtistProfileVersion)).scalar_one()
-        version_id = version.id
+def test_generation_voice_admission(client, orch) -> None:
     from conftest import submit
 
-    ok = submit(client, key="gen-prof", artist_profile_version_id=version_id)
-    assert ok.status_code == 202
-    unknown = submit(client, key="gen-unknown", artist_profile_version_id="nope")
-    assert unknown.status_code == 404
+    profile = _profile(client)
+    profile_id = profile["profile_id"]
+    # no recordings at all -> best fidelity falls back to reference only if refs exist
+    native_missing = submit(client, key="gen-native", artist_id=profile_id, voice_fidelity="native")
+    assert native_missing.status_code == 409
+    assert native_missing.json()["error"]["code"] == "VOICE_NOT_READY"
+
+    _library(client, profile_id, count=1)
+    reference = submit(client, key="gen-ref", artist_id=profile_id, voice_fidelity="reference")
+    assert reference.status_code == 202, reference.text
     with orch.db.session() as session:
-        row = session.get(ArtistProfileVersion, version_id)
-        row.base_model_id = "heartmula"
+        job = session.execute(select(Job).where(Job.id == reference.json()["job_id"])).scalar_one()
+        voice = job.request_json["_voice"]
+        assert voice["voice_method"] == "reference"
+        assert job.request_json["task_type"] == "cover"
+        assert job.request_json["src_asset_id"] == voice["reference_asset_id"]
+
+    _finalize(client, profile_id)
+    _train_to_ready(client, orch, profile_id)
+    with orch.db.session() as session:
+        adapter = session.execute(select(VoiceAdapter)).scalar_one()
+        adapter_id = adapter.id
+    explicit = submit(client, key="gen-adapter", voice_adapter_id=adapter_id)
+    assert explicit.status_code == 202
+    conflict = submit(client, key="gen-conflict", artist_id=profile_id, voice_adapter_id=adapter_id)
+    assert conflict.status_code == 422
+    assert conflict.json()["error"]["code"] == "VOICE_BINDING_CONFLICT"
+    unknown = submit(client, key="gen-unknown", voice_adapter_id="nope")
+    assert unknown.status_code == 404
+
+
+def test_generation_voice_incompatible_selection(client, orch) -> None:
+    from conftest import submit
+
+    profile = _profile(client)
+    profile_id = profile["profile_id"]
+    _library(client, profile_id, count=1)
+    _finalize(client, profile_id)
+    accepted = client.post(f"/api/v1/artist-profiles/{profile_id}/voice/train",
+                           json={"model_selection": "ace-step-1.5-xl-sft"},
+                           headers=auth(TOKEN_A, **{"Idempotency-Key": "tr-xl"}))
+    adapter_id = accepted.json()["adapter_id"]
+    with orch.db.session() as session:
+        adapter = session.get(VoiceAdapter, adapter_id)
+        adapter.state = "validated"
         session.commit()
-    incompatible = submit(client, key="gen-bad", artist_profile_version_id=version_id)
-    assert incompatible.status_code == 422
-    assert incompatible.json()["error"]["code"] == "PROFILE_INCOMPATIBLE"
+    mismatch = client.post("/api/v1/jobs",
+                           json={"operation": "music.generate", "model_id": "ace-step-1.5",
+                                 "music_description": "x", "lyrics": "la la\n", "voice_adapter_id": adapter_id},
+                           headers=auth(TOKEN_A, **{"Idempotency-Key": "gen-xl"}))
+    assert mismatch.status_code == 422
+    assert mismatch.json()["error"]["code"] == "VOICE_INCOMPATIBLE"
+
+
+def test_voice_train_admission_guards(client) -> None:
+    profile = _profile(client)
+    profile_id = profile["profile_id"]
+    no_data = client.post(f"/api/v1/artist-profiles/{profile_id}/voice/train",
+                          json={"model_selection": "ace-step-1.5-turbo"},
+                          headers=auth(TOKEN_A, **{"Idempotency-Key": "g1"}))
+    assert no_data.status_code == 409
+    _library(client, profile_id, count=1)
+    _finalize(client, profile_id)
+    bad_model = client.post(f"/api/v1/artist-profiles/{profile_id}/voice/train",
+                            json={"model_selection": "heartmula"},
+                            headers=auth(TOKEN_A, **{"Idempotency-Key": "g2"}))
+    assert bad_model.status_code == 422
+    assert bad_model.json()["error"]["code"] == "MODEL_VOICE_UNSUPPORTED"
+
+
+def test_voice_profile_patch_and_default(client, orch) -> None:
+    profile = _profile(client)
+    profile_id = profile["profile_id"]
+    _library(client, profile_id, count=1)
+    _finalize(client, profile_id)
+    accepted = client.post(f"/api/v1/artist-profiles/{profile_id}/voice/analyze",
+                           headers=auth(TOKEN_A, **{"Idempotency-Key": "an1"}))
+    orch.dispatcher.publish_once()
+    _training_worker(orch).run_once()
+    with orch.db.session() as session:
+        voice_profile = session.execute(select(VoiceProfile)).scalar_one()
+        vp_id = voice_profile.id
+    patched = client.patch(f"/api/v1/artist-profiles/{profile_id}/voice/profiles/{vp_id}",
+                           json={"description": {"timbre": "warm baritone"},
+                                 "performance": {"intensity": "steady"}},
+                           headers=auth(TOKEN_A))
+    assert patched.status_code == 200
+    assert patched.json()["description"] == {"timbre": "warm baritone"}
+    assert patched.json()["performance"] == {"intensity": "steady"}
+    default = client.post(f"/api/v1/artist-profiles/{profile_id}/voice/profiles/{vp_id}/set-default",
+                          headers=auth(TOKEN_A))
+    assert default.status_code == 200
+    artist = client.get(f"/api/v1/artist-profiles/{profile_id}", headers=auth(TOKEN_A)).json()
+    assert artist["default_voice_profile_id"] == vp_id

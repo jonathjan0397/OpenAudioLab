@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from .config import Settings
@@ -31,6 +31,66 @@ from .storage import Storage
 log = logging.getLogger("oal.orchestration")
 
 TERMINAL_JOB_STATUSES = ("succeeded", "failed", "cancelled")
+
+# Recovery policy (docs/REMEDIATION_PLAN.md §C). Infrastructure failures are
+# retryable within the attempt budget; resource failures additionally mark the
+# worker unhealthy (the caller does that); anything not listed is permanent
+# and fails terminally, exactly as before this policy existed.
+RETRYABLE_ERROR_CODES = {
+    "ENGINE_TIMEOUT",
+    "ENGINE_ERROR",
+    "ENGINE_UNAVAILABLE",
+    "ENGINE_OOM",
+    "ENGINE_START_FAILED",
+    "STORAGE_UNAVAILABLE",
+}
+RESOURCE_ERROR_CODES = {"ENGINE_OOM", "ENGINE_START_FAILED"}
+
+
+def is_retryable(error_code: str | None) -> bool:
+    return error_code in RETRYABLE_ERROR_CODES
+
+
+def retry_backoff(attempt_number: int) -> timedelta:
+    """Bounded exponential backoff with jitter; never exceeds 60 s."""
+    import random
+
+    base = min(60.0, 5.0 * (2 ** max(0, attempt_number - 1)))
+    return timedelta(seconds=base + random.uniform(0, 2))
+
+
+def refund_generation_credits(session: Session, job: Job | None) -> None:
+    """Idempotently refund user generation debits on terminal failure.
+
+    Pairing is by count: every ``generation`` debit may have one matching
+    ``generation-refund`` credit (explicit retries re-charge, so a retried job
+    can legitimately be refunded once per charged attempt).
+    """
+    if job is None or not job.owner_id.startswith("usr_"):
+        return
+    from .quota import GENERATION_OPERATIONS
+    from .models import CreditEntry, User
+
+    if job.operation not in GENERATION_OPERATIONS:
+        return
+    entries = list(
+        session.execute(
+            select(CreditEntry).where(CreditEntry.job_id == job.id,
+                                      CreditEntry.reason.in_(("generation", "generation-refund")))
+        ).scalars()
+    )
+    charged = sum(-e.delta for e in entries if e.reason == "generation")
+    refunded = sum(e.delta for e in entries if e.reason == "generation-refund")
+    outstanding = charged - refunded
+    if outstanding <= 0:
+        return
+    user = session.get(User, job.owner_id[4:])
+    if user is None:
+        return
+    user.credits_balance += outstanding
+    session.add(
+        CreditEntry(owner_id=job.owner_id, delta=outstanding, reason="generation-refund", job_id=job.id)
+    )
 
 
 def as_utc(value: datetime | None) -> datetime | None:
@@ -78,6 +138,17 @@ def set_job_stage(db: "Db", job_id: str, stage: str, progress: float | None = No
         session.commit()
 
 
+def set_upstream_task(db: "Db", attempt_id: str, lease_token: str, task_id: str) -> None:
+    """Persist the engine task id right after submit (duplicate-inference guard)."""
+    with db.session() as session:
+        session.execute(
+            update(JobAttempt)
+            .where(JobAttempt.id == attempt_id, JobAttempt.lease_token == lease_token)
+            .values(upstream_task_id=task_id)
+        )
+        session.commit()
+
+
 def enqueue(session: Session, job: Job, settings: Settings) -> OutboxRecord:
     record = OutboxRecord(job_id=job.id, queue=RedisQueue.queue_name(job.model_id))
     session.add(record)
@@ -97,10 +168,15 @@ class Dispatcher:
             reserve = self.settings.dispatcher_baseline_reserve
         published = 0
         with self.db.session() as session:
+            now = utcnow()
             rows = list(
                 session.execute(
                     select(OutboxRecord)
-                    .where(OutboxRecord.published_at.is_(None))
+                    .join(Job, Job.id == OutboxRecord.job_id)
+                    .where(
+                        OutboxRecord.published_at.is_(None),
+                        or_(Job.next_retry_at.is_(None), Job.next_retry_at <= now),
+                    )
                     .order_by(OutboxRecord.id)
                     .limit(limit)
                 ).scalars()
@@ -152,6 +228,7 @@ class Dispatcher:
                     job.error_code = "MAX_ATTEMPTS"
                     job.error_message = "Attempt budget exhausted after worker interruption."
                     release_guest_reservation(session, job, "worker_failed")
+                    refund_generation_credits(session, job)
                     append_event(session, job.id, "failed", "failed", message="MAX_ATTEMPTS", attempt_id=attempt.id)
                 else:
                     job.attempt_number += 1
@@ -170,11 +247,57 @@ class Dispatcher:
             session.commit()
         return handled
 
+    def republish_stranded_once(self, limit: int = 20, grace_seconds: float | None = None) -> int:
+        """Re-publish queued jobs whose Redis message was lost after publish.
+
+        A BRPOP that dies before the DB claim destroys the message; the job
+        stays ``queued`` with no delivery hint. After a grace window (so we do
+        not spam legitimately-queued jobs on busy queues) the job gets a fresh
+        outbox row; duplicate deliveries stay harmless via the claim guard.
+        """
+        grace = grace_seconds if grace_seconds is not None else self.settings.dispatcher_stranded_grace_seconds
+        cutoff = utcnow() - timedelta(seconds=grace)
+        handled = 0
+        with self.db.session() as session:
+            jobs = list(
+                session.execute(
+                    select(Job)
+                    .where(Job.status == "queued", Job.updated_at < cutoff)
+                    .order_by(Job.seq)
+                    .limit(limit)
+                ).scalars()
+            )
+            for job in jobs:
+                if job.next_retry_at is not None and as_utc(job.next_retry_at) > utcnow():
+                    continue
+                latest = session.execute(
+                    select(OutboxRecord)
+                    .where(OutboxRecord.job_id == job.id)
+                    .order_by(OutboxRecord.id.desc())
+                    .limit(1)
+                ).scalars().first()
+                if latest is None or latest.published_at is None:
+                    continue  # publish_once still owns this job
+                running = session.execute(
+                    select(JobAttempt.id)
+                    .where(JobAttempt.job_id == job.id, JobAttempt.status == "running")
+                    .limit(1)
+                ).scalars().first()
+                if running is not None:
+                    continue
+                enqueue(session, job, self.settings)
+                job.updated_at = utcnow()  # re-arm the grace window for this sweep
+                append_event(session, job.id, "requeued", "queued", message="Stranded queued job re-published.")
+                handled += 1
+            session.commit()
+        return handled
+
     def run_forever(self) -> None:
         while True:
             try:
                 self.publish_once()
                 self.reconcile_once()
+                self.republish_stranded_once()
             except Exception:  # pragma: no cover - process supervisor boundary
                 log.exception("dispatcher iteration failed")
             time.sleep(self.settings.dispatcher_poll_seconds)
@@ -191,6 +314,8 @@ def claim_attempt(db: Db, job_id: str, worker_id: str) -> tuple[str, str, str] |
         ).scalar_one_or_none()
         if job is None or job.status != "queued":
             return None
+        if job.next_retry_at is not None and as_utc(job.next_retry_at) > utcnow():
+            return None  # early duplicate delivery; the sweeper re-publishes later
         existing = session.execute(
             select(JobAttempt).where(
                 JobAttempt.job_id == job.id,
@@ -210,6 +335,7 @@ def claim_attempt(db: Db, job_id: str, worker_id: str) -> tuple[str, str, str] |
         )
         session.add(attempt)
         job.status = "running"
+        job.next_retry_at = None
         job.started_at = utcnow()
         job.stage = "accepted"
         append_event(session, job.id, "running", "running", stage="accepted", attempt_id=attempt.id)
@@ -290,7 +416,7 @@ def _generation_manifest(
             "seed": request.get("seed"),
             "controls": controls,
             "outputs": request.get("outputs") or [],
-            "artist_profile_version_id": request.get("artist_profile_version_id"),
+            "voice": request.get("_voice"),
             "lora_id": request.get("lora_id"),
             "client_reference": job.client_reference,
             "task_type": request.get("task_type") or "text2music",
@@ -473,21 +599,37 @@ def fail_attempt(
             session.commit()
             return "stale"
         job = get_job_by_id(session, job_id)
+        requeued = False
         if job is not None and job.status in ("running", "cancelling"):
             if job.cancel_requested_at is not None:
                 job.status = "cancelled"
+                job.finished_at = utcnow()
+            elif is_retryable(error_code) and job.attempt_number < settings.max_attempts:
+                # Bounded automatic retry for infrastructure failures: the
+                # attempt budget still applies and backoff paces the requeue.
+                job.attempt_number += 1
+                job.status = "queued"
+                job.stage = None
+                job.progress = None
+                job.error_code = error_code
+                job.error_message = error_message
+                job.next_retry_at = utcnow() + retry_backoff(job.attempt_number)
+                enqueue(session, job, settings)
+                requeued = True
             else:
                 job.status = "failed"
                 job.error_code = error_code
                 job.error_message = error_message
-            job.finished_at = utcnow()
+                job.finished_at = utcnow()
         from .quota import release_guest_reservation
 
         if job is not None and job.status in TERMINAL_JOB_STATUSES:
             release_guest_reservation(session, job, "job_failed")
-        append_event(session, job_id, "failed", job.status if job else "unknown", message=error_code, attempt_id=attempt_id)
+            refund_generation_credits(session, job)
+        append_event(session, job_id, "requeued" if requeued else "failed",
+                     job.status if job else "unknown", message=error_code, attempt_id=attempt_id)
         session.commit()
-        return "failed"
+        return "requeued" if requeued else "failed"
 
 
 def cancel_attempt(db: Db, job_id: str, attempt_id: str, lease_token: str) -> str:

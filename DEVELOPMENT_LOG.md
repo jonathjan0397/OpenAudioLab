@@ -827,3 +827,143 @@ operator-approved exact checkpoint/revision/license.
  failed XL jobs can now be retried (LoRA skipped + int8 XL); and the earlier XL int8 note
  in gpu_config/docs says compile "required for quantization" which is the opposite of what
  actually happens (compile breaks it) — flagged, not yet corrected upstream-side.
+
+## 2026-10-21 — UAIS milestones A–D + Vast training worker (branch feat/uais-artist-voice)
+
+Decisions:
+1. **Hard replace, no migration.** The old rights/dataset/training-run/evaluation stack was
+   experimental with no customers; migration 0033 drops those tables and creates the six
+   UAIS tables. `artist_profiles.default_voice_profile_id` replaces `active_version_id`;
+   `loras.adapter_id` replaces `profile_version_id`.
+2. **No LLM in the voice path.** QC (ffmpeg), embeddings (`mfcc-stats-v1`, pure-Python
+   log-mel stats) and validation similarity are deterministic; the embedding is an analysis
+   artifact only, never a conditioning input. Threshold 0.5 is a calibration default.
+3. **Capability manifests fail closed.** Only `ace-step-1.5-turbo` has
+   `adapter_load_verified=true`; SFT/XL/merge report honest unverified states; unknown
+   selections get `UNSUPPORTED`, never silent routing.
+4. **DB is truth.** Voice jobs ride the durable job system (`voice.analyze/train/validate`);
+   queue keys `oal:queue:training[-xl]` are delivery hints. Credits (50/10) charged at
+   admission, refunded by the worker on failure via `voice-refund:{job}`.
+5. **Vast training = slim image + runtime download**, two autoscaler pools (2B on default
+   offers; XL on ≥32 GB / ≤$0.60 dph), queue-pinned via `OAL_TRAIN_(XL_)QUEUE_MODEL_ID`;
+   `dph_total` recorded to `vast_instances.dph` for cost accounting.
+
+Validation evidence: backend suite 284 passed (13 UAIS API tests in tests/test_artist.py;
+autoscale pool tests in tests/test_autoscale.py); frontend `tsc -b && vite build` clean and
+vitest 17 passed. Commits 56c188e (backend), f35498f (Vast worker), 2c32f23 (frontend+docs).
+Still open: real-GPU training run (first XL VRAM/time benchmark) and owner review before
+merge.
+
+## 2026-10-21 — UAIS phases E+F (same branch)
+
+Decisions:
+1. **Phase E — separation inside `voice.analyze`.** No new job operation: the worker
+   separates vocals per recording through the existing `Separator` interface (Demucs
+   adapter; VIPE/SVC can replace it later), stores each stem as a derived
+   `training_stem` Asset, and records `vocal_asset_id` + `separation_json` on the
+   recording. Embeddings switch to `input_type: vocal_stem`; with no separator the run
+   stays `full_mix` and the reason is recorded (fail-open on availability, fail-closed
+   on silent relabeling). Training keeps conditioning on full mixes — separation serves
+   identity analysis/validation, not a rebranded training input.
+2. **Phase F — genre independence as an estimate.** `voice_profile.identity_json` gains
+   `genre_independence {estimate, basis, separator}` from mean/min cross-recording
+   embedding consistency (different songs = genre/style proxy). Explicitly an estimate
+   with recorded basis; not a quality score, not a measured genre transform.
+
+Validation evidence: tests/test_artist.py extended (vocal-stem provenance + identity
+summary assertions; new full-mix fallback test with NullSeparator) — 14 UAIS tests pass;
+full backend suite and frontend build re-run below. Commits follow on
+feat/uais-artist-voice.
+
+## 2026-10-21 — Remediation Phases 1–3 (feat/uais-artist-voice, per docs/REMEDIATION_PLAN.md)
+
+Decisions:
+1. **Phase 1 (P0 job safety, commit b6325f5).** Migration 0034 adds `jobs.next_retry_at`
+   and `job_attempts.upstream_task_id`. Retryable engine/storage failures requeue with
+   capped exponential backoff (5s·2^n, max 60s + jitter) up to `MAX_ATTEMPTS`; terminal
+   failure refunds `usr_` generation debits by count-pairing `generation` vs
+   `generation-refund` entries, and explicit retry re-charges. The engine persists the
+   upstream task id at submit and `_recover_upstream` repolls it before ever resubmitting
+   (succeeded→finalize, pending→resume, unknown→fresh submit). A stranded-queued
+   sweeper (`republish_stranded_once`, 120 s grace) re-publishes queued jobs with no
+   outbox row, and `publish_once` skips outbox rows whose job is inside its retry
+   window; `claim_attempt` rejects early duplicate deliveries and clears `next_retry_at`.
+2. **Phase 2 (P1 worker/GPU recovery, commit ec2d02d).** Engine worker quarantines after
+   an unhealthy failure (claim-time gate, no new claims during cooldown); ENGINE_TIMEOUT
+   now restarts the engine process after the job is failed. Audio worker heartbeats via a
+   background thread (interval `max(5, lease/3)`) so long ffmpeg passes keep the lease.
+   docker-compose: `restart: unless-stopped` on all long-running services and
+   `healthcheck: disable: true` on workers (no healthcheck binary in image). autoscale:
+   `MAX_DPH` default 0.40, state file default `/var/tmp/oal_autoscale_state.json`, and
+   scale-down holds while a burst attempt is actively running (drain, don't cut).
+3. **Phase 3 (P2 UI correctness).** Backend adds `GET /tracks/stats`
+   (total/shared/favorites, aggregate — not page-limited) and `allowance
+   {plan, monthly_credits}` in `/auth/me` (plan "free" → 0). Frontend: sidebar dedupe +
+   NavLink-native active state (was hardcoded first-item), stats from the endpoint,
+   credit denominator from plan allowance (no invented "of 5,000"), indeterminate
+   animated progress bar whenever the server has no percentage (no fabricated 8%/6%),
+   `humanizeStage()` label map shared by widget/Studio/Voice/Training, Retry button on
+   failed widget jobs (POST /jobs/{id}/retry), active job id persisted in sessionStorage,
+   `:focus-visible` outlines + `prefers-reduced-motion` CSS, bell is a real button.
+
+Validation evidence: backend suite 296 passed (7 recovery + 2 autoscale/worker + 2
+stats/allowance tests added); frontend `tsc -b && vite build` clean, 17 vitest tests
+pass. Hub DB still at 0033 — 0034 applies on next deploy.
+
+## 2026-10-21 — Remediation Phase 4 (P3: R14–R15, same branch)
+
+Decisions:
+1. **R14 — claim-time capability check (no queue split yet).** `EngineWorker._can_run_profile`
+   re-validates the job's `_admission` (profile allowlist, installed checkpoint, free VRAM
+   `total-used >= profile.vram_required_mb`) immediately after claiming. A worker that
+   cannot run the profile releases the attempt through the existing `_requeue` path
+   (budget intact, job back at queue tail, 1 s pause) instead of failing after an engine
+   swap — the turbo-only-worker/premium-job requeue loop is gone. Per-profile queue split
+   stays optional until hop-rate is measured on the mixed fleet (benchmark gate).
+2. **GpuLease removed.** The table was dead (no code path ever acquired it); migration
+   0035 drops `gpu_leases` (serialized claiming is the real GPU-ownership mechanism).
+3. **R15 — workload-aware autoscale.** `queued_work_seconds()` estimates queued demand as
+   `(45 s base + 30 s/min duration) x family factor` (turbo 1.0, sft 2.0, xl 2.5, merge 2.0 —
+   provisional constants, env-overridable via `OAL_SCALE_FAMILY_FACTORS` etc.) from the DB
+   job rows; `tick` scales on `depth_eff = max(depth, ceil(work/DEFAULT_JOB_SECONDS))`.
+   Falls back to raw depth when Redis/DB is unavailable, so existing depth-only behavior
+   remains the safety net. Tiered scale-down (hold → 1 → 0) unchanged.
+
+Validation evidence: 4 new tests (capability gating unit + requeue-without-budget +
+fallback/weighting) — 300 backend tests pass. XL benchmark (real GPU baselines) still
+pending owner Vast-spend approval; factors are provisional until recorded.
+
+## 2026-10-21 — Remediation Phase 5 (P4: R16–R18, same branch)
+
+Decisions:
+1. **R16 — creator honesty + IO.** The premium quote body is now built by one shared
+   `makeBody()` used by both submit and a debounced pre-submit preview
+   (`≈ N credits per run`, keyed only on pricing-relevant fields so typing never
+   re-quotes; 600 ms debounce, guest/short-idea guarded). Draft persistence is debounced
+   to one localStorage write/second, and a `storage` event listener adopts drafts saved
+   by other tabs (events fire only in the other tabs, so no echo loop).
+2. **R17 — library at scale.** Studio fetches 200 tracks and adds client-side title
+   search, sort (newest/oldest/title/duration) and 25-per-page pagination over the
+   filtered list. Row actions collapse to primary (play, ♥, Share) + a `⋯` overflow menu
+   (WAV, MP3, Stems, Details, Remix, Repaint, workspace move) — ≤3 primary actions per
+   the gate. Page resets on filter/search/sort change.
+3. **R18 — mobile.** Header gains a `☰` toggle (`.nav-open` column nav at ≤768 px);
+   player bar compacts (narrow now-playing, hidden volume, tighter gaps) at ≤768 px.
+
+Validation evidence: `tsc -b && vite build` clean; 17 vitest tests; 300 backend tests
+unchanged (frontend-only phase). 320–1920 px visual audit pending the redeploy pass.
+
+## 2026-10-21 — Remediation Phase 6 (P5: R19–R20, same branch)
+
+Decisions:
+1. **R19 — artist journey.** Artist rows gain inline name/bio editing (PATCH
+   `/artist-profiles/{id}` already supported both fields); the Voice Studio checkbox now
+   actually gates recording upload (disabled until consent is on file); the per-profile
+   "Voice" link deep-links `/voice?artist=<id>` and Voice Studio preselects it, joining
+   the Artist → Voice workflow without a page rewrite.
+2. **R20 — per-model voice state.** The widget note is now a state machine over the
+   bound artist's compatibility data: applied / style-LoRA-selected / voice-unavailable /
+   no-adapter-yet / stale-adapter / trained-for-another-model — visible before submit.
+
+Validation evidence: `tsc -b && vite build` clean; 17 vitest; 300 backend tests
+(backend untouched this phase). §22 Creator-workflow click-through pending redeploy.

@@ -7,7 +7,7 @@ import Waveform from "./Waveform";
 import { usePlayer } from "./PlayerContext";
 import { useWorkspace } from "./WorkspaceContext";
 import { exportArtifact } from "./social";
-import { fmtTime } from "./ui";
+import { fmtTime, humanizeStage, Progress } from "./ui";
 
 interface JobAccepted {
   job_id: string;
@@ -160,11 +160,9 @@ export default function CreateWidget({
   const [loraId, setLoraId] = useState(String(saved.loraId || ""));
 
   const wsArtistCompatible =
-    !isGuest && !premiumSelected && !loraId &&
-    !!activeArtist && activeArtist.applicable && activeArtist.base_model_id === "ace-step-1.5";
-  const workspaceArtistVersion = wsArtistCompatible ? activeArtist!.active_version_id || undefined : undefined;
-  const wsArtistBlocked =
-    !isGuest && !!activeArtist && !wsArtistCompatible && (!!loraId || premiumSelected || !activeArtist.applicable);
+    !isGuest && !loraId && !!activeArtist && activeArtist.applicable &&
+    activeArtist.adapter_model_selection === modelSelection;
+  const workspaceAdapterId = wsArtistCompatible ? activeArtist!.default_adapter_id || undefined : undefined;
   const [bpm, setBpm] = useState(String(saved.bpm || ""));
   const [keyScale, setKeyScale] = useState(String(saved.keyScale || ""));
   const [timeSignature, setTimeSignature] = useState(String(saved.timeSignature || ""));
@@ -173,7 +171,7 @@ export default function CreateWidget({
   const [quality, setQuality] = useState(Number(saved.quality ?? 8));
   const [variations, setVariations] = useState(Number(saved.variations ?? 1));
   const [chipSeed, setChipSeed] = useState(() => Math.floor(Math.random() * 1e9));
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(() => sessionStorage.getItem("oal-active-job"));
   const [error, setError] = useState("");
   const [history, setHistory] = useState<DraftSnapshot[]>([]);
   const [lockTitle, setLockTitle] = useState(false);
@@ -186,7 +184,8 @@ export default function CreateWidget({
   }, [duration, guest.data?.max_duration_seconds, isGuest]);
 
   useEffect(() => {
-    localStorage.setItem(
+    // R16: at most one write/second while typing.
+    const t = setTimeout(() => localStorage.setItem(
       DRAFT_KEY,
       JSON.stringify({
         title,
@@ -208,9 +207,29 @@ export default function CreateWidget({
         drafted,
         draftOpen,
         modelSelection,
-      })
-    );
+      })), 500);
+    return () => clearTimeout(t);
   }, [title, desc, styles, lyrics, mood, instrumental, gender, loraId, bpm, keyScale, timeSignature, language, shift, quality, variations, duration, drafted, draftOpen, modelSelection]);
+
+  // R16: another tab saved a draft -> adopt it (storage events fire only in
+  // the other tabs, so this never echoes our own writes).
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== DRAFT_KEY || !e.newValue) return;
+      try {
+        const d = JSON.parse(e.newValue);
+        setTitle(d.title ?? ""); setDesc(d.desc ?? ""); setStyles(d.styles ?? "");
+        setLyrics(d.lyrics ?? ""); setMood(d.mood ?? ""); setInstrumental(Boolean(d.instrumental));
+        setGender(d.gender ?? ""); setLoraId(d.loraId ?? ""); setBpm(d.bpm ?? "");
+        setKeyScale(d.keyScale ?? ""); setTimeSignature(d.timeSignature ?? "");
+        setLanguage(d.language ?? ""); setShift(d.shift ?? 1); setQuality(d.quality ?? 8);
+        setVariations(d.variations ?? 1); setDuration(d.duration ?? 120);
+        if (d.modelSelection) setModelSelection(d.modelSelection);
+      } catch { /* ignore malformed drafts */ }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   // When the selected model's step band changes, reset Quality to that profile's
   // default so a value carried from another model (e.g. Turbo's 8, or a premium
@@ -307,8 +326,55 @@ export default function CreateWidget({
     onError: (e: Error) => setError(e.message),
   });
 
+  // R16: pre-submit price preview for premium selections. Keyed only on
+  // pricing-relevant fields so typing the idea never hits the quote endpoint.
+  const [previewOn, setPreviewOn] = useState(false);
+  useEffect(() => {
+    if (!premiumSelected) { setPreviewOn(false); return; }
+    setPreviewOn(false);
+    const t = setTimeout(() => setPreviewOn(true), 600);
+    return () => clearTimeout(t);
+  }, [premiumSelected, quality, variations, duration, modelSelection]);
+  const quotePreview = useQuery({
+    queryKey: ["quote-preview", modelSelection, quality, variations, duration, mode],
+    queryFn: () => api.post<GenerationQuote>("/api/v1/generation/quote", makeBody(lyrics, lyrics.trim().length > 0)),
+    enabled: premiumSelected && previewOn && desc.trim().length >= 3 && !isGuest,
+  });
+
   const canDraft = desc.trim().length >= 8;
   const assistantBusy = draft.isPending || rewriteLyrics.isPending || rewriteStyle.isPending || rewriteTitle.isPending;
+
+  const makeBody = (finalLyrics: string, lyricsProvided: boolean) => {
+    const durationSeconds = mode === "extend" ? Math.min(duration + 60, 600) : duration;
+    return buildGenerationRequest(
+      {
+        idea: desc,
+        styles,
+        mood,
+        gender,
+        bpm,
+        keyScale,
+        timeSignature,
+        language,
+        shift,
+        quality,
+        guidance: 0,
+        variations,
+        title: title.trim() || draftTitle,
+        lyrics: finalLyrics,
+        lyricsProvided,
+        instrumental,
+        durationSeconds,
+        loraId,
+        modelSelection: premiumSelected ? modelSelection : undefined,
+        executionProfileId: premiumSelected ? selectedProfile!.execution_profile_id : undefined,
+        seed: mode === "remix" ? Math.floor(Math.random() * 1_000_000_000) : undefined,
+        workspaceId: isGuest ? undefined : activeId || undefined,
+        voiceAdapterId: workspaceAdapterId,
+      },
+      { supportedControls: caps.data?.supported_controls, controlRanges: selectedProfile?.control_ranges },
+    );
+  };
 
   const generate = useMutation({
     mutationFn: async () => {
@@ -319,35 +385,7 @@ export default function CreateWidget({
         const r = await api.post<{ text: string }>("/api/v1/llm/lyrics", { prompt: desc, mode: "write" });
         finalLyrics = r.text;
       }
-      const durationSeconds = mode === "extend" ? Math.min(duration + 60, 600) : duration;
-      const body = buildGenerationRequest(
-        {
-          idea: desc,
-          styles,
-          mood,
-          gender,
-          bpm,
-          keyScale,
-          timeSignature,
-          language,
-          shift,
-          quality,
-          guidance: 0,
-          variations,
-          title: title.trim() || draftTitle,
-          lyrics: finalLyrics,
-          lyricsProvided,
-          instrumental,
-          durationSeconds,
-          loraId,
-          modelSelection: premiumSelected ? modelSelection : undefined,
-          executionProfileId: premiumSelected ? selectedProfile!.execution_profile_id : undefined,
-          seed: mode === "remix" ? Math.floor(Math.random() * 1_000_000_000) : undefined,
-          workspaceId: isGuest ? undefined : activeId || undefined,
-          artistProfileVersionId: workspaceArtistVersion,
-        },
-        { supportedControls: caps.data?.supported_controls, controlRanges: selectedProfile?.control_ranges },
-      );
+      const body = makeBody(finalLyrics, lyricsProvided);
       // Premium selection: get a server quote first, then bind it. The quote and
       // the job carry identical fields (the server hash excludes quote_id).
       if (premiumSelected) {
@@ -375,6 +413,17 @@ export default function CreateWidget({
       setError(err?.controlHint() || err?.message || "Generation failed. Please try again.");
       qc.invalidateQueries({ queryKey: ["guest"] });
     },
+  });
+
+  useEffect(() => {
+    if (jobId) sessionStorage.setItem("oal-active-job", jobId);
+    else sessionStorage.removeItem("oal-active-job");
+  }, [jobId]);
+
+  const retry = useMutation({
+    mutationFn: () => api.post<JobDetail>(`/api/v1/jobs/${jobId}/retry`),
+    onSuccess: () => setError(""),
+    onError: (e: Error) => setError(e.message),
   });
 
   const job = useQuery({
@@ -609,13 +658,18 @@ export default function CreateWidget({
               <button type="button" className="chip chip-shuffle" title="Shuffle tags" onClick={() => setChipSeed(Math.floor(Math.random() * 1e9))}>♻</button>
             </div>
           </div>
-          {(wsArtistCompatible || wsArtistBlocked) && (
-            <div className={`ws-artist-note${wsArtistCompatible ? " on" : " off"}`}>
-              {wsArtistCompatible
-                ? `♪ ${activeArtist!.name} — this workspace's artist will be applied`
-                : `${activeArtist!.name} — artist not applied (needs the Standard model and an active, trained version)`}
-            </div>
-          )}
+          {(() => {
+            if (isGuest || !activeArtist) return null;
+            const a = activeArtist;
+            let state: string;
+            if (wsArtistCompatible) state = `♪ ${a.name} — voice applied on this model`;
+            else if (loraId) state = `${a.name} — style LoRA selected; voice adapter skipped`;
+            else if (!a.applicable) state = `${a.name} — voice unavailable for generation`;
+            else if (!a.default_adapter_id) state = `${a.name} — no voice adapter yet (train in Voice Studio)`;
+            else if (a.adapter_state === "stale") state = `${a.name} — adapter stale (retrain in Voice Studio)`;
+            else state = `${a.name} — adapter trained for ${a.adapter_model_selection || "another model"}; switch model or train for this one`;
+            return <div className={`ws-artist-note${wsArtistCompatible ? " on" : " off"}`}>{state}</div>;
+          })()}
           <div className="create-bottom-row">
             <button type="button" className="more-toggle" onClick={() => setMoreOpen((o) => !o)}>More controls {moreOpen ? "▴" : "▾"}</button>
             <span className="spacer" />
@@ -657,9 +711,11 @@ export default function CreateWidget({
                       {selectedModel?.display_name}: {selectedProfile.control_ranges.inference_steps.locked ? "8 steps" : ""} · effective CFG {selectedProfile.control_ranges.guidance_scale.default} (fixed).
                     </span>
                   )}
-                  {premiumSelected && quote && (
+                  {premiumSelected && (quotePreview.data || quote) && (
                     <span className="sub" style={{ fontSize: 11 }}>
-                      Quoted: {quote.reserved_credits} credits{quote.balance != null ? ` · balance ${quote.balance}` : ""}
+                      {quote
+                        ? `Quoted: ${quote.reserved_credits} credits${quote.balance != null ? ` · balance ${quote.balance}` : ""}`
+                        : `≈ ${quotePreview.data!.reserved_credits} credits per run`}
                     </span>
                   )}
                 </div>
@@ -830,17 +886,18 @@ export default function CreateWidget({
       {status === "failed" && (
         <p className="pill err" style={{ marginTop: 12 }}>
           {job.data?.error_code}: {job.data?.error_message}
+          <button className="btn" style={{ marginLeft: 10 }} disabled={retry.isPending} onClick={() => retry.mutate()}>
+            {retry.isPending ? "Retrying…" : "Retry"}
+          </button>
         </p>
       )}
       {busy && (
         <div style={{ marginTop: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--muted)", marginBottom: 5 }}>
-            <span>{job.data?.stage ? `${job.data.stage}…` : "Queued…"}</span>
+            <span>{humanizeStage(job.data?.stage) || "Queued"}</span>
             <span>{job.data?.progress != null ? `${Math.round(job.data.progress * 100)}%` : ""}</span>
           </div>
-          <div className="progress">
-            <i style={{ width: `${Math.round((job.data?.progress ?? 0.08) * 100)}%` }} />
-          </div>
+          <Progress value={job.data?.progress ?? null} />
         </div>
       )}
       {results.map((result) => {

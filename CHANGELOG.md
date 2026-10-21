@@ -6,6 +6,70 @@ feature branches; `master` remains the documentation/planning baseline until the
 owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_N.md`.
 
 ## [Unreleased]
+### Remediation Phase 6 (2026-10-21, feat/uais-artist-voice)
+- **Artist UX (R19):** inline name/bio editing on artist rows; consent checkbox now
+  gates recording upload in Voice Studio; per-profile deep link into Voice Studio.
+- **Voice state visibility (R20):** Create widget shows the bound artist's per-model
+  adapter state (applied / stale / no adapter / wrong model / unavailable) before submit.
+
+### Remediation Phase 5 (2026-10-21, feat/uais-artist-voice)
+- **Creator (R16):** pre-submit premium price preview (`≈ N credits`, debounced,
+  pricing-fields only), draft writes debounced to ≤1/s, cross-tab draft sync via
+  `storage` events.
+- **Library (R17):** title search, sort, 25-per-page pagination over a 200-track fetch;
+  rows reduced to play/♥/Share + `⋯` overflow menu (downloads, stems, details, remix,
+  repaint, workspace move).
+- **Mobile (R18):** hamburger nav toggle at ≤768 px; compact player bar on small screens.
+
+### Remediation Phase 4 (2026-10-21, feat/uais-artist-voice)
+- **Claim-time capability check (R14):** engine workers re-verify the job's execution
+  profile (allowlist, installed checkpoint, free VRAM) after claiming and release
+  incompatible jobs without burning the attempt budget — no more turbo/premium
+  requeue-loop on a mixed fleet.
+- **Dead `gpu_leases` table dropped** (migration 0035); serialized claiming is the
+  GPU-ownership mechanism.
+- **Workload-aware autoscale (R15):** scale decisions use estimated queued GPU-seconds
+  (duration x model-class factors, provisional pending XL benchmark) instead of raw
+  queue depth, with depth-only fallback.
+
+### Remediation Phases 1–3 (2026-10-21, feat/uais-artist-voice)
+- **P0 job safety:** retryable failures requeue with capped backoff (`jobs.next_retry_at`),
+  terminal failure refunds generation credits (explicit retry re-charges), upstream ACE-Step
+  task id persisted per attempt (`job_attempts.upstream_task_id`) and repolled after worker
+  restarts, stranded-queued sweeper + retry-window publish eligibility (migration 0034).
+- **P1 worker/GPU recovery:** engine quarantine after unhealthy failures, engine restart
+  after stalls, audio-worker heartbeat thread, compose restart policies + worker healthcheck
+  disables, autoscale $0.40/day cap, persistent state file, mid-job scale-down drain hold.
+- **P2 UI correctness:** `GET /tracks/stats` + plan `allowance` in `/auth/me`; sidebar
+  active-state/dedupe, endpoint-backed stats, plan-based credit denominator, honest
+  indeterminate progress bars, humanized stage labels, widget Retry button, persisted job
+  tracking, focus-visible + reduced-motion styles, accessible notification bell.
+
+### UAIS: Universal Artist Identity System replaces experimental artist training (2026-10-21)
+- **Hard replace** of the rights/dataset/training-run/evaluation stack (migration 0033 drops
+  the old experimental tables; no customer data existed). New tables: `voice_profiles`,
+  `voice_datasets`, `voice_recordings`, `voice_dataset_versions`, `voice_adapters`,
+  `voice_analyses`.
+- **Voice pipeline API** under `/artist-profiles/{id}/voice/*`: dataset create/get, recording
+  upload (ffmpeg QC + SHA-256 dedupe) / delete, version freeze (adapters go `stale`),
+  `analyze` / `train` (50 cr) / `validate` (10 cr) jobs, `status`, per-model
+  `compatibility`, `adapters`, `adapters/capabilities`, voice-profile list/patch/set-default.
+- **Generation binding**: `artist_id` + `voice_fidelity` (`native|reference|best`) or explicit
+  `voice_adapter_id` (mutually exclusive with `lora_id`); resolved plan frozen into the job;
+  reference plans run `task_type=cover` with the artist reference asset. No silent fallback.
+- **Capability registry**: per-model voice manifests; only turbo is adapter-load-verified;
+  unknown models fail closed (`UNSUPPORTED`), never silently routed.
+- **Vast training worker**: `training_worker` role runs voice jobs; autoscaler gains a 2B pool
+  (`oal:queue:training`) and an XL pool (`oal:queue:training-xl`, ≥32 GB offers, dph cap);
+  nodes are queue-pinned and `dph` is recorded for cost accounting.
+- **Frontend**: new Voice Studio page (`/voice`), create widget binds the workspace artist's
+  default adapter when model-compatible, Training page lists voice jobs, Admin training/LoRA
+  surfaces moved to job-id/adapter-id.
+- **Phases E/F**: `voice.analyze` separates vocal stems per recording when a worker separator
+  exists (stored as derived `training_stem` assets; `input_type: vocal_stem`, honest
+  `full_mix` fallback), and writes a genre-independence **estimate** (cross-recording
+  embedding consistency) into `voice_profile.identity_json`.
+
 ### My Tracks UX, workspaces, FAQ, and test-data cleanup (2026-10-21)
 - **Details** card now shows formatted generation info (model/engine/planner, task, duration,
   seed, lyrics origin+hash, prompt/idea/style, controls, cover/repaint source, created) with

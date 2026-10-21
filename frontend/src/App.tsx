@@ -15,6 +15,7 @@ import ExplorePage from "./pages/Explore";
 import PricingPage from "./pages/Pricing";
 import SettingsPage from "./pages/Settings";
 import TrainingPage from "./pages/Training";
+import VoiceStudioPage from "./pages/VoiceStudio";
 import TrackPage from "./pages/Track";
 import StylesPage from "./pages/Styles";
 import PoliciesPage from "./pages/Policies";
@@ -36,6 +37,7 @@ export default function App() {
   const navigate = useNavigate();
   const searchRef = useRef<HTMLInputElement>(null);
   const [bellOpen, setBellOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
   const notes = useQuery({
     queryKey: ["notifications"],
     queryFn: () =>
@@ -54,11 +56,19 @@ export default function App() {
     <ThemeCtx.Provider value={theme}>
     <PlayerProvider>
       <WorkspaceProvider>
-      <header className="site-header">
+      <header className={`site-header${navOpen ? " nav-open" : ""}`}>
         <NavLink to="/" className="logo">
           OpenAudioLab<span className="tld">.io</span>
         </NavLink>
-        <nav>
+        <button
+          className="nav-toggle"
+          aria-label="Toggle navigation"
+          aria-expanded={navOpen}
+          onClick={() => setNavOpen((v) => !v)}
+        >
+          ☰
+        </button>
+        <nav onClick={() => setNavOpen(false)}>
           <NavLink to="/" end>Create</NavLink>
           <NavLink to="/explore">Explore</NavLink>
           <NavLink to="/artists">Artists</NavLink>
@@ -82,9 +92,9 @@ export default function App() {
         </span>
         <span className="spacer" />
         <span className="bell-wrap">
-          <span className="bell" title="Notifications" onClick={() => setBellOpen((o) => !o)}>
+          <button className="bell" title="Notifications" aria-label="Notifications" onClick={() => setBellOpen((o) => !o)}>
             🔔{notes.data && notes.data.active_count > 0 && <span className="dot" />}
-          </span>
+          </button>
           {bellOpen && (
             <div className="card bell-menu">
               <div className="card-header">
@@ -119,6 +129,7 @@ export default function App() {
         <Route path="/styles" element={<StylesPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/training" element={<TrainingPage />} />
+        <Route path="/voice" element={<VoiceStudioPage />} />
         <Route path="/track/:assetId" element={<TrackPage />} />
         <Route path="/policies" element={<PoliciesPage />} />
         <Route path="/faq" element={<FaqPage />} />

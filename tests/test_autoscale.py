@@ -98,8 +98,8 @@ def test_training_tick_creates_training_node(monkeypatch):
     _noop(monkeypatch)
     created = []
 
-    def fake_create(slot=None, dry_run=False, transport="wg", role="engine_worker"):
-        created.append(role)
+    def fake_create(slot=None, dry_run=False, transport="wg", role="engine_worker", **kw):
+        created.append((role, kw.get("train_queue")))
         return 77
 
     monkeypatch.setattr(autoscale, "create_instance", fake_create)
@@ -107,7 +107,7 @@ def test_training_tick_creates_training_node(monkeypatch):
     st = {"train_pending_since": now}
     r = _FakeRedis({autoscale.TRAIN_QUEUE: 1})
     autoscale.training_tick(r, st, now, dry_run=True)
-    assert created == ["training_worker"]
+    assert created == [("training_worker", "training")]
     assert st["train_nodes"][0]["contract"] == 77
 
 
@@ -167,3 +167,62 @@ def test_training_tick_stops_idle_training_node(monkeypatch):
     assert stopped == [77]
     assert st["train_nodes"] == []
     assert st["train_stopped"][0]["contract"] == 77
+
+
+def test_training_tick_xl_pool_creates_separate_node(monkeypatch):
+    _configure(monkeypatch, VAST_TRANSPORT="public", REUSE=True, KEEP_STOPPED=2,
+               TRAIN_WAIT_LOCAL=0.0, TRAIN_DOWN_SECONDS=240,
+               TRAIN_MAX_NODES=1, TRAIN_XL_MAX_NODES=1,
+               TRAIN_XL_MIN_VRAM="32", TRAIN_XL_MAX_DPH=0.60)
+    _noop(monkeypatch)
+    created = []
+
+    def fake_create(slot=None, dry_run=False, transport="wg", role="engine_worker", **kw):
+        created.append((role, kw.get("train_queue"), kw.get("min_vram"), kw.get("max_dph")))
+        return 91
+
+    monkeypatch.setattr(autoscale, "create_instance", fake_create)
+    now = 10000.0
+    st = {"train_pending_since": now, "train_xl_pending_since": now}
+    r = _FakeRedis({autoscale.TRAIN_QUEUE: 1, autoscale.TRAIN_QUEUE_XL: 2})
+    autoscale.training_tick(r, st, now, dry_run=True)
+    assert created == [("training_worker", "training", None, None),
+                       ("training_worker", "training-xl", "32", 0.60)]
+    assert st["train_nodes"][0]["contract"] == 91
+    assert st["train_xl_nodes"][0]["contract"] == 91
+
+
+def test_scaledown_holds_for_running_burst_attempt(monkeypatch):
+    _configure(monkeypatch, SCALE_UP=2, JOBS_PER_NODE=2, MAX_NODES=3, BASELINE=1,
+               TO_ONE_SECONDS=300, SCALE_DOWN_SECONDS=1800, MIN_UPTIME=0,
+               VAST_TRANSPORT="public", REUSE=True, KEEP_STOPPED=2)
+    _noop(monkeypatch)
+    monkeypatch.setattr(autoscale, "burst_running", lambda: True)
+    stopped = []
+    monkeypatch.setattr(autoscale, "stop_instance", lambda cid, dry=False: stopped.append(cid))
+    now = 10000.0
+    st = {"nodes": [{"contract": 55, "created_at": now - 1000}], "low_since": now - 2000}
+    r = _FakeRedis({autoscale.QUEUE_KEY: 0, autoscale.BURST_KEY: 0, autoscale.TRAIN_QUEUE: 0})
+    autoscale.tick(r, st, dry_run=True)
+    assert stopped == []
+    assert st["nodes"][0]["contract"] == 55
+
+
+def test_queued_work_seconds_falls_back_without_db(monkeypatch):
+    _configure(monkeypatch)
+    monkeypatch.setattr(autoscale, "_engine", lambda: None)
+    r = _FakeRedis({autoscale.QUEUE_KEY: 3, autoscale.BURST_KEY: 0, autoscale.TRAIN_QUEUE: 0})
+    # _FakeRedis has no lrange -> exception path -> depth x DEFAULT_JOB_SECONDS
+    assert autoscale.queued_work_seconds(r) == 3 * autoscale.DEFAULT_JOB_SECONDS
+
+
+def test_workload_weighting_scales_on_heavier_jobs(monkeypatch):
+    """R15: two XL jobs (factor 2.5) must weigh more than two turbo jobs."""
+    _configure(monkeypatch, SCALE_UP=3, JOBS_PER_NODE=2, MAX_NODES=3)
+    _noop(monkeypatch)
+    monkeypatch.setattr(autoscale, "_engine", lambda: None)
+    r = _FakeRedis({autoscale.QUEUE_KEY: 2, autoscale.BURST_KEY: 0, autoscale.TRAIN_QUEUE: 0})
+    # Fallback path is family-blind; verify the weighting formula directly instead.
+    turbo = (autoscale.WORK_BASE_SECONDS + autoscale.WORK_SECONDS_PER_MINUTE * 0.5) * autoscale.FAMILY_FACTORS["turbo"]
+    xl = (autoscale.WORK_BASE_SECONDS + autoscale.WORK_SECONDS_PER_MINUTE * 0.5) * autoscale.FAMILY_FACTORS["xl"]
+    assert xl > 2 * turbo

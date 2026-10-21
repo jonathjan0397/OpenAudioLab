@@ -58,6 +58,7 @@ class Job(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     assets_expired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (Index("ix_jobs_owner_seq", "owner_id", "seq"),)
@@ -88,6 +89,7 @@ class JobAttempt(Base):
     lease_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="running")
     error_code: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    upstream_task_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     engine_version: Mapped[str | None] = mapped_column(String(120), nullable=True)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -228,105 +230,144 @@ class ArtistProfile(Base):
     singer_json: Mapped[dict] = mapped_column(JSON, default=dict)
     sharing_policy: Mapped[str] = mapped_column(String(20), default="private")
     is_main: Mapped[bool] = mapped_column(Boolean, default=False)
-    active_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    default_voice_profile_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     etag_version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class RightsRecord(Base):
-    __tablename__ = "rights_records"
+# --- Universal Artist Identity System (UAIS) --------------------------------
+#
+# An Artist's voice is a persistent, portable identity asset: one canonical
+# versioned voice profile per artist, one training library with immutable
+# frozen versions, and a registry of model-specific adapters. Durable records
+# are authoritative; queue messages are delivery hints only.
+
+
+class VoiceProfile(Base):
+    """Versioned canonical voice identity, independent of any generation model."""
+
+    __tablename__ = "voice_profiles"
+    __table_args__ = (UniqueConstraint("artist_profile_id", "version_number", name="uq_voiceprofile_artist_version"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    artist_profile_id: Mapped[str] = mapped_column(String(36), index=True)
     owner_id: Mapped[str] = mapped_column(String(80), index=True)
-    profile_id: Mapped[str] = mapped_column(String(36), index=True)
-    asset_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    purpose: Mapped[str] = mapped_column(String(40))
-    declaration: Mapped[str] = mapped_column(String(500))
-    declared_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    version_number: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(20), default="draft")  # draft|analyzed|training|ready|archived
+    dataset_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    identity_json: Mapped[dict] = mapped_column(JSON, default=dict)      # acoustically measured attributes
+    description_json: Mapped[dict] = mapped_column(JSON, default=dict)   # user-selected descriptive attributes
+    performance_json: Mapped[dict] = mapped_column(JSON, default=dict)   # performance profile settings
+    embeddings_json: Mapped[dict] = mapped_column(JSON, default=dict)    # {model, input_type, recordings, centroid}
+    analysis_model: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
-class Dataset(Base):
-    __tablename__ = "datasets"
+class VoiceDataset(Base):
+    """One training library per artist; recordings are immutable once frozen."""
+
+    __tablename__ = "voice_datasets"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    artist_profile_id: Mapped[str] = mapped_column(String(36), unique=True, index=True)
     owner_id: Mapped[str] = mapped_column(String(80), index=True)
-    profile_id: Mapped[str] = mapped_column(String(36), index=True)
-    name: Mapped[str] = mapped_column(String(200))
-    status: Mapped[str] = mapped_column(String(20), default="open")
+    name: Mapped[str] = mapped_column(String(200), default="Training library")
+    latest_version_number: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class DatasetTrack(Base):
-    __tablename__ = "dataset_tracks"
+class VoiceRecording(Base):
+    """An uploaded training recording with QC evidence and consent record."""
+
+    __tablename__ = "voice_recordings"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     dataset_id: Mapped[str] = mapped_column(String(36), index=True)
+    artist_profile_id: Mapped[str] = mapped_column(String(36), index=True)
     owner_id: Mapped[str] = mapped_column(String(80), index=True)
     asset_id: Mapped[str] = mapped_column(String(36))
-    lyrics: Mapped[str | None] = mapped_column(Text, nullable=True)
-    language: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    labels_json: Mapped[dict] = mapped_column(JSON, default=dict)
-    split: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    filename: Mapped[str] = mapped_column(String(300), default="")
+    sha256: Mapped[str] = mapped_column(String(64), default="")
+    bytes: Mapped[int] = mapped_column(Integer, default=0)
+    duration_seconds: Mapped[float | None] = mapped_column(nullable=True)
+    sample_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    channels: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    qc_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    consent_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    vocal_asset_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    separation_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    state: Mapped[str] = mapped_column(String(20), default="active")  # active|removed
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class DatasetVersion(Base):
-    __tablename__ = "dataset_versions"
+class VoiceDatasetVersion(Base):
+    """Immutable frozen snapshot of the library at finalize time."""
+
+    __tablename__ = "voice_dataset_versions"
+    __table_args__ = (UniqueConstraint("dataset_id", "version_number", name="uq_voicedsv_dataset_version"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     dataset_id: Mapped[str] = mapped_column(String(36), index=True)
     owner_id: Mapped[str] = mapped_column(String(80), index=True)
     version_number: Mapped[int] = mapped_column(Integer, default=1)
     frozen_sha256: Mapped[str] = mapped_column(String(64))
-    split_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    manifest_json: Mapped[dict] = mapped_column(JSON, default=dict)
     report_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
-class ArtistProfileVersion(Base):
-    __tablename__ = "artist_profile_versions"
+class VoiceAdapter(Base):
+    """Model-specific voice representation bound to one exact checkpoint."""
+
+    __tablename__ = "voice_adapters"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
-    profile_id: Mapped[str] = mapped_column(String(36), index=True)
+    artist_profile_id: Mapped[str] = mapped_column(String(36), index=True)
     owner_id: Mapped[str] = mapped_column(String(80), index=True)
-    mechanism: Mapped[str] = mapped_column(String(40))
-    base_model_id: Mapped[str] = mapped_column(String(80))
-    base_revision: Mapped[str] = mapped_column(String(120))
-    recipe_revision: Mapped[str] = mapped_column(String(120))
+    voice_profile_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     dataset_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    artifacts_json: Mapped[dict] = mapped_column(JSON, default=dict)
-    evaluation_status: Mapped[str] = mapped_column(String(20), default="none")
-    state: Mapped[str] = mapped_column(String(20), default="candidate")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
-class TrainingRun(Base):
-    __tablename__ = "training_runs"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
-    job_id: Mapped[str] = mapped_column(String(36), index=True)
-    profile_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    budget_json: Mapped[dict] = mapped_column(JSON, default=dict)
-    hyperparams_json: Mapped[dict] = mapped_column(JSON, default=dict)
-    seed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    model_selection: Mapped[str] = mapped_column(String(80))
+    engine_model: Mapped[str] = mapped_column(String(120), default="")
+    base_revision: Mapped[str] = mapped_column(String(120), default="")
+    adapter_format: Mapped[str] = mapped_column(String(30), default="peft_lora")
+    architecture_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    training_config_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    training_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    storage_prefix: Mapped[str] = mapped_column(String(500), default="")
+    files_json: Mapped[list] = mapped_column(JSON, default=list)
+    adapter_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    state: Mapped[str] = mapped_column(String(20), default="training")
+    # training|ready|validated|stale|failed|retired
     metrics_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    worker_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    hardware: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    status: Mapped[str] = mapped_column(String(20), default="queued")
+    validation_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    last_validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    limitations_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    error_code: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
-class Evaluation(Base):
-    __tablename__ = "evaluations"
+class VoiceAnalysis(Base):
+    """One Voice Identity Analysis run over a frozen dataset version."""
+
+    __tablename__ = "voice_analyses"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
-    profile_version_id: Mapped[str] = mapped_column(String(36), index=True)
+    artist_profile_id: Mapped[str] = mapped_column(String(36), index=True)
+    owner_id: Mapped[str] = mapped_column(String(80), index=True)
+    dataset_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     job_id: Mapped[str] = mapped_column(String(36), index=True)
-    prompts_json: Mapped[list] = mapped_column(JSON, default=list)
-    measurements_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    review: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    embedding_model: Mapped[str] = mapped_column(String(80))
+    input_type: Mapped[str] = mapped_column(String(20), default="full_mix")
+    result_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -348,7 +389,7 @@ class Lora(Base):
     priority: Mapped[int] = mapped_column(Integer, default=0)
     state: Mapped[str] = mapped_column(String(20), default="active")
     provenance: Mapped[str] = mapped_column(String(20), default="external")
-    profile_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    adapter_id: Mapped[str | None] = mapped_column(String(36), nullable=True)  # UAIS VoiceAdapter provenance
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -407,6 +448,7 @@ class VastInstance(Base):
     hostname: Mapped[str | None] = mapped_column(String(120), nullable=True)
     role: Mapped[str] = mapped_column(String(40), default="engine")
     gpu_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    dph: Mapped[float | None] = mapped_column(nullable=True)  # offer $/hr at creation, for cost accounting
     state: Mapped[str] = mapped_column(String(20), default="running")
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -752,21 +794,3 @@ class WorkerCapability(Base):
     supports_staged_planner: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
-
-
-class GpuLease(Base):
-    """Fenced exclusive ownership of one physical GPU so only one heavy engine is
-    resident at a time (serial GPU-0 alternation). A lease is acquired before a
-    model load and released after unload/idle-stop."""
-
-    __tablename__ = "gpu_leases"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
-    gpu_id: Mapped[str] = mapped_column(String(40), index=True)  # e.g. "cuda:0"
-    holder: Mapped[str | None] = mapped_column(String(120), nullable=True)  # worker_id
-    model_selection: Mapped[str | None] = mapped_column(String(80), nullable=True)
-    fence_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    status: Mapped[str] = mapped_column(String(20), default="free", index=True)  # free|held
-    acquired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

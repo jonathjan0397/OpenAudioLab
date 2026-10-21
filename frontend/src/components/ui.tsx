@@ -79,12 +79,32 @@ export function StatusPill({ status, label }: { status: string; label?: string }
   return <span className={`pill ${cls}`}>{label || status.replace(/_/g, " ")}</span>;
 }
 
-export function Progress({ value, width }: { value: number; width?: number | string }) {
+export function Progress({ value, width }: { value: number | null; width?: number | string }) {
+  if (value == null) {
+    // Indeterminate: no server percentage exists; never invent one.
+    return <div className="progress indeterminate" style={{ width }}><i /></div>;
+  }
   return (
     <div className="progress" style={{ width }}>
       <i style={{ width: `${Math.round(Math.min(1, Math.max(0, value)) * 100)}%` }} />
     </div>
   );
+}
+
+const STAGE_LABELS: Record<string, string> = {
+  accepted: "Accepted",
+  submitting: "Submitting to engine",
+  "preparing model": "Preparing model",
+  "generating audio": "Generating audio",
+  "collecting recovered result": "Collecting result",
+  postprocessing: "Post-processing",
+  done: "Done",
+};
+
+export function humanizeStage(stage: string | null | undefined): string | null {
+  if (!stage) return null;
+  if (STAGE_LABELS[stage]) return STAGE_LABELS[stage];
+  return stage.charAt(0).toUpperCase() + stage.slice(1);
 }
 
 export function Donut({ value, size = 64, label }: { value: number; size?: number; label?: string }) {

@@ -14,6 +14,7 @@ from .llm import router as llm_router
 from .styles import router as styles_router
 from .features import router as features_router
 from .billing import router as billing_router
+from .voice import router as voice_router
 from .workspaces import router as workspaces_router
 
 __all__ = [
@@ -33,5 +34,6 @@ __all__ = [
     "styles_router",
     "features_router",
     "billing_router",
+    "voice_router",
     "workspaces_router",
 ]

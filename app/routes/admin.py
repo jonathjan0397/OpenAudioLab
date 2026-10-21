@@ -318,7 +318,7 @@ def admin_timeseries(
     op_filter = {
         "generate": "music.generate",
         "export": "audio.export",
-        "training": "artist.train",
+        "training": "voice.train",
     }.get(task if task != "all" else "", None)
 
     if granularity == "hour":
@@ -366,8 +366,9 @@ def admin_timeseries(
 TASK_LABELS = {
     "music.generate": "Text to Music",
     "audio.export": "Audio Export",
-    "artist.train": "Artist Training",
-    "artist.evaluate": "Evaluation",
+    "voice.train": "Voice Training",
+    "voice.analyze": "Voice Analysis",
+    "voice.validate": "Voice Validation",
 }
 
 
@@ -424,44 +425,42 @@ def admin_jobs(
 
 @router.get("/admin/trainings")
 def admin_trainings(request: Request, limit: int = Query(default=5, ge=1, le=50)) -> JSONResponse:
-    """Recent training runs with live progress, for the admin overview."""
-    from ..models import ArtistProfile, ArtistProfileVersion, Job, TrainingRun
+    """Recent UAIS voice jobs with live progress, for the admin overview."""
+    from ..models import ArtistProfile, Job, VoiceAdapter
 
     with request.app.state.db.session() as session:
         rows = list(
             session.execute(
-                select(
-                    TrainingRun, Job.status, Job.progress, Job.stage, Job.created_at, Job.started_at,
-                    Job.finished_at, Job.error_code, Job.error_message, ArtistProfile.name, ArtistProfile.style_json, User.username,
-                )
-                .join(Job, Job.id == TrainingRun.job_id)
-                .outerjoin(ArtistProfileVersion, ArtistProfileVersion.id == TrainingRun.profile_version_id)
-                .outerjoin(ArtistProfile, ArtistProfile.id == ArtistProfileVersion.profile_id)
+                select(Job, ArtistProfile.name, User.username, VoiceAdapter)
+                .outerjoin(VoiceAdapter, VoiceAdapter.training_job_id == Job.id)
+                .outerjoin(ArtistProfile, ArtistProfile.id == VoiceAdapter.artist_profile_id)
                 .outerjoin(User, User.id == func.replace(Job.owner_id, "usr_", ""))
-                .order_by(Job.created_at.desc())
+                .where(Job.operation.in_(("voice.analyze", "voice.train", "voice.validate")))
+                .order_by(Job.seq.desc())
                 .limit(limit)
             ).all()
         )
     out = []
-    for run, status, progress, stage, created, started, finished, err_code, err_msg, name, style_json, username in rows:
+    for job, name, username, adapter in rows:
         eta = None
-        if status == "running" and progress and started:
-            elapsed = (utcnow() - started).total_seconds()
-            eta = round(elapsed * (1 - progress) / progress)
+        if job.status == "running" and job.progress and job.started_at:
+            elapsed = (utcnow() - job.started_at).total_seconds()
+            eta = round(elapsed * (1 - job.progress) / job.progress)
         out.append(
             {
-                "run_id": run.id,
+                "run_id": job.id,
                 "profile": name or "unnamed",
-                "profile_version_id": run.profile_version_id,
+                "adapter_id": adapter.id if adapter else None,
+                "model_selection": adapter.model_selection if adapter else None,
                 "user": username or "—",
-                "status": status,
-                "stage": stage,
-                "progress": progress,
+                "status": job.status,
+                "operation": job.operation,
+                "stage": job.stage,
+                "progress": job.progress,
                 "eta_seconds": eta,
-                "created_at": created.isoformat() if created else None,
-                "hardware": run.hardware,
-                "error": f"{err_code}: {err_msg}"[:200] if err_code or err_msg else None,
-                "suggested_tags": (style_json or {}).get("suggested_tags", []),
+                "created_at": job.created_at.isoformat() if job.created_at else None,
+                "hardware": (adapter.metrics_json or {}).get("hardware") if adapter else None,
+                "error": f"{job.error_code}: {job.error_message}"[:200] if job.error_code or job.error_message else None,
             }
         )
     return JSONResponse(out)
@@ -478,7 +477,7 @@ def admin_services(request: Request) -> JSONResponse:
     services = [
         ("Music Engine 01", "Text to Music", "music.generate", "v1.5", 99.9),
         ("Stem Separator", "Audio Processing", "audio.export", "v1.0", 99.8),
-        ("Artist Trainer", "Custom Model Training", "artist.train", "v0.9", 99.5),
+        ("Artist Trainer", "Custom Model Training", "voice.train", "v0.9", 99.5),
     ]
     with request.app.state.db.session() as session:
         rows = session.execute(
@@ -608,7 +607,7 @@ def admin_billing(request: Request) -> JSONResponse:
             "credits_pct": round(used / quota * 100, 1),
             "subscriptions_pct": 0,
             "api_usage_pct": pct("music.generate"),
-            "custom_training_pct": pct("artist.train"),
+            "custom_training_pct": pct("voice.train"),
             "export_pct": pct("audio.export"),
             "job_counts": op_counts,
             "billing_mode": getattr(settings, "billing_mode", "production"),
@@ -866,17 +865,14 @@ def admin_job_detail(job_id: str, request: Request) -> JSONResponse:
 
 @router.post("/admin/trainings/{run_id}/cancel")
 def admin_training_cancel(run_id: str, request: Request) -> JSONResponse:
-    """Cancel a queued/running training run from the admin console."""
-    from ..models import Job, TrainingRun
+    """Cancel a queued/running voice job from the admin console (run_id = job id)."""
+    from ..models import Job
     from ..orchestration import append_event
 
     with request.app.state.db.session() as session:
-        run = session.get(TrainingRun, run_id)
-        if run is None:
-            raise ApiError(404, "RUN_NOT_FOUND", "Training run not found.")
-        job = session.execute(select(Job).where(Job.id == run.job_id)).scalar_one_or_none()
-        if job is None:
-            raise ApiError(404, "JOB_NOT_FOUND", "Training job not found.")
+        job = session.get(Job, run_id)
+        if job is None or job.operation not in ("voice.analyze", "voice.train", "voice.validate"):
+            raise ApiError(404, "JOB_NOT_FOUND", "Voice training job not found.")
         if job.status == "queued":
             job.status = "cancelled"
             job.cancel_requested_at = utcnow()
@@ -893,7 +889,7 @@ def admin_training_cancel(run_id: str, request: Request) -> JSONResponse:
                 409, "STATE_CONFLICT", f"Training run in state '{job.status}' cannot be cancelled."
             )
         session.commit()
-        return JSONResponse({"run_id": run.id, "status": job.status})
+        return JSONResponse({"run_id": job.id, "status": job.status})
 
 
 @router.post("/admin/users/{user_id}/credits")
@@ -969,28 +965,40 @@ async def admin_lora_upload(
     tags: str = Form(default="", max_length=500),
     files: list = File(...),
 ) -> JSONResponse:
-    """Upload song files (title parsed from filename) and start LoRA training."""
+    """Upload song files (title parsed from filename) into a UAIS training
+    library, freeze version 1 and start voice training on Turbo."""
     import hashlib as _hashlib
-    import json as _json
 
-    from ..models import ArtistProfile, Asset, Dataset, DatasetTrack, DatasetVersion, Job, TrainingRun
+    from ..models import (
+        ArtistProfile,
+        Asset,
+        Job,
+        VoiceAdapter,
+        VoiceDataset,
+        VoiceDatasetVersion,
+        VoiceRecording,
+    )
     from ..orchestration import append_event, enqueue
     from ..models import new_uuid, utcnow as _utcnow
+    from ..uais.capabilities import capability
 
     settings = request.app.state.settings
     owner_id = "usr_" + user.id
     tag_list = [t.strip().lower() for t in tags.split(",") if t.strip()]
     if not files:
         raise ApiError(422, "NO_FILES", "Attach at least one audio file.")
+    cap = capability("ace-step-1.5-turbo")
 
     with request.app.state.db.session() as session:
         profile = ArtistProfile(id=new_uuid(), owner_id=owner_id, name=name, slug=_hashlib.sha1(name.encode()).hexdigest()[:8])
         session.add(profile)
-        dataset = Dataset(id=new_uuid(), owner_id=owner_id, profile_id=profile.id, name=f"{name} dataset")
+        session.flush()
+        dataset = VoiceDataset(id=new_uuid(), artist_profile_id=profile.id, owner_id=owner_id, name=f"{name} library")
         session.add(dataset)
         session.flush()
 
         titles = []
+        manifest = []
         for upload in files:
             body = await upload.read()
             if not body:
@@ -1010,57 +1018,64 @@ async def admin_lora_upload(
             assign_asset_slug(session, asset)
             session.add(asset)
             session.flush()
-            session.add(
-                DatasetTrack(
-                    id=new_uuid(), dataset_id=dataset.id, owner_id=owner_id, asset_id=asset.id,
-                    labels_json={"caption": f"{caption}, {title.lower()}"},
-                )
+            recording = VoiceRecording(
+                id=new_uuid(), dataset_id=dataset.id, artist_profile_id=profile.id, owner_id=owner_id,
+                asset_id=asset.id, filename=upload.filename or "untitled", sha256=checksum, bytes=len(body),
+                qc_json={"verdict": "usable", "source": "admin-upload",
+                         "caption": f"{caption}, {title.lower()}"},
+                consent_json={"declaration": "admin-supplied authorized training set",
+                              "declared_at": _utcnow().isoformat()},
             )
+            session.add(recording)
+            manifest.append({"recording_id": recording.id, "asset_id": asset.id, "sha256": checksum,
+                             "duration_seconds": None, "caption": recording.qc_json["caption"]})
         session.flush()
 
-        tracks = list(session.execute(select(DatasetTrack).where(DatasetTrack.dataset_id == dataset.id)).scalars())
-        ordered = sorted(tracks, key=lambda t: t.id)
-        if len(ordered) >= 3:
-            splits = {t.id: ("holdout" if i == len(ordered) - 1 else "validation" if i == len(ordered) - 2 else "train") for i, t in enumerate(ordered)}
-        elif len(ordered) == 2:
-            splits = {ordered[0].id: "train", ordered[1].id: "holdout"}
-        else:
-            splits = {ordered[0].id: "train"}
-        for t in tracks:
-            t.split = splits[t.id]
-        frozen = _hashlib.sha256("\n".join(sorted(splits)).encode()).hexdigest()
-        version = DatasetVersion(
+        frozen = _hashlib.sha256(
+            "\n".join(sorted(f"{m['sha256']}|{m['recording_id']}" for m in manifest)).encode()
+        ).hexdigest()
+        version = VoiceDatasetVersion(
             id=new_uuid(), dataset_id=dataset.id, owner_id=owner_id, version_number=1, frozen_sha256=frozen,
-            split_json={"tracks": [{"track_id": t.id, "asset_id": t.asset_id, "split": splits[t.id]} for t in ordered]},
-            report_json={"recordings": len(ordered), "source": "admin-upload"},
+            manifest_json={"recordings": manifest},
+            report_json={"recordings": len(manifest), "source": "admin-upload", "warnings": []},
         )
         session.add(version)
-        dataset.status = "finalized"
+        dataset.latest_version_number = 1
 
         recipe = settings.train_recipe_revision
+        adapter = VoiceAdapter(
+            id=new_uuid(), artist_profile_id=profile.id, owner_id=owner_id,
+            dataset_version_id=version.id, model_selection="ace-step-1.5-turbo",
+            engine_model=cap.engine_model if cap else "acestep-v15-turbo",
+            base_revision=cap.base_revision if cap else "",
+            training_config_json={"max_epochs": 60}, state="training",
+        )
+        session.add(adapter)
         job = Job(
-            id=new_uuid(), owner_id=owner_id, operation="artist.train",
+            id=new_uuid(), owner_id=owner_id, operation="voice.train",
             model_id=settings.train_queue_model_id, model_revision=recipe, status="queued",
             request_json={
-                "profile_id": profile.id, "dataset_version_id": version.id,
-                "base_model_id": "ace-step-1.5", "recipe_revision": recipe,
+                "profile_id": profile.id, "adapter_id": adapter.id,
+                "model_selection": "ace-step-1.5-turbo",
             },
             request_hash=f"admin-lora:{dataset.id}", idempotency_key=new_uuid(),
         )
         session.add(job)
-        session.add(TrainingRun(id=new_uuid(), job_id=job.id, budget_json={"max_epochs": 60, "max_wall_seconds": settings.train_max_wall_seconds}, hyperparams_json={}, status="queued"))
+        adapter.training_job_id = job.id
         enqueue(session, job, settings)
         append_event(session, job.id, "queued", "queued")
         session.commit()
-        profile_id, dataset_id, job_id, version_id = profile.id, dataset.id, job.id, version.id
+        profile_id, dataset_id, job_id, version_id, adapter_id = (
+            profile.id, dataset.id, job.id, version.id, adapter.id)
     return JSONResponse(
         status_code=202,
-        content={"profile_id": profile_id, "dataset_id": dataset_id, "dataset_version_id": version_id, "job_id": job_id, "titles": titles},
+        content={"profile_id": profile_id, "dataset_id": dataset_id, "dataset_version_id": version_id,
+                 "adapter_id": adapter_id, "job_id": job_id, "titles": titles},
     )
 
 
 class AdminLoraPublish(BaseModel):
-    profile_version_id: str
+    adapter_id: str
     name: str = Field(max_length=200)
     tags: str = Field(default="", max_length=500)
     auto_apply: bool = True
@@ -1069,34 +1084,36 @@ class AdminLoraPublish(BaseModel):
 
 @router.post("/admin/loras", status_code=201)
 def admin_lora_publish(payload: AdminLoraPublish, request: Request) -> JSONResponse:
-    from ..models import ArtistProfileVersion, Lora, new_uuid
+    from ..models import Lora, VoiceAdapter, new_uuid
 
     with request.app.state.db.session() as session:
-        version = session.get(ArtistProfileVersion, payload.profile_version_id)
-        if version is None:
-            raise ApiError(404, "VERSION_NOT_FOUND", "Profile version not found.")
-        artifacts = version.artifacts_json or {}
-        if not artifacts.get("adapter_object_prefix") or not artifacts.get("adapter_files"):
-            raise ApiError(409, "NO_ADAPTER", "Profile version has no exported adapter.")
+        adapter = session.get(VoiceAdapter, payload.adapter_id)
+        if adapter is None:
+            raise ApiError(404, "ADAPTER_NOT_FOUND", "Voice adapter not found.")
+        if adapter.state not in ("ready", "validated", "stale"):
+            raise ApiError(409, "STATE_CONFLICT",
+                           "Only trained adapters can be published.", {"state": adapter.state})
+        if not adapter.storage_prefix or not adapter.files_json:
+            raise ApiError(409, "NO_ADAPTER", "Adapter has no exported artifact files.")
         if session.execute(select(Lora).where(Lora.name == payload.name)).scalar_one_or_none():
             raise ApiError(409, "NAME_TAKEN", "A style model with this name exists.")
+        base_model_id = "ace-step-1.5-xl" if "xl" in adapter.model_selection else "ace-step-1.5"
         lora = Lora(
             id=new_uuid(),
             name=payload.name,
             kind="style",
             tags_json=[t.strip().lower() for t in payload.tags.split(",") if t.strip()],
-            storage_prefix=artifacts["adapter_object_prefix"],
-            files_json=list(artifacts["adapter_files"]),
-            base_model_id=version.base_model_id,
-            base_revision=version.base_revision,
+            storage_prefix=adapter.storage_prefix,
+            files_json=list(adapter.files_json),
+            base_model_id=base_model_id,
+            base_revision=adapter.base_revision,
             auto_apply=payload.auto_apply,
             priority=payload.priority,
             state="active",
             provenance="trained",
-            profile_version_id=version.id,
+            adapter_id=adapter.id,
         )
         session.add(lora)
-        version.state = "active"
         session.commit()
         body = {"id": lora.id, "name": lora.name, "tags": lora.tags_json, "auto_apply": lora.auto_apply}
     return JSONResponse(status_code=201, content=body)
@@ -1112,24 +1129,24 @@ class AdminLoraPatch(BaseModel):
 
 @router.get("/admin/loras")
 def admin_loras(request: Request) -> JSONResponse:
-    from ..models import ArtistProfileVersion, Lora, TrainingRun
+    from ..models import Job, Lora, VoiceAdapter
 
     with request.app.state.db.session() as session:
         rows = list(session.execute(select(Lora).order_by(Lora.created_at.desc())).scalars())
         out = []
         for l in rows:
             run_status = None
-            if l.profile_version_id:
-                version = session.get(ArtistProfileVersion, l.profile_version_id)
-                if version is not None:
-                    run = session.execute(select(TrainingRun).where(TrainingRun.profile_version_id == version.id)).scalar_one_or_none()
-                    run_status = run.status if run else None
+            if l.adapter_id:
+                adapter = session.get(VoiceAdapter, l.adapter_id)
+                if adapter is not None and adapter.training_job_id:
+                    job = session.get(Job, adapter.training_job_id)
+                    run_status = job.status if job else None
             out.append(
                 {
                     "id": l.id, "name": l.name, "kind": l.kind, "tags": l.tags_json,
                     "state": l.state, "auto_apply": l.auto_apply, "priority": l.priority,
                     "default_scale": l.default_scale, "provenance": l.provenance,
-                    "profile_version_id": l.profile_version_id, "training_status": run_status,
+                    "adapter_id": l.adapter_id, "training_status": run_status,
                 }
             )
     return JSONResponse({"loras": out})

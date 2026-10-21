@@ -675,3 +675,45 @@ img.avatar { padding: 0; }
 .artist-strip { display: flex; gap: 10px; flex-wrap: wrap; }
 .artist-tile { display: flex; align-items: center; gap: 10px; padding: 10px 14px; text-decoration: none; color: inherit; }
 .artist-tile:hover { border-color: var(--accent); }
+
+/* Remediation P2 (R12/R13): honest indeterminate progress, focus, motion. */
+.progress.indeterminate { position: relative; overflow: hidden; }
+.progress.indeterminate i {
+  position: absolute; left: -35%; width: 35%; height: 100%;
+  background: var(--accent);
+  animation: oal-indeterminate 1.4s ease-in-out infinite;
+}
+@keyframes oal-indeterminate { 0% { left: -35%; } 100% { left: 100%; } }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+.bell { background: none; border: 0; cursor: pointer; font: inherit; color: inherit; padding: 4px; }
+
+/* Remediation P4 (R17/R18): library controls + mobile nav/player. */
+.lib-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+.lib-toolbar input { flex: 1 1 160px; min-width: 120px; }
+.menu-wrap { position: relative; display: inline-flex; }
+.menu-pop {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 30;
+  display: flex; flex-direction: column; gap: 6px; min-width: 150px; padding: 10px;
+}
+.nav-toggle { display: none; background: none; border: 0; font-size: 20px; cursor: pointer; color: inherit; padding: 2px 8px; }
+@media (max-width: 768px) {
+  .nav-toggle { display: inline-block; }
+  .site-header nav { display: none; }
+  .site-header.nav-open nav {
+    display: flex; order: 5; width: 100%; flex-direction: column; gap: 10px; padding: 8px 0;
+  }
+  .player-bar { gap: 8px; padding: 8px 10px; }
+  .player-bar .now { width: 130px; }
+  .player-bar .vol { display: none; }
+  .player-bar .seek .time { width: 30px; }
+}

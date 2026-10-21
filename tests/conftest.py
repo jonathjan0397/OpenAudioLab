@@ -55,13 +55,12 @@ def _clean(_migrate) -> None:
             "upload_sessions",
             "artist_profiles",
             "artist_songs",
-            "rights_records",
-            "datasets",
-            "dataset_tracks",
-            "dataset_versions",
-            "artist_profile_versions",
-            "training_runs",
-            "evaluations",
+            "voice_profiles",
+            "voice_datasets",
+            "voice_recordings",
+            "voice_dataset_versions",
+            "voice_adapters",
+            "voice_analyses",
             "loras",
             "users",
             "user_sessions",
@@ -80,7 +79,6 @@ def _clean(_migrate) -> None:
             "admin_audits",
             "quotes",
             "worker_capabilities",
-            "gpu_leases",
         ):
             session.execute(text(f"DELETE FROM {table}"))
         session.commit()

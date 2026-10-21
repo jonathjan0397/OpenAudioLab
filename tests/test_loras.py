@@ -57,7 +57,7 @@ def test_lora_incompatible_base(client, orch) -> None:
 def test_lora_profile_conflict(client, orch) -> None:
     lora_id = _seed_lora(orch)
     response = submit(
-        client, key="gen-both", lora_id=lora_id, artist_profile_version_id="whatever"
+        client, key="gen-both", lora_id=lora_id, artist_id="whatever"
     )
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "LORA_PROFILE_CONFLICT"

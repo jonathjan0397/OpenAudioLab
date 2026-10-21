@@ -27,11 +27,16 @@ class FakeAdapter:
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, EngineError):
             raise outcome
-        return SubmitResult(task_id="fake-task")
+        return outcome
 
     def poll(self, task_id: str):
         self.polls += 1
-        return self.outcomes.pop(0) if self.outcomes else ("pending", None)
+        if not self.outcomes:
+            return ("pending", None)
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, EngineError):
+            raise outcome
+        return outcome
 
     def download(self, file_url: str) -> bytes:
         return generate_fixture_wav("abc123", 7, 2)
@@ -279,3 +284,108 @@ def test_lora_compatible_guards_2b_lora_on_xl() -> None:
     assert _lora_compatible("acestep-v15-xl-sft", "acestep-v15-xl-sft") is True
     assert _lora_compatible("", "acestep-v15-xl-sft") is True
     assert _lora_compatible("ace-step-1.5", "") is True
+
+
+def test_upstream_task_recovery_reuses_finished_output(client, orch) -> None:
+    """Worker death after submit must not pay for a second inference (R3)."""
+    from app.models import JobAttempt
+
+    adapter = FakeAdapter([SubmitResult(task_id="orphan-task"),
+                           EngineError("ENGINE_TIMEOUT", "worker vanished")])
+    worker = _worker(orch, adapter)
+    job_id = submit(client, key="rec-1").json()["job_id"]
+    orch.dispatcher.publish_once()
+    assert worker.run_once() is True
+    with orch.db.session() as session:
+        attempt = session.execute(
+            select(JobAttempt).where(JobAttempt.job_id == job_id, JobAttempt.attempt_number == 1)
+        ).scalar_one()
+        assert attempt.upstream_task_id == "orphan-task"
+        assert _status(orch.db, job_id) == "queued"  # transient -> requeued
+        from app.models import Job, utcnow
+        from datetime import timedelta
+        job = session.execute(select(Job).where(Job.id == job_id)).scalar_one()
+        job.next_retry_at = utcnow() - timedelta(seconds=1)
+        session.commit()
+    orch.dispatcher.publish_once()
+
+    # Recovery: the engine still knows the task and it finished; no new submit.
+    recovered = FakeAdapter([("succeeded", [{"file": "/v1/audio?path=x", "dit_model": "acestep-v15-turbo"}])])
+    worker2 = _worker(orch, recovered)
+    assert worker2.run_once() is True
+    assert recovered.submitted == []
+    assert _status(orch.db, job_id) == "succeeded"
+
+
+def test_upstream_task_unknown_falls_back_to_submit(client, orch) -> None:
+    from app.models import Job, JobAttempt, utcnow
+    from datetime import timedelta
+
+    adapter = FakeAdapter([SubmitResult(task_id="gone-task"),
+                           EngineError("ENGINE_TIMEOUT", "died")])
+    worker = _worker(orch, adapter)
+    job_id = submit(client, key="rec-2").json()["job_id"]
+    orch.dispatcher.publish_once()
+    worker.run_once()
+    with orch.db.session() as session:
+        job = session.execute(select(Job).where(Job.id == job_id)).scalar_one()
+        job.next_retry_at = utcnow() - timedelta(seconds=1)
+        session.commit()
+    orch.dispatcher.publish_once()
+
+    # Engine restarted: the old task is unknown -> poll raises -> submit fresh.
+    fresh = FakeAdapter([EngineError("ENGINE_NOT_FOUND", "unknown"),
+                         SubmitResult(task_id="fresh-task"),
+                         ("succeeded", [{"file": "/v1/audio?path=y", "dit_model": "acestep-v15-turbo"}])])
+    worker2 = _worker(orch, fresh)
+    assert worker2.run_once() is True
+    assert len(fresh.submitted) == 1
+    assert _status(orch.db, job_id) == "succeeded"
+
+
+def test_unhealthy_cooldown_defers_claims(client, orch) -> None:
+    """R5: a quarantined worker must not keep claiming ordinary jobs."""
+    adapter = FakeAdapter([SubmitResult(task_id="t")])
+    worker = _worker(orch, adapter)
+    worker._mark_unhealthy("ENGINE_OOM", "CUDA out of memory")
+    submit(client, key="q-1")
+    orch.dispatcher.publish_once()
+    assert worker.run_once() is False
+    assert orch.queue.depth("oal:queue:ace-step-1.5") == 1
+
+
+def test_can_run_profile_gates_premium(client, orch) -> None:
+    """R14: claim-time capability check (no allowlist entry / no checkpoint)."""
+    worker = _worker(orch, FakeAdapter([]))
+    assert worker._can_run_profile({})[0] is True
+    assert worker._can_run_profile({"execution_profile_id": "turbo-fast-v1", "family": "turbo"})[0] is True
+    premium = {"execution_profile_id": "xl-turbo-fast-v1", "family": "xl", "engine_model": "acestep-v15-xl-turbo"}
+    ok, why = worker._can_run_profile(premium)
+    assert ok is False and "not enabled" in why
+    orch.settings.premium_profiles_enabled = "xl-turbo-fast-v1"
+    ok, why = worker._can_run_profile(premium)
+    assert ok is False and "not installed" in why
+
+
+def test_premium_job_requeued_without_budget(client, orch) -> None:
+    """R14: a turbo-only worker releases a premium job like ENGINE_BUSY."""
+    from app.models import JobAttempt
+
+    worker = _worker(orch, FakeAdapter([]))
+    job_id = submit(client, key="eng-r14").json()["job_id"]
+    orch.dispatcher.publish_once()
+    with orch.db.session() as session:
+        job = session.execute(select(Job).where(Job.id == job_id)).scalar_one()
+        job.request_json = {
+            **(job.request_json or {}),
+            "_admission": {"execution_profile_id": "xl-turbo-fast-v1", "family": "xl",
+                           "engine_model": "acestep-v15-xl-turbo"},
+        }
+        session.commit()
+    assert worker.run_once() is True
+    assert _status(orch.db, job_id) == "queued"
+    with orch.db.session() as session:
+        attempts = session.execute(select(JobAttempt).where(JobAttempt.job_id == job_id)).scalars().all()
+    assert attempts == []  # attempt released, budget intact
+    assert orch.dispatcher.publish_once() == 1
+    assert orch.queue.depth("oal:queue:ace-step-1.5") == 1

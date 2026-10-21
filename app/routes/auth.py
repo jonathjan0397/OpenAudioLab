@@ -278,7 +278,14 @@ def auth_logout(request: Request) -> JSONResponse:
 
 @router.get("/auth/me")
 def auth_me(request: Request, user: User = Depends(current_user)) -> JSONResponse:
-    return JSONResponse(content={"user": user_payload(user)})
+    from .billing import _plan_credits
+
+    with request.app.state.db.session() as session:
+        allowance = _plan_credits(session, user.plan)
+    return JSONResponse(content={
+        "user": user_payload(user),
+        "allowance": {"plan": user.plan, "monthly_credits": int(allowance)},
+    })
 
 
 class ProfileUpdateRequest(BaseModel):
