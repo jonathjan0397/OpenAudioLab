@@ -1,9 +1,0 @@
-/opt/acestep/.venv/lib/python3.12/site-packages/torchao/quantization/quant_api.py:1825: SyntaxWarning: invalid escape sequence '\.'
-  * regex for parameter names, must start with `re:`, e.g. `re:language\.layers\..+\.q_proj.weight`.
-2026-10-19 13:32:07.544 | WARNING  | acestep.training.trainer:<module>:40 - bitsandbytes not installed. Using standard AdamW.
-/opt/acestep/.venv/lib/python3.12/site-packages/torch/nn/utils/weight_norm.py:144: FutureWarning: `torch.nn.utils.weight_norm` is deprecated in favor of `torch.nn.utils.parametrizations.weight_norm`.
-  WeightNorm.apply(module, name, dim)
-[INFO] Loading model from /opt/acestep/checkpoints/acestep-v15-turbo (variant=turbo, dtype=torch.bfloat16)
-[OK] Model loaded with attn_implementation=sdpa
-[Side-Step] Pass 2 FAIL 10 Bring Me All Your Lovin.tmp: [Errno 2] No such file or directory: '/work/tensors_country/10 Bring Me All Your Lovin.tmp.pt'
-PREPROCESS_RESULT {"processed": 199, "failed": 1, "total": 200, "output_dir": "/work/tensors_country"}

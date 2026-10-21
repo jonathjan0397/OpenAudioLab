@@ -33,3 +33,7 @@ house-lora-ab/
 
 # TS incremental build cache
 *.tsbuildinfo
+
+# runtime storage + logs (generated; not tracked)
+artifacts-data/
+*.log
