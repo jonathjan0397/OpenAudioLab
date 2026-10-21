@@ -160,11 +160,12 @@ export default function CreateWidget({
   const [loraId, setLoraId] = useState(String(saved.loraId || ""));
 
   const wsArtistCompatible =
-    !isGuest && !premiumSelected && !loraId &&
-    !!activeArtist && activeArtist.applicable && activeArtist.base_model_id === "ace-step-1.5";
-  const workspaceArtistVersion = wsArtistCompatible ? activeArtist!.active_version_id || undefined : undefined;
+    !isGuest && !loraId && !!activeArtist && activeArtist.applicable &&
+    activeArtist.adapter_model_selection === modelSelection;
+  const workspaceAdapterId = wsArtistCompatible ? activeArtist!.default_adapter_id || undefined : undefined;
   const wsArtistBlocked =
-    !isGuest && !!activeArtist && !wsArtistCompatible && (!!loraId || premiumSelected || !activeArtist.applicable);
+    !isGuest && !!activeArtist && !wsArtistCompatible &&
+    (!!loraId || !activeArtist.applicable || activeArtist.adapter_model_selection !== modelSelection);
   const [bpm, setBpm] = useState(String(saved.bpm || ""));
   const [keyScale, setKeyScale] = useState(String(saved.keyScale || ""));
   const [timeSignature, setTimeSignature] = useState(String(saved.timeSignature || ""));
@@ -344,7 +345,7 @@ export default function CreateWidget({
           executionProfileId: premiumSelected ? selectedProfile!.execution_profile_id : undefined,
           seed: mode === "remix" ? Math.floor(Math.random() * 1_000_000_000) : undefined,
           workspaceId: isGuest ? undefined : activeId || undefined,
-          artistProfileVersionId: workspaceArtistVersion,
+          voiceAdapterId: workspaceAdapterId,
         },
         { supportedControls: caps.data?.supported_controls, controlRanges: selectedProfile?.control_ranges },
       );
@@ -613,7 +614,7 @@ export default function CreateWidget({
             <div className={`ws-artist-note${wsArtistCompatible ? " on" : " off"}`}>
               {wsArtistCompatible
                 ? `♪ ${activeArtist!.name} — this workspace's artist will be applied`
-                : `${activeArtist!.name} — artist not applied (needs the Standard model and an active, trained version)`}
+                : `${activeArtist!.name} — voice adapter not applied (pick the model it was trained for, or train it for this model)`}
             </div>
           )}
           <div className="create-bottom-row">

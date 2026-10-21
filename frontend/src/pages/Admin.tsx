@@ -109,7 +109,9 @@ interface Service {
 interface Training {
   run_id: string;
   profile: string;
-  profile_version_id: string | null;
+  adapter_id: string | null;
+  model_selection: string | null;
+  operation: string;
   user: string;
   status: string;
   stage: string | null;
@@ -118,7 +120,6 @@ interface Training {
   created_at: string | null;
   hardware: string | null;
   error: string | null;
-  suggested_tags?: string[];
 }
 interface AdminJob {
   job_id: string;
@@ -278,7 +279,9 @@ const TASK_OPTIONS = [
   { value: "", label: "All tasks" },
   { value: "music.generate", label: "Text to Music" },
   { value: "audio.export", label: "Audio Export" },
-  { value: "artist.train", label: "Artist Training" },
+  { value: "voice.train", label: "Voice Training" },
+  { value: "voice.analyze", label: "Voice Analysis" },
+  { value: "voice.validate", label: "Voice Validation" },
 ];
 
 function fmtRuntime(secs: number | null | undefined): string {
@@ -439,7 +442,7 @@ export default function AdminPage() {
   const [loraProgress, setLoraProgress] = useState<number | null>(null);
   const loras = useQuery({
     queryKey: ["admin-loras"],
-    queryFn: () => api.get<{ loras: { id: string; name: string; tags: string[]; state: string; auto_apply: boolean; priority: number; default_scale: number; provenance: string; profile_version_id: string | null; training_status: string | null }[] }>("/api/v1/admin/loras"),
+    queryFn: () => api.get<{ loras: { id: string; name: string; tags: string[]; state: string; auto_apply: boolean; priority: number; default_scale: number; provenance: string; adapter_id: string | null; training_status: string | null }[] }>("/api/v1/admin/loras"),
     enabled: enabled && section === "loras",
   });
   const invalidateLoras = () => {
@@ -472,9 +475,9 @@ export default function AdminPage() {
   const publishLora = useMutation({
     mutationFn: (t: Training) =>
       api.post<{ id: string }>("/api/v1/admin/loras", {
-        profile_version_id: t.profile_version_id,
+        adapter_id: t.adapter_id,
         name: `${t.profile} style`,
-        tags: [t.profile.toLowerCase().replace(/\s+/g, "-"), ...(t.suggested_tags || [])].join(","),
+        tags: [t.profile.toLowerCase().replace(/\s+/g, "-")].join(","),
       }),
     onSuccess: invalidateLoras,
   });
@@ -1382,7 +1385,7 @@ export default function AdminPage() {
             {(() => {
               const t = (trainings.data || [])[0];
               if (!t) return null;
-              const published = (loras.data?.loras || []).some((l) => l.profile_version_id === t.profile_version_id);
+              const published = (loras.data?.loras || []).some((l) => l.adapter_id === t.adapter_id);
               const cls = t.status === "succeeded" ? "ok" : t.status === "failed" ? "err" : t.status === "running" ? "info" : "warn";
               const label = t.status === "running" ? `${t.stage || "training"} ${Math.round((t.progress || 0) * 100)}%` : t.status;
               return (
@@ -1414,18 +1417,15 @@ export default function AdminPage() {
                   ))}
               </div>
             )}
-            {(trainings.data || []).some((t) => t.status === "succeeded" && t.profile_version_id && !(loras.data?.loras || []).some((l) => l.profile_version_id === t.profile_version_id)) && (
+            {(trainings.data || []).some((t) => t.status === "succeeded" && t.adapter_id && !(loras.data?.loras || []).some((l) => l.adapter_id === t.adapter_id)) && (
               <div style={{ marginBottom: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {(trainings.data || [])
-                  .filter((t) => t.status === "succeeded" && t.profile_version_id && !(loras.data?.loras || []).some((l) => l.profile_version_id === t.profile_version_id))
+                  .filter((t) => t.status === "succeeded" && t.adapter_id && !(loras.data?.loras || []).some((l) => l.adapter_id === t.adapter_id))
                   .map((t) => (
                     <span key={t.run_id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                       <button className="btn" onClick={() => publishLora.mutate(t)}>
                         ⇈ Publish “{t.profile}” as style model
                       </button>
-                      {(t.suggested_tags || []).length > 0 && (
-                        <span className="sub" style={{ fontSize: 11 }}>auto-tags: {(t.suggested_tags || []).slice(0, 4).join(", ")}</span>
-                      )}
                     </span>
                   ))}
               </div>

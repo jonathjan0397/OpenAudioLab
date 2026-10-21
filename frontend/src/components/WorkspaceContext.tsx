@@ -8,9 +8,10 @@ export interface WorkspaceArtist {
   slug: string | null;
   is_main: boolean;
   sharing_policy: string;
-  active_version_id: string | null;
-  base_model_id: string | null;
-  version_state: string | null;
+  default_voice_profile_id: string | null;
+  default_adapter_id: string | null;
+  adapter_model_selection: string | null;
+  adapter_state: string | null;
   applicable: boolean;
 }
 

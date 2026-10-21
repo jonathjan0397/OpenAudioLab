@@ -15,6 +15,7 @@ import ExplorePage from "./pages/Explore";
 import PricingPage from "./pages/Pricing";
 import SettingsPage from "./pages/Settings";
 import TrainingPage from "./pages/Training";
+import VoiceStudioPage from "./pages/VoiceStudio";
 import TrackPage from "./pages/Track";
 import StylesPage from "./pages/Styles";
 import PoliciesPage from "./pages/Policies";
@@ -119,6 +120,7 @@ export default function App() {
         <Route path="/styles" element={<StylesPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/training" element={<TrainingPage />} />
+        <Route path="/voice" element={<VoiceStudioPage />} />
         <Route path="/track/:assetId" element={<TrackPage />} />
         <Route path="/policies" element={<PoliciesPage />} />
         <Route path="/faq" element={<FaqPage />} />

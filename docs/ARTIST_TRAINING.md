@@ -1,5 +1,38 @@
 # Custom-track artist profiles and training
 
+## UAIS replacement (2026-10-21, implemented)
+
+The experimental rights/dataset/training-run/evaluation flow below was replaced by the
+**Universal Artist Identity System (UAIS)** as a hard replace (old experimental rows were
+dropped in migration `0033_uais`; no customer data existed). Current truth:
+
+- Tables: `voice_profiles`, `voice_datasets`, `voice_recordings`, `voice_dataset_versions`,
+  `voice_adapters`, `voice_analyses`. `artist_profiles.default_voice_profile_id` points at
+  the active voice profile; `loras.adapter_id` binds published style models to adapters.
+- Pipeline: create dataset → upload recordings (ffmpeg QC: clipping/silence/energy/decode;
+  SHA-256 dedupe) → freeze an immutable dataset version (frozen SHA-256; older adapters go
+  `stale`) → optional `voice.analyze` (`mfcc-stats-v1` embeddings; analysis artifact only,
+  never a conditioning input) → `voice.train` (50 credits) → `voice.validate` (10 credits,
+  similarity vs configurable threshold default 0.5 — calibration default, not science).
+- Jobs: operations `voice.analyze` / `voice.train` / `voice.validate` on the durable job
+  system; queues `oal:queue:training` (2B) and `oal:queue:training-xl` (4B XL).
+- Compatibility per model selection (`app/uais/capabilities.py` manifests +
+  `app/uais/resolver.py`): `NATIVE_ADAPTER_READY`, `ADAPTER_VALIDATION_REQUIRED`,
+  `REFERENCE_CONDITIONING_AVAILABLE`, `ADAPTER_TRAINING_REQUIRED`, `PREPARING`,
+  `UNSUPPORTED`, `FAILED`. Only `ace-step-1.5-turbo` has `adapter_load_verified=true`;
+  SFT/XL/merge are honest unverified states. Unknown licenses fail closed.
+- Generation binding: `artist_id` + `voice_fidelity` (`native|reference|best`) or an
+  explicit `voice_adapter_id` (mutually exclusive with `lora_id` and with each other).
+  The resolved plan is frozen into the job (`request_json._voice`); reference plans run
+  `task_type=cover` with the artist's reference asset. No silent fallback between methods.
+- Frontend: Voice Studio page (`/voice`) drives dataset, freeze, analyze, train, validate,
+  adapters and the compatibility matrix; the create widget binds the workspace artist's
+  default adapter when it matches the selected model.
+
+Deferred phases: SVC/VIPE vocal separation (phase E) and genre-independent identity
+(phase F). The sections below are the original capability planning; where they mention
+`datasets`/`training_runs`/`evaluations` tables or `/activate`, UAIS supersedes them.
+
 ## Purpose and truthful capability reporting
 
 Users can create private artist profiles from authorized custom music tracks. Style and singer identity are separate optional components, combinable at generation time only where the selected engine supports the combination. Profiles cannot guarantee an exact singer or style match merely because references have been uploaded.

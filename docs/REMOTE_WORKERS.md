@@ -387,3 +387,33 @@ before merged checkpoints.
 Validated (2026-10-20): one-adapter sanity contract `56826462` and corrected
 full A/B contract `56827635` completed successfully. Corrected results were
 rsynced to `/Cold-Archive/OpenAudioLab/house-lora-ab/2026-10-19-v2/`.
+
+## UAIS training remote worker (2026-10-21)
+
+UAIS voice jobs (`voice.analyze` / `voice.train` / `voice.validate`) run on the same
+ephemeral-node mechanism as engine workers, with the `training_worker` role
+(`app/training_worker.py`): no co-located ACE-Step HTTP server is required for
+analyze/validate, and training uses the slim worker image plus **runtime checkpoint
+download** (decision: reuse `stratastack/oal-worker` + `OAL_TRAIN_WORKER_IMAGE`
+override, not a fat training image; no Gradio, no frontend).
+
+Autoscaler pools (`scripts/autoscale.py::training_tick`):
+
+- **train-2b** — queue `oal:queue:training` (2B turbo/SFT adapters), default offer
+  filter, `OAL_TRAIN_MAX_NODES` (default 1).
+- **train-xl** — queue `oal:queue:training-xl` (4B XL), offers ≥ `OAL_TRAIN_XL_MIN_VRAM`
+  (default 32 GB) and ≤ `OAL_TRAIN_XL_MAX_DPH` (default $0.60/h), `OAL_TRAIN_XL_MAX_NODES`
+  (default 1). All model classes are remote-capable immediately; first XL runs double as
+  the VRAM/time benchmark (XL training VRAM is unverified on 24 GB).
+
+Nodes are pinned to their pool's queue via `OAL_TRAIN_QUEUE_MODEL_ID` /
+`OAL_TRAIN_XL_QUEUE_MODEL_ID` so pools never steal each other's jobs. The local
+baseline worker gets first claim for `OAL_TRAIN_VAST_AFTER_SECONDS` before a node is
+created; idle pools stop nodes after `OAL_TRAIN_DOWN_SECONDS` (reuse/stop/destroy
+policy identical to the engine tier). `dph_total` is recorded into
+`vast_instances.dph` at create time for cost accounting (stopped nodes keep their
+dph; runtime = dph × running hours).
+
+Credits: training 50 / validation 10, charged at admission for user owners and
+refunded by the worker on failure (`CreditEntry` external_id `voice-refund:{job}`).
+Worker capability registration uses `execution_profile_id="voice.train"`.

@@ -44,8 +44,9 @@ interface Workspace {
     profile_id: string;
     name: string;
     applicable: boolean;
-    base_model_id: string | null;
-    active_version_id: string | null;
+    default_adapter_id: string | null;
+    adapter_model_selection: string | null;
+    adapter_state: string | null;
     is_main?: boolean;
   } | null;
 }
@@ -70,7 +71,7 @@ interface ArtistRow {
   sharing_policy: string;
   etag: string;
   is_main: boolean;
-  active_version_id: string | null;
+  default_voice_profile_id: string | null;
 }
 
 const SIDEBAR = [
@@ -79,6 +80,7 @@ const SIDEBAR = [
   { to: "/studio", label: "My Tracks", icon: "♪" },
   { to: "/artists", label: "Artist Profiles", icon: "☺" },
   { to: "/training", label: "Training", icon: "◈" },
+  { to: "/voice", label: "Voice Studio", icon: "◉" },
   { to: "/settings", label: "Settings", icon: "⚙" },
 ];
 
@@ -809,15 +811,15 @@ export default function StudioPage() {
                             <option value="">— none (no voice/style) —</option>
                             {profileList.map((a) => (
                               <option key={a.profile_id} value={a.profile_id}>
-                                {`${a.is_main ? "★ " : ""}${a.name}${a.active_version_id ? "" : "  (no trained version)"}`}
+                                {`${a.is_main ? "★ " : ""}${a.name}${a.default_voice_profile_id ? "" : "  (no voice profile)"}`}
                               </option>
                             ))}
                           </select>
                         ) : (
                           <span className="sub" style={{ fontSize: 12 }}>Train an artist profile first, then attach it here.</span>
                         )}
-                        {cur.artist?.applicable && <span className="pill ok">♪ applied to new songs (Standard model)</span>}
-                        {cur.artist && !cur.artist.applicable && <span className="pill warn">needs an active, trained version</span>}
+                        {cur.artist?.applicable && <span className="pill ok">♪ voice adapter applied to new songs</span>}
+                        {cur.artist && !cur.artist.applicable && <span className="pill warn">needs a validated voice adapter</span>}
                       </div>
                     );
                   })()}

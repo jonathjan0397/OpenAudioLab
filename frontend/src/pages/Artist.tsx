@@ -24,7 +24,7 @@ interface Profile {
   sharing_policy: string;
   etag: string;
   is_main: boolean;
-  active_version_id: string | null;
+  default_voice_profile_id: string | null;
 }
 interface ProfileSong {
   song_id: string;
@@ -199,11 +199,12 @@ export default function ArtistPage() {
             <div key={p.profile_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid color-mix(in srgb, var(--border) 40%, transparent)" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="title" style={{ fontSize: 14 }}>{p.is_main && <span title="Main profile" style={{ color: "var(--accent)" }}>★ </span>}{p.name}{p.is_main && <span className="sub" style={{ fontWeight: 400 }}> · Main</span>}{!p.is_main && <span className="sub" style={{ fontWeight: 400 }}> · sub-artist</span>}</div>
-                <div className="sub" style={{ fontSize: 12 }}>/{p.slug} · {p.sharing_policy}{p.active_version_id ? "" : " · no trained version"}{p.bio ? ` · ${p.bio.slice(0, 48)}` : ""}</div>
+                <div className="sub" style={{ fontSize: 12 }}>/{p.slug} · {p.sharing_policy}{p.default_voice_profile_id ? "" : " · no voice profile"}{p.bio ? ` · ${p.bio.slice(0, 48)}` : ""}</div>
               </div>
               <button className="btn" onClick={() => setSelected(selected === p.profile_id ? null : p.profile_id)}>
                 {selected === p.profile_id ? "Hide songs" : "Songs"}
               </button>
+              <Link className="btn btn-ghost" to="/voice" title="Voice Studio">Voice</Link>
               {!p.is_main && (
                 <button className="btn btn-ghost" title="Make this the Main profile" disabled={setMain.isPending} onClick={() => setMain.mutate(p.profile_id)}>
                   Set main
