@@ -51,7 +51,7 @@ SCALE_DOWN_SECONDS = float(os.environ.get("OAL_SCALE_DOWN_SECONDS", "1800"))
 TO_ONE_SECONDS = float(os.environ.get("OAL_SCALE_TO_ONE_SECONDS", "300"))
 MIN_UPTIME = float(os.environ.get("OAL_VAST_MIN_UPTIME", "180"))
 POLL = float(os.environ.get("OAL_SCALE_POLL_SECONDS", "15"))
-STATE = os.environ.get("OAL_AUTOSCALE_STATE", "/tmp/oal_autoscale_state.json")
+STATE = os.environ.get("OAL_AUTOSCALE_STATE", "/var/tmp/oal_autoscale_state.json")
 VASTAI = os.environ.get("VASTAI", "vastai")
 # WireGuard peer pool for Vast burst nodes (hub iface wg2, 10.203.0.0/24).
 # The autoscaler runs on the hub; wg set needs root, so run it under sudo or
@@ -103,7 +103,7 @@ TRAIN_XL_MAX_DPH = float(os.environ.get("OAL_TRAIN_XL_MAX_DPH", "0.60"))
 # Optional training-specific image (defaults to the engine worker image; the
 # UAIS decision is slim image + runtime checkpoint download).
 TRAIN_IMAGE = os.environ.get("OAL_TRAIN_WORKER_IMAGE", "")
-MAX_DPH = float(os.environ.get("OAL_SCALE_MAX_DPH", "0"))
+MAX_DPH = float(os.environ.get("OAL_SCALE_MAX_DPH", "0.40"))  # 0 = uncapped (R9: never default to unlimited spend)
 PRUNE_SECONDS = float(os.environ.get("OAL_PRUNE_SECONDS", "3600"))
 RETENTION_DAYS = int(os.environ.get("OAL_RETENTION_DAYS", "30"))
 # Baseline fallback: when the always-on dev worker is unhealthy, create one
@@ -830,6 +830,9 @@ def tick(r, st, dry_run=False):
         if removable and burst_depth > 0:
             removable = []
             hold_reason = f"burst={burst_depth} draining"
+        elif removable and burst_running():
+            removable = []
+            hold_reason = "burst job running; hold for drain"
         else:
             hold_reason = "all < min_uptime"
         if not removable:
@@ -858,6 +861,31 @@ def tick(r, st, dry_run=False):
 
     training_tick(r, st, now, dry_run)
     return depth
+
+
+def burst_running() -> bool:
+    """True while a music.generate attempt runs on a non-baseline (burst) worker.
+
+    Scale-down must not stop a node mid-job (R9); the queue-depth guard alone
+    misses the node that is *executing* the last job.
+    """
+    eng = _engine()
+    if eng is None:
+        return False
+    try:
+        import sqlalchemy
+
+        with eng.connect() as conn:
+            n = conn.execute(
+                sqlalchemy.text(
+                    "select count(*) from job_attempts a join jobs j on j.id = a.job_id "
+                    "where a.status='running' and j.operation='music.generate' "
+                    "and a.worker_id is not null and a.worker_id not like 'oal-baseline%'"
+                )
+            ).scalar()
+        return bool(n)
+    except Exception:
+        return False
 
 
 def train_running() -> bool:

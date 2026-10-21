@@ -190,3 +190,19 @@ def test_training_tick_xl_pool_creates_separate_node(monkeypatch):
                        ("training_worker", "training-xl", "32", 0.60)]
     assert st["train_nodes"][0]["contract"] == 91
     assert st["train_xl_nodes"][0]["contract"] == 91
+
+
+def test_scaledown_holds_for_running_burst_attempt(monkeypatch):
+    _configure(monkeypatch, SCALE_UP=2, JOBS_PER_NODE=2, MAX_NODES=3, BASELINE=1,
+               TO_ONE_SECONDS=300, SCALE_DOWN_SECONDS=1800, MIN_UPTIME=0,
+               VAST_TRANSPORT="public", REUSE=True, KEEP_STOPPED=2)
+    _noop(monkeypatch)
+    monkeypatch.setattr(autoscale, "burst_running", lambda: True)
+    stopped = []
+    monkeypatch.setattr(autoscale, "stop_instance", lambda cid, dry=False: stopped.append(cid))
+    now = 10000.0
+    st = {"nodes": [{"contract": 55, "created_at": now - 1000}], "low_since": now - 2000}
+    r = _FakeRedis({autoscale.QUEUE_KEY: 0, autoscale.BURST_KEY: 0, autoscale.TRAIN_QUEUE: 0})
+    autoscale.tick(r, st, dry_run=True)
+    assert stopped == []
+    assert st["nodes"][0]["contract"] == 55

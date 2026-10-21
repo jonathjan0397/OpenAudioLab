@@ -257,6 +257,7 @@ class EngineWorker:
                 session.commit()
         except Exception:
             log.exception("could not mark worker %s unhealthy", self.worker_id)
+        self._unhealthy_gate = time.time() + cooldown
 
     def _touch_heartbeat(self) -> None:
         path = self.settings.worker_heartbeat_file
@@ -537,6 +538,13 @@ class EngineWorker:
             self._touch_heartbeat()
             time.sleep(2)
             return False
+        if time.time() < getattr(self, "_unhealthy_gate", 0.0):
+            # Quarantine (R5): an OOM/failed-start worker must not keep
+            # claiming ordinary jobs during its cooldown window.
+            self.register()
+            self._touch_heartbeat()
+            time.sleep(2)
+            return False
         job_id = self.queue.receive(self.receive_queues, self.settings.worker_brpop_timeout_seconds)
         if job_id is None:
             self.register()
@@ -668,6 +676,16 @@ class EngineWorker:
                 except EngineError:
                     log.warning("failed to unload profile adapter after job %s", claimed_job)
 
+    def _restart_engine_after_stall(self) -> None:
+        """Escalation L3 (R7): recycle a hung/timed-out engine so the next
+        attempt starts from a clean GPU state; the process starts lazily."""
+        if self.engine_process is None:
+            return
+        try:
+            self.engine_process.stop()
+        except Exception:
+            log.exception("engine stop after stall failed")
+
     def _recover_upstream(self, job_id: str) -> tuple[SubmitResult, list | None] | None:
         """Reuse a previous attempt's upstream task instead of paying twice.
 
@@ -740,6 +758,7 @@ class EngineWorker:
                     self.db, self.settings, claimed_job, attempt_id, lease_token,
                     "ENGINE_TIMEOUT", "Upstream generation exceeded the timeout.",
                 )
+                self._restart_engine_after_stall()
                 return True
             time.sleep(poll_interval)
 

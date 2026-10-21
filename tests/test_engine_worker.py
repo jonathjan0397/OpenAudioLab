@@ -341,3 +341,14 @@ def test_upstream_task_unknown_falls_back_to_submit(client, orch) -> None:
     assert worker2.run_once() is True
     assert len(fresh.submitted) == 1
     assert _status(orch.db, job_id) == "succeeded"
+
+
+def test_unhealthy_cooldown_defers_claims(client, orch) -> None:
+    """R5: a quarantined worker must not keep claiming ordinary jobs."""
+    adapter = FakeAdapter([SubmitResult(task_id="t")])
+    worker = _worker(orch, adapter)
+    worker._mark_unhealthy("ENGINE_OOM", "CUDA out of memory")
+    submit(client, key="q-1")
+    orch.dispatcher.publish_once()
+    assert worker.run_once() is False
+    assert orch.queue.depth("oal:queue:ace-step-1.5") == 1

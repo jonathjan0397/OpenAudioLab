@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import threading
 import os
 import socket
 import time
@@ -204,6 +205,20 @@ class AudioWorker:
         if claim is None:
             return True
         claimed_job, attempt_id, lease_token = claim
+        # R6: long separations (up to the separator timeout) must keep the
+        # lease alive, or the reconciler falsely interrupts the attempt.
+        beat_stop = threading.Event()
+
+        def _beat() -> None:
+            interval = max(5.0, self.settings.lease_seconds / 3)
+            while not beat_stop.wait(interval):
+                try:
+                    heartbeat(self.db, attempt_id, lease_token)
+                except Exception:
+                    log.exception("audio heartbeat failed")
+
+        beater = threading.Thread(target=_beat, daemon=True)
+        beater.start()
         try:
             self._process(claimed_job, attempt_id, lease_token)
         except Exception as exc:  # worker boundary: never die on one job
@@ -212,6 +227,8 @@ class AudioWorker:
                 self.db, self.settings, claimed_job, attempt_id, lease_token,
                 "EXPORT_FAILED", str(exc)[:300],
             )
+        finally:
+            beat_stop.set()
         return True
 
     def _process(self, job_id: str, attempt_id: str, lease_token: str) -> None:
