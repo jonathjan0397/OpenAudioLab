@@ -785,7 +785,7 @@ def gpu_fleet_offers(
         "external": {"eq": False},
         "type": "on-demand",
         "cuda_max_good": {"gte": crit["min_cuda"]},
-        "gpu_ram": {"gte": int(crit["min_vram_gb"] * 1024 * 1024 * 1024)},
+        "gpu_ram": {"gte": int(crit["min_vram_gb"] * 1024)},  # bundles reports MB
         "num_gpus": {"eq": 1},
         "dph_total": {"lte": crit["max_dph"]},
         "order": [["dph_total", "asc"]],

@@ -557,6 +557,17 @@ def test_offer_normalize_maps_fields(client) -> None:
     assert o["dph"] == 0.20 and o["disk_gb"] == 150.0
 
 
+def test_offer_normalize_bundles_units(client) -> None:
+    """§19.13b: bundles API reports gpu_ram in MB and compute_cap x100."""
+    from app import vast_offers as vo
+
+    o = vo.normalize(_raw(gpu_ram=24576, compute_cap=1200, inet_down=0.0))
+    assert o["vram_gb"] == 24.0 and o["compute_cap"] == 12.0
+    assert o["download_mbps"] is None  # 0.0 placeholder -> Not reported
+    # bundles returns verified=null; the server-side filter enforces it
+    assert vo.ineligible_reason(o, vo.criteria_defaults()) is None
+
+
 def test_offer_checkpoint_size_affects_readiness(client) -> None:
     """§19.14: bigger checkpoints take longer; family map is explicit."""
     from app import vast_offers as vo

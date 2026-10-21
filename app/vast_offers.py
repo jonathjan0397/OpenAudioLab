@@ -62,21 +62,34 @@ def normalize(raw: dict) -> dict:
                 return float(v)
         return None
 
-    gpu_ram_bytes = num("gpu_ram", "gpu_ram_mb")
+    gpu_ram = num("gpu_ram", "gpu_ram_mb")
+    # Unit detection: the legacy search API reported bytes, the bundles API
+    # reports MB (e.g. 24576). Values below 1024 are already GB.
+    vram_gb = None
+    if gpu_ram is not None:
+        if gpu_ram >= 1_000_000_000:
+            vram_gb = gpu_ram / 1024**3
+        elif gpu_ram >= 1024:
+            vram_gb = gpu_ram / 1024
+        else:
+            vram_gb = gpu_ram
+        vram_gb = round(vram_gb, 1)
+    cc = num("compute_cap")
+    if cc is not None and cc >= 100:  # bundles reports compute capability x100
+        cc = cc / 100
     return {
         "offer_id": str(raw.get("id") or raw.get("offer_id") or ""),
         "gpu": raw.get("gpu_name") or raw.get("gpu") or None,
-        # Vast reports gpu_ram in bytes (REST and CLI raw output).
-        "vram_gb": round(gpu_ram_bytes / 1024**3, 1) if gpu_ram_bytes else None,
+        "vram_gb": vram_gb,
         "cuda": num("cuda_max_good", "cuda_version"),
         "country": _country(raw.get("geolocation") or raw.get("locality")),
         "region": raw.get("geolocation") or raw.get("locality") or None,
         "reliability": num("reliability2", "reliability"),
-        "download_mbps": num("inet_down", "download_speed"),
-        "upload_mbps": num("inet_up", "upload_speed"),
+        "download_mbps": num("inet_down", "download_speed") or None,
+        "upload_mbps": num("inet_up", "upload_speed") or None,
         "disk_gb": num("disk_space", "hdd_total_gb"),
         "dph": num("dph_total", "dph"),
-        "compute_cap": num("compute_cap"),
+        "compute_cap": cc,
         "verified": bool(raw.get("verified")) if raw.get("verified") is not None else None,
         "rentable": raw.get("rentable"),
     }
@@ -112,8 +125,8 @@ def ineligible_reason(offer: dict, crit: dict) -> str | None:
         return "INCOMPATIBLE_GPU"
     if crit["countries"] and offer["country"] not in crit["countries"]:
         return "OUTSIDE_REGION"
-    if crit["verified_only"] and offer["verified"] is not True:
-        return "UNVERIFIED_HOST"
+    if crit["verified_only"] and offer["verified"] is False:
+        return "UNVERIFIED_HOST"  # bundles returns null; the server-side filter enforces it
     if offer["reliability"] is not None and offer["reliability"] < crit["min_reliability"]:
         return "LOW_RELIABILITY"
     if crit["min_download_mbps"] and (offer["download_mbps"] or 0) < crit["min_download_mbps"]:
