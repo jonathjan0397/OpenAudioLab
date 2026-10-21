@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, AuthUser, SiteInfo } from "./api";
 import AuthMenu from "./components/AuthMenu";
 import { PlayerBar, PlayerProvider } from "./components/PlayerContext";
+import { WorkspaceProvider, useWorkspace } from "./components/WorkspaceContext";
 import Toaster from "./components/Toast";
 import { ThemeCtx } from "./theme";
 import MainPage from "./pages/Main";
@@ -52,6 +53,7 @@ export default function App() {
   return (
     <ThemeCtx.Provider value={theme}>
     <PlayerProvider>
+      <WorkspaceProvider>
       <header className="site-header">
         <NavLink to="/" className="logo">
           OpenAudioLab<span className="tld">.io</span>
@@ -103,6 +105,7 @@ export default function App() {
             </div>
           )}
         </span>
+        <WorkspaceSwitcher />
         <AuthMenu />
       </header>
       <Routes>
@@ -132,7 +135,29 @@ export default function App() {
       </footer>
       <PlayerBar />
       <Toaster />
+      </WorkspaceProvider>
     </PlayerProvider>
     </ThemeCtx.Provider>
+  );
+}
+
+function WorkspaceSwitcher() {
+  const { activeId, workspaces, setActive } = useWorkspace();
+  if (workspaces.length === 0) return null;
+  return (
+    <span className="ws-switcher" title="Active workspace — new songs are saved here">
+      <span aria-hidden>▤</span>
+      <select
+        value={activeId ?? ""}
+        onChange={(e) => setActive(e.target.value || null)}
+        aria-label="Active workspace"
+      >
+        {workspaces.map((w) => (
+          <option key={w.workspace_id} value={w.workspace_id}>
+            {w.is_default ? `★ ${w.name}` : w.name}
+          </option>
+        ))}
+      </select>
+    </span>
   );
 }

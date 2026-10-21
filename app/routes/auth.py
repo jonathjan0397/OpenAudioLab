@@ -100,6 +100,7 @@ def user_payload(user: User) -> dict:
         "email_verified_at": user.email_verified_at.isoformat() if user.email_verified_at else None,
         "avatar_key": user.avatar_key,
         "bio": user.bio,
+        "active_workspace_id": user.active_workspace_id,
     }
 
 

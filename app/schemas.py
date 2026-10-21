@@ -48,6 +48,7 @@ class GenerateJobRequest(StrictModel):
     outputs: list[OutputOption] = Field(default_factory=lambda: ["mix_wav", "mix_mp3"])
     artist_profile_version_id: str | None = None
     lora_id: str | None = None
+    workspace_id: str | None = Field(default=None, max_length=36)
     client_reference: str | None = Field(default=None, max_length=200)
     policy_version: str | None = Field(default=None, max_length=80)
     policy_accepted: bool = False

@@ -402,6 +402,7 @@ def complete_attempt(
                 job_id=job.id,
                 owner_id=job.owner_id,
                 attempt_id=attempt_id,
+                workspace_id=(job.request_json or {}).get("workspace_id"),
                 storage_key=key,
                 role=role_name,
                 mime="audio/wav",

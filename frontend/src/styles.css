@@ -64,6 +64,15 @@ a { color: var(--accent); }
   border-radius: 999px; padding: 7px 14px; color: var(--muted);
 }
 .header-search input { border: 0; background: transparent; padding: 0; width: 100%; }
+.ws-switcher {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 999px; padding: 5px 8px 5px 12px; color: var(--muted); font-size: 13px;
+}
+.ws-switcher select {
+  border: 0; background: transparent; color: var(--text); font: inherit;
+  max-width: 160px; cursor: pointer;
+}
 .bell { position: relative; cursor: pointer; color: var(--muted); font-size: 17px; }
 .bell .dot {
   position: absolute; top: -2px; right: -3px; width: 8px; height: 8px;

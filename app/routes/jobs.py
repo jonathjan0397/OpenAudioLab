@@ -495,6 +495,12 @@ def create_job(
                     "The registry LoRA was trained for a different base model.",
                     {"lora_base_model_id": lora.base_model_id, "model_id": payload.model_id},
                 )
+        if payload.workspace_id is not None:
+            from ..models import Workspace
+
+            workspace = session.get(Workspace, payload.workspace_id)
+            if workspace is None or workspace.owner_id != owner_id or workspace.deleted_at is not None:
+                raise ApiError(404, "WORKSPACE_NOT_FOUND", "Workspace not found.")
         existing = session.execute(
             select(IdempotencyRecord).where(
                 IdempotencyRecord.owner_id == owner_id,

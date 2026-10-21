@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 
 from ..deps import owner_from_request
 from ..errors import ApiError
-from ..models import Asset, Job, Workspace, WorkspaceSong, new_uuid
+from ..models import Asset, Job, User, Workspace, WorkspaceSong, new_uuid
 from ..schemas import StrictModel
 
 router = APIRouter(tags=["workspaces"])
@@ -34,6 +34,10 @@ class WorkspaceSongCreate(StrictModel):
     asset_id: str | None = Field(default=None, max_length=36)
     job_id: str | None = Field(default=None, max_length=36)
     title: str = Field(default="Untitled", max_length=200)
+
+
+class ActiveWorkspaceSet(StrictModel):
+    workspace_id: str | None = Field(default=None, max_length=36)
 
 
 def ensure_default_workspace(session, owner_id: str) -> Workspace:
@@ -130,6 +134,41 @@ def create_workspace(payload: WorkspaceCreate, request: Request, owner_id: str =
         session.add(ws)
         session.commit()
         return JSONResponse(status_code=201, content=_ws_json(ws))
+
+
+@router.get("/workspaces/active")
+def get_active_workspace(request: Request, owner_id: str = Depends(owner_from_request)) -> JSONResponse:
+    """Effective workspace for routing new generations (the account's pick, else default)."""
+    with request.app.state.db.session() as session:
+        user = session.get(User, owner_id[4:]) if owner_id.startswith("usr_") else None
+        active = user.active_workspace_id if user else None
+        if active is not None:
+            ws = session.get(Workspace, active)
+            if ws is None or ws.deleted_at is not None or ws.owner_id != owner_id:
+                active = None
+        default = ensure_default_workspace(session, owner_id)
+        return JSONResponse({"workspace_id": active or default.id, "is_default": active is None})
+
+
+@router.post("/workspaces/active")
+def set_active_workspace(
+    payload: ActiveWorkspaceSet, request: Request, owner_id: str = Depends(owner_from_request)
+) -> JSONResponse:
+    """Persist the account's active workspace (None -> My Default Space)."""
+    with request.app.state.db.session() as session:
+        if not owner_id.startswith("usr_"):
+            raise ApiError(400, "ACCOUNT_REQUIRED", "Active workspace requires a site account.")
+        user = session.get(User, owner_id[4:])
+        if user is None or user.state != "active":
+            raise ApiError(403, "USER_DISABLED", "Account is missing or disabled.")
+        if payload.workspace_id is None:
+            ws = ensure_default_workspace(session, owner_id)
+            user.active_workspace_id = None
+        else:
+            ws = _get_owned(session, payload.workspace_id, owner_id)
+            user.active_workspace_id = ws.id
+        session.commit()
+        return JSONResponse({"workspace_id": ws.id})
 
 
 @router.get("/workspaces/{workspace_id}")

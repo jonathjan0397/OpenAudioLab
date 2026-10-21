@@ -5,6 +5,7 @@ import { buildGenerationRequest } from "../lib/generation";
 import ArtworkTile from "./ArtworkTile";
 import Waveform from "./Waveform";
 import { usePlayer } from "./PlayerContext";
+import { useWorkspace } from "./WorkspaceContext";
 import { exportArtifact } from "./social";
 import { fmtTime } from "./ui";
 
@@ -98,6 +99,7 @@ export default function CreateWidget({
 }) {
   const player = usePlayer();
   const qc = useQueryClient();
+  const { activeId } = useWorkspace();
   const me = useQuery({
     queryKey: ["me"],
     queryFn: () => api.get<{ user: AuthUser }>("/api/v1/auth/me"),
@@ -334,6 +336,7 @@ export default function CreateWidget({
           modelSelection: premiumSelected ? modelSelection : undefined,
           executionProfileId: premiumSelected ? selectedProfile!.execution_profile_id : undefined,
           seed: mode === "remix" ? Math.floor(Math.random() * 1_000_000_000) : undefined,
+          workspaceId: isGuest ? undefined : activeId || undefined,
         },
         { supportedControls: caps.data?.supported_controls, controlRanges: selectedProfile?.control_ranges },
       );

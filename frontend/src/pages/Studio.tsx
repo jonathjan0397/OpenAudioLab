@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, AuthUser } from "../api";
@@ -6,6 +6,7 @@ import CreateWidget, { DRAFT_KEY } from "../components/CreateWidget";
 import ArtworkTile from "../components/ArtworkTile";
 import Waveform from "../components/Waveform";
 import { usePlayer } from "../components/PlayerContext";
+import { useWorkspace } from "../components/WorkspaceContext";
 import { Donut, Progress, StatusPill, fmtTime } from "../components/ui";
 import { exportArtifact } from "../components/social";
 import { buildGenerationRequest } from "../lib/generation";
@@ -118,7 +119,11 @@ export default function StudioPage() {
     queryFn: () => api.get<{ user: AuthUser }>("/api/v1/auth/me"),
     retry: false,
   });
+  const { activeId } = useWorkspace();
   const [wsFilter, setWsFilter] = useState<string>("all");
+  useEffect(() => {
+    if (activeId) setWsFilter(activeId);
+  }, [activeId]);
   const tracks = useQuery({
     queryKey: ["my-tracks", wsFilter],
     queryFn: () => api.get<{ tracks: Track[] }>(`/api/v1/tracks?limit=50${wsFilter !== "all" ? `&workspace_id=${encodeURIComponent(wsFilter)}` : ""}`),
@@ -296,6 +301,7 @@ export default function StudioPage() {
           ...(s.duration_seconds ? { duration_seconds: s.duration_seconds } : {}),
           instrumental: !!s.instrumental,
           outputs: ["mix_wav"],
+          ...(activeId || s.workspace_id ? { workspace_id: activeId || s.workspace_id } : {}),
         },
         { "Idempotency-Key": crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}` }
       )
@@ -329,6 +335,7 @@ export default function StudioPage() {
           durationSeconds: Math.max(10, Math.min(120, Math.round(t.duration_seconds || 30))),
           loraId: "",
           taskType: "cover",
+          workspaceId: activeId || t.workspace_id || undefined,
           srcAssetId: t.asset_id,
           audioCoverStrength: 0.7,
         }),
@@ -365,6 +372,7 @@ export default function StudioPage() {
           durationSeconds: Math.max(10, Math.min(120, Math.round(t.duration_seconds || 15))),
           loraId: "",
           taskType: "repaint",
+          workspaceId: activeId || t.workspace_id || undefined,
           srcAssetId: t.asset_id,
           repaintingStart: Math.max(0, Number(repaintStart) || 0),
           repaintingEnd: Math.max(0, Number(repaintEnd) || 0),

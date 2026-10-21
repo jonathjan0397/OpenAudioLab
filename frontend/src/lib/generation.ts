@@ -40,6 +40,9 @@ export interface GenerationDraft {
   modelSelection?: string;
   executionProfileId?: string;
   quoteId?: string;
+  // Active workspace: routes new generations into this collection. Left
+  // undefined for guests / no selection so the backend files into the default.
+  workspaceId?: string;
 }
 
 // Default capability set for the deployed ACE-Step 1.5 Turbo release. Callers
@@ -169,5 +172,6 @@ export function buildGenerationRequest(
   if (d.repaintMode) body.repaint_mode = d.repaintMode;
   if (typeof d.repaintStrength === "number") body.repaint_strength = d.repaintStrength;
   if (d.chunkMaskMode) body.chunk_mask_mode = d.chunkMaskMode;
+  if (d.workspaceId) body.workspace_id = d.workspaceId;
   return body;
 }
