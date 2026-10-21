@@ -35,6 +35,8 @@ class Storage(Protocol):
 
     def delete(self, key: str) -> None: ...
 
+    def list_prefix(self, prefix: str) -> list[str]: ...
+
 
 class LocalObjectStorage:
     def __init__(self, root: str | Path) -> None:
@@ -72,6 +74,17 @@ class LocalObjectStorage:
         path = self._path(key)
         if path.is_file():
             path.unlink()
+
+    def list_prefix(self, prefix: str) -> list[str]:
+        base = (self.root / prefix).resolve()
+        root = self.root.resolve()
+        if not str(base).startswith(str(root)) or not base.exists():
+            return []
+        out: list[str] = []
+        for p in base.rglob("*"):
+            if p.is_file():
+                out.append(str(p.relative_to(root)))
+        return out
 
 
 def parse_range(header: str | None, size: int) -> tuple[int, int] | None:
@@ -164,6 +177,25 @@ class S3ObjectStorage:
 
     def delete(self, key: str) -> None:
         self.client.delete_object(Bucket=self.bucket, Key=self._key(key))
+
+    def list_prefix(self, prefix: str) -> list[str]:
+        full = self._key(prefix)
+        keys: list[str] = []
+        token: str | None = None
+        while True:
+            kwargs = {"Bucket": self.bucket, "Prefix": full, "MaxKeys": 1000}
+            if token:
+                kwargs["ContinuationToken"] = token
+            resp = self.client.list_objects_v2(**kwargs)
+            for obj in resp.get("Contents", []):
+                k = obj["Key"]
+                keys.append(k[len(self.prefix):] if self.prefix and k.startswith(self.prefix) else k)
+            if not resp.get("IsTruncated"):
+                break
+            token = resp.get("NextContinuationToken")
+            if not token:
+                break
+        return keys
 
 
 def build_storage(settings: "Settings") -> Storage:
