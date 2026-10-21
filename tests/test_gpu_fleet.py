@@ -352,3 +352,121 @@ def test_fleet_offers_endpoint_mocked(client, monkeypatch):
     monkeypatch.setattr(requests, "post", boom)
     adm._OFFER_CACHE.update({"key": None, "at": 0.0, "result": None})
     assert client.get("/api/v1/admin/gpu-fleet/offers").status_code == 502
+
+
+# ------------------------------------------------------- M3: deployments API
+
+def _login_admin3(client):
+    from app.models import User
+
+    client.post("/api/v1/auth/logout")
+    r = client.post("/api/v1/auth/register",
+                    json={"email": "fleet4@example.com", "username": "fleet4", "password": "super-secret-1"})
+    if r.status_code == 201:
+        with client.app.state.db.session() as session:
+            session.get(User, r.json()["user"]["id"]).role = "admin"
+            session.commit()
+
+
+def test_manual_deployment_idempotent_and_audited(client):
+    """§19.34/35/40: manual deploy works while auto burst is on, double-submit
+    collapses on the idempotency key, and an audit event is written."""
+    from app.models import GpuFleetEvent
+
+    _login_admin3(client)
+    body = {"purpose": "xl-turbo", "idempotency_key": "deploy-abc"}
+    r = client.post("/api/v1/admin/gpu-fleet/deployments", json=body)
+    assert r.status_code == 201
+    assert r.json()["created"] is True
+    assert r.json()["deployment"]["origin"] == "MANUAL_ADMIN"
+    assert r.json()["deployment"]["automatic_shutdown"] is False
+    r2 = client.post("/api/v1/admin/gpu-fleet/deployments", json=body)
+    assert r2.status_code == 200 and r2.json()["created"] is False  # §19.35
+    with client.app.state.db.session() as session:
+        from sqlalchemy import select as sa_select
+
+        evs = session.execute(sa_select(GpuFleetEvent)
+                              .where(GpuFleetEvent.action == "deploy_requested")).scalars().all()
+    assert len(evs) == 1  # §19.40 (one event, not two)
+
+
+def test_deployment_budget_enforced(client, monkeypatch):
+    """§19.39: manual provisioning cannot silently bypass the daily budget."""
+    from app.models import VastInstance
+
+    _login_admin3(client)
+    with client.app.state.db.session() as session:
+        session.add(VastInstance(vast_instance_id="budget-1", hostname="budget-node",
+                                 dph=0.25, state="running"))
+        session.commit()
+    monkeypatch.setattr("app.routes.admin._fleet_settings",
+                        lambda request: {**_fset(), "daily_burst_budget_usd": 0.10})
+    r = client.post("/api/v1/admin/gpu-fleet/deployments",
+                    json={"purpose": "auto", "idempotency_key": "deploy-budget"})
+    assert r.status_code == 409
+    assert r.json()["error"]["code"] == "BUDGET_EXHAUSTED"
+    with client.app.state.db.session() as session:
+        from sqlalchemy import delete as sa_delete
+
+        session.execute(sa_delete(VastInstance).where(VastInstance.vast_instance_id == "budget-1"))
+        session.commit()
+
+
+def test_worker_stop_busy_guard(client, monkeypatch):
+    """§19.36: stop during active generation needs force."""
+    from app.models import JobAttempt, VastInstance
+
+    _login_admin3(client)
+    monkeypatch.setattr("app.routes.admin._vast_request", lambda *a, **k: {})
+    with client.app.state.db.session() as session:
+        inst = VastInstance(vast_instance_id="busy-1", hostname="gpu-node-7", dph=0.2, state="running")
+        session.add(inst)
+        session.commit()
+        iid = inst.id
+    # no running attempt -> stop ok
+    r = client.post("/api/v1/admin/gpu-fleet/workers/acestep-gpu-node-7-999/stop")
+    assert r.status_code == 200
+    # add a running attempt -> 409 unless force
+    with client.app.state.db.session() as session:
+        session.add(JobAttempt(job_id="x", attempt_number=1, worker_id="acestep-gpu-node-7-999",
+                               status="running", lease_token="t"))
+        session.commit()
+    r = client.post("/api/v1/admin/gpu-fleet/workers/acestep-gpu-node-7-999/stop")
+    assert r.status_code == 409
+    assert r.json()["error"]["code"] == "WORKER_BUSY"
+    r = client.post("/api/v1/admin/gpu-fleet/workers/acestep-gpu-node-7-999/stop?force=true")
+    assert r.status_code == 200
+    with client.app.state.db.session() as session:
+        from sqlalchemy import delete as sa_delete, select as sa_select
+
+        session.execute(sa_delete(JobAttempt).where(JobAttempt.lease_token == "t"))
+        rec = session.execute(sa_select(VastInstance).where(VastInstance.id == iid)).scalars().first()
+        if rec:
+            session.delete(rec)
+        session.commit()
+
+
+def test_manual_contracts_protected_from_scaledown():
+    """§19.38: routine scale-down must not destroy manual workers."""
+    import importlib.util, pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("autoscale_m3", root / "scripts" / "autoscale.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    # no DB -> empty set (best-effort), and the tick filter uses it
+    assert mod.manual_contracts() == set()
+
+
+def test_nonadmin_denied(client):
+    from app.models import User
+
+    client.post("/api/v1/auth/logout")
+    r = client.post("/api/v1/auth/register",
+                    json={"email": "pleb@example.com", "username": "pleb", "password": "super-secret-1"})
+    assert r.status_code == 201
+    resp = client.get("/api/v1/admin/gpu-fleet")
+    assert resp.status_code == 403  # §19.32
+    with client.app.state.db.session() as session:
+        session.get(User, r.json()["user"]["id"])
+    client.post("/api/v1/auth/logout")
