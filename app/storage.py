@@ -110,6 +110,20 @@ def parse_range(header: str | None, size: int) -> tuple[int, int] | None:
     return (start, min(end, size - 1))
 
 
+def asset_blob_keys(storage_key: str) -> list[str]:
+    """Object keys backing a single asset row: the file plus any cached peaks JSON."""
+    keys = [storage_key]
+    if storage_key.endswith(".wav"):
+        keys.append(storage_key[: -len(".wav")] + ".json")
+    return keys
+
+
+def delete_asset_blobs(storage: Storage, storage_key: str) -> None:
+    """Remove an asset's bytes (and cached waveform) from object storage. Idempotent."""
+    for key in asset_blob_keys(storage_key):
+        storage.delete(key)
+
+
 class S3ObjectStorage:
     """S3-compatible adapter (MinIO on the hub, or managed object storage).
 

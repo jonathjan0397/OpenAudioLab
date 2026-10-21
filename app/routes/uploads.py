@@ -198,10 +198,15 @@ def delete_asset(
     request: Request,
     owner_id: str = Depends(owner_from_request),
 ) -> Response:
+    """Move an asset to Trash: hidden from the owner immediately, bytes reclaimed
+    48 hours later by the retention service (purge_after). Matches admin soft-delete."""
     with request.app.state.db.session() as session:
         asset = session.get(Asset, asset_id)
         if asset is None or asset.owner_id != owner_id:
             raise ApiError(404, "ASSET_NOT_FOUND", "Asset not found.")
-        asset.deleted_at = utcnow()
+        if asset.deleted_at is None:
+            now = utcnow()
+            asset.deleted_at = now
+            asset.purge_after = now + timedelta(hours=48)
         session.commit()
     return Response(status_code=204)

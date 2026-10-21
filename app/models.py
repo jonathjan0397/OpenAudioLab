@@ -143,6 +143,7 @@ class Asset(Base):
     duration_seconds: Mapped[float | None] = mapped_column(nullable=True)
     synthetic: Mapped[bool] = mapped_column(default=False)
     title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    slug: Mapped[str | None] = mapped_column(String(80), nullable=True)
     shared: Mapped[bool] = mapped_column(default=False)
     tags_json: Mapped[list] = mapped_column(JSON, default=list)
     manifest_json: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -150,6 +151,8 @@ class Asset(Base):
     finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    purge_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Worker(Base):
@@ -369,6 +372,7 @@ class User(Base):
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     avatar_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
     bio: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    active_workspace_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

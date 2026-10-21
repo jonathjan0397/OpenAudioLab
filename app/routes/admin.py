@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import re
+import urllib.parse
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 
@@ -15,6 +19,52 @@ router = APIRouter(tags=["admin"], dependencies=[Depends(require_admin)])
 
 ALLOWED_TEMPLATES = ("open-canvas", "analog-soul", "neon-studio", "signal-lab")
 DEFAULT_TEMPLATE = "open-canvas"
+TRASH_PURGE_HOURS = 48
+
+_MIME_EXT = {
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/mpeg": ".mp3",
+    "audio/flac": ".flac",
+    "audio/ogg": ".ogg",
+    "application/zip": ".zip",
+}
+
+
+def _filename_ext(asset) -> str:
+    suffix = _MIME_EXT.get((asset.mime or "").lower())
+    if suffix:
+        return suffix
+    for known in (".wav", ".mp3", ".flac", ".ogg", ".zip", ".json"):
+        if asset.storage_key.endswith(known):
+            return known
+    return ".bin"
+
+
+def _safe_filename(base: str | None, asset_id: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", (base or "").strip()).strip("-.")
+    return cleaned or asset_id[:16]
+
+
+def _disposition(asset) -> str:
+    name = _safe_filename(asset.slug or asset.title, asset.id) + _filename_ext(asset)
+    ascii_name = name.encode("ascii", "ignore").decode() or asset.id
+    quoted = urllib.parse.quote(name)
+    return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quoted}'
+
+
+def _asset_state(asset, now) -> str:
+    from ..orchestration import as_utc
+
+    if asset.purged_at is not None:
+        return "purged"
+    if asset.deleted_at is not None:
+        return "trashed"
+    if asset.expires_at is not None and as_utc(asset.expires_at) <= now:
+        return "expired"
+    if asset.shared:
+        return "shared"
+    return "live"
 
 
 class AdminCreateUser(BaseModel):
@@ -35,6 +85,11 @@ class AdminCreditAdjust(BaseModel):
     delta: int = Field(ge=-1_000_000, le=1_000_000)
     reason: str = Field(default="admin_adjust", max_length=60)
     note: str | None = Field(default=None, max_length=200)
+
+
+class AdminAssetPatch(BaseModel):
+    shared: bool | None = Field(default=None)
+    trash: bool | None = Field(default=None)
 
 
 class TemplateSetting(BaseModel):
@@ -1550,3 +1605,396 @@ def admin_patch_abuse_report(
         record_admin_audit(session, admin.id, "abuse.update", "abuse_report", report.id, reason=payload.status)
         session.commit()
     return JSONResponse({"id": report.id, "status": report.status, "decision": report.decision})
+
+
+# --- M18: admin media catalog (browse + listen + moderate all owners) --------
+
+_ASSET_STATUS_FILTERS = ("all", "live", "shared", "trashed", "expired", "purged", "uploads", "stems")
+
+
+def _iso(value) -> str | None:
+    return value.isoformat() if value else None
+
+
+def _enrich_asset_rows(session, assets, now):
+    from ..models import Job
+
+    owner_ids = sorted({a.owner_id for a in assets})
+    names: dict[str, str] = {}
+    user_ids = sorted({o[4:] for o in owner_ids if o.startswith("usr_")})
+    if user_ids:
+        for u in session.execute(select(User).where(User.id.in_(user_ids))).scalars():
+            names["usr_" + u.id] = u.username
+    job_ids = [a.job_id for a in assets if a.job_id]
+    jobs: dict[str, tuple[str | None, object]] = {}
+    if job_ids:
+        for jid, model_id, rjson in session.execute(
+            select(Job.id, Job.model_id, Job.request_json).where(Job.id.in_(job_ids))
+        ).all():
+            jobs[jid] = (model_id, (rjson or {}).get("seed"))
+    rows = []
+    for asset in assets:
+        model_id, seed = jobs.get(asset.job_id, (None, None)) if asset.job_id else (None, None)
+        state = _asset_state(asset, now)
+        rows.append(
+            {
+                "asset_id": asset.id,
+                "owner_id": asset.owner_id,
+                "user": names.get(asset.owner_id, asset.owner_id.replace("tok_", "api:")[:14]),
+                "role": asset.role,
+                "kind": asset.kind,
+                "mime": asset.mime,
+                "bytes": asset.bytes,
+                "duration_seconds": asset.duration_seconds,
+                "title": asset.title,
+                "slug": asset.slug,
+                "shared": bool(asset.shared),
+                "workspace_id": asset.workspace_id,
+                "job_id": asset.job_id,
+                "model_id": model_id,
+                "seed": seed,
+                "state": state,
+                "byte_present": asset.purged_at is None,
+                "playable": asset.mime.startswith("audio/") and asset.purged_at is None,
+                "content_url": f"/api/v1/admin/artifacts/{asset.id}/content",
+                "waveform_url": (
+                    f"/api/v1/admin/artifacts/{asset.id}/waveform" if asset.storage_key.endswith(".wav") else None
+                ),
+                "download_name": _safe_filename(asset.slug or asset.title, asset.id) + _filename_ext(asset),
+                "created_at": _iso(asset.created_at),
+                "finalized_at": _iso(asset.finalized_at),
+                "expires_at": _iso(asset.expires_at),
+                "deleted_at": _iso(asset.deleted_at),
+                "purge_after": _iso(asset.purge_after),
+                "purged_at": _iso(asset.purged_at),
+            }
+        )
+    return rows
+
+
+@router.get("/admin/assets")
+def admin_assets(
+    request: Request,
+    user_id: str | None = Query(default=None, max_length=36),
+    owner_id: str | None = Query(default=None, max_length=80),
+    q: str | None = Query(default=None, max_length=120),
+    role: str | None = Query(default=None, max_length=40),
+    kind: str | None = Query(default=None, max_length=20),
+    status: str = Query(default="all", max_length=20),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> JSONResponse:
+    """Cross-owner media catalog for admins: browse + listen, incl. expired/trashed/purged."""
+    from ..models import Asset
+
+    if status not in _ASSET_STATUS_FILTERS:
+        raise ApiError(422, "INVALID_STATUS", f"status must be one of {list(_ASSET_STATUS_FILTERS)}")
+
+    now = utcnow()
+    with request.app.state.db.session() as session:
+        stmt = select(Asset)
+        if owner_id:
+            stmt = stmt.where(Asset.owner_id == owner_id)
+        elif user_id:
+            stmt = stmt.where(Asset.owner_id == "usr_" + user_id)
+        if role:
+            stmt = stmt.where(Asset.role == role)
+        if kind:
+            stmt = stmt.where(Asset.kind == kind)
+
+        if status == "live":
+            stmt = stmt.where(Asset.deleted_at.is_(None), Asset.purged_at.is_(None)).where(
+                or_(Asset.expires_at.is_(None), Asset.expires_at > now)
+            )
+        elif status == "shared":
+            stmt = stmt.where(Asset.deleted_at.is_(None), Asset.purged_at.is_(None), Asset.shared.is_(True))
+        elif status == "trashed":
+            stmt = stmt.where(Asset.deleted_at.is_not(None), Asset.purged_at.is_(None))
+        elif status == "expired":
+            stmt = stmt.where(Asset.purged_at.is_(None), Asset.expires_at.is_not(None), Asset.expires_at <= now)
+        elif status == "purged":
+            stmt = stmt.where(Asset.purged_at.is_not(None))
+        elif status == "uploads":
+            stmt = stmt.where(Asset.kind == "uploaded")
+        elif status == "stems":
+            stmt = stmt.where(Asset.role.in_(("stems_wav", "stems_zip")), Asset.deleted_at.is_(None))
+
+        if q:
+            like = f"%{q.strip()}%"
+            conds = [Asset.title.ilike(like), Asset.storage_key.ilike(like), Asset.id == q.strip()]
+            owner_candidates = [
+                "usr_" + uid
+                for (uid,) in session.execute(
+                    select(User.id).where(or_(User.username.ilike(like), User.email.ilike(like)))
+                ).all()
+            ]
+            if owner_candidates:
+                conds.append(Asset.owner_id.in_(owner_candidates))
+            stmt = stmt.where(or_(*conds))
+
+        total = session.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
+        assets = list(session.execute(stmt.order_by(Asset.created_at.desc()).limit(limit).offset(offset)).scalars())
+        items = _enrich_asset_rows(session, assets, now)
+    return JSONResponse({"items": items, "total": total})
+
+
+@router.get("/admin/artifacts/{asset_id}/content")
+def admin_artifact_content(
+    asset_id: str,
+    request: Request,
+    download: bool = Query(default=False),
+) -> Response:
+    """Forensic playback/download stream. Admin-gated; serves expired and trashed bytes."""
+    from ..models import Asset
+    from ..storage import parse_range
+
+    with request.app.state.db.session() as session:
+        asset = session.execute(select(Asset).where(Asset.id == asset_id)).scalar_one_or_none()
+        if asset is None:
+            raise ApiError(404, "ASSET_NOT_FOUND", "Asset not found.")
+        storage_key = asset.storage_key
+        mime = asset.mime
+        total_bytes = asset.bytes
+        purged = asset.purged_at is not None
+        disposition = _disposition(asset) if download else None
+    if purged:
+        raise ApiError(410, "CONTENT_PURGED", "Asset bytes have been purged.")
+    byte_range = parse_range(request.headers.get("Range"), total_bytes)
+    try:
+        stored = request.app.state.storage.get(storage_key, byte_range)
+    except FileNotFoundError:
+        raise ApiError(404, "CONTENT_MISSING", "Stored file is missing.")
+    headers = {"Accept-Ranges": "bytes"}
+    if disposition is not None:
+        headers["Content-Disposition"] = disposition
+    status_code = 200
+    if stored.content_range is not None:
+        headers["Content-Range"] = stored.content_range
+        status_code = 206
+    return Response(content=stored.body, status_code=status_code, media_type=mime, headers=headers)
+
+
+@router.get("/admin/artifacts/{asset_id}/waveform")
+def admin_artifact_waveform(asset_id: str, request: Request) -> Response:
+    """Cached (or lazily computed) waveform peaks for any asset, incl. expired/trashed."""
+    from ..models import Asset
+
+    storage = request.app.state.storage
+    with request.app.state.db.session() as session:
+        asset = session.execute(select(Asset).where(Asset.id == asset_id)).scalar_one_or_none()
+    if asset is None:
+        raise ApiError(404, "ASSET_NOT_FOUND", "Asset not found.")
+    if not asset.storage_key.endswith(".wav"):
+        raise ApiError(404, "WAVEFORM_NOT_FOUND", "No waveform for this asset.")
+    key = asset.storage_key[: -len(".wav")] + ".json"
+    try:
+        stored = storage.get(key)
+        return Response(content=stored.body, media_type="application/json")
+    except FileNotFoundError:
+        pass
+    if asset.purged_at is not None:
+        raise ApiError(410, "CONTENT_PURGED", "Asset bytes have been purged.")
+    try:
+        wav = storage.get(asset.storage_key)
+    except FileNotFoundError:
+        raise ApiError(404, "WAVEFORM_NOT_FOUND", "Audio file is missing.")
+    from ..peaks import peaks_json
+
+    body = peaks_json(wav.body)
+    try:
+        storage.put(key, body)
+    except OSError:
+        pass
+    return Response(content=body, media_type="application/json")
+
+
+@router.patch("/admin/assets/{asset_id}")
+def admin_patch_asset(
+    asset_id: str,
+    payload: AdminAssetPatch,
+    request: Request,
+    admin: User = Depends(require_admin),
+) -> JSONResponse:
+    """Moderation: unshare/re-share a track, or move to Trash / restore it."""
+    from ..audit import record_admin_audit
+    from ..models import Asset
+
+    now = utcnow()
+    with request.app.state.db.session() as session:
+        asset = session.get(Asset, asset_id)
+        if asset is None:
+            raise ApiError(404, "ASSET_NOT_FOUND", "Asset not found.")
+        if payload.shared is not None:
+            asset.shared = payload.shared
+        if payload.trash is True:
+            asset.deleted_at = now
+            asset.purge_after = now + timedelta(hours=TRASH_PURGE_HOURS)
+        elif payload.trash is False:
+            asset.deleted_at = None
+            asset.purge_after = None
+        record_admin_audit(
+            session,
+            admin.id,
+            "asset.patch",
+            "asset",
+            asset.id,
+            context_json=payload.model_dump(exclude_none=True),
+        )
+        session.commit()
+    return JSONResponse(
+        {
+            "asset_id": asset.id,
+            "shared": bool(asset.shared),
+            "deleted_at": _iso(asset.deleted_at),
+            "purge_after": _iso(asset.purge_after),
+        }
+    )
+
+
+@router.post("/admin/assets/{asset_id}/purge")
+def admin_purge_asset(
+    asset_id: str,
+    request: Request,
+    admin: User = Depends(require_admin),
+) -> JSONResponse:
+    """Irreversibly delete one asset's bytes now (metadata row is kept for audit)."""
+    from ..audit import record_admin_audit
+    from ..models import Asset
+    from ..storage import delete_asset_blobs
+
+    now = utcnow()
+    with request.app.state.db.session() as session:
+        asset = session.get(Asset, asset_id)
+        if asset is None:
+            raise ApiError(404, "ASSET_NOT_FOUND", "Asset not found.")
+        already = asset.purged_at is not None
+        if not already:
+            delete_asset_blobs(request.app.state.storage, asset.storage_key)
+            asset.purged_at = now
+            if asset.deleted_at is None:
+                asset.deleted_at = now
+        record_admin_audit(session, admin.id, "asset.purge", "asset", asset.id)
+        session.commit()
+    return JSONResponse({"asset_id": asset_id, "purged": True, "already_purged": already})
+
+
+@router.post("/admin/users/{user_id}/purge-content")
+def admin_purge_user_content(
+    user_id: str,
+    request: Request,
+    admin: User = Depends(require_admin),
+) -> JSONResponse:
+    """Irreversibly delete ALL of a user's stored media (account + rows are kept)."""
+    from ..audit import record_admin_audit
+    from ..models import Asset
+    from ..storage import delete_asset_blobs
+
+    owner_id = "usr_" + user_id
+    now = utcnow()
+    purged = 0
+    with request.app.state.db.session() as session:
+        if session.get(User, user_id) is None:
+            raise ApiError(404, "USER_NOT_FOUND", "User not found.")
+        assets = list(
+            session.execute(select(Asset).where(Asset.owner_id == owner_id, Asset.purged_at.is_(None))).scalars()
+        )
+        for asset in assets:
+            delete_asset_blobs(request.app.state.storage, asset.storage_key)
+            asset.purged_at = now
+            if asset.deleted_at is None:
+                asset.deleted_at = now
+            purged += 1
+        record_admin_audit(
+            session, admin.id, "user.purge-content", "user", user_id, context_json={"assets_purged": purged}
+        )
+        session.commit()
+    return JSONResponse({"user_id": user_id, "owner_id": owner_id, "assets_purged": purged})
+
+
+@router.get("/admin/users/{user_id}/assets")
+def admin_user_assets(
+    user_id: str,
+    request: Request,
+    status: str = Query(default="all", max_length=20),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> JSONResponse:
+    """A single user's media catalog (same rows as /admin/assets, scoped to the owner)."""
+    response = admin_assets(
+        request, user_id=user_id, owner_id=None, q=None, role=None, kind=None, status=status, limit=limit, offset=offset
+    )
+    return response
+
+
+@router.get("/admin/users/{user_id}")
+def admin_user_detail(
+    user_id: str,
+    request: Request,
+    asset_limit: int = Query(default=20, ge=1, le=200),
+) -> JSONResponse:
+    """Per-user drill-down: account summary + content counts + recent playable generations."""
+    from ..models import Asset, Job
+
+    now = utcnow()
+    owner_id = "usr_" + user_id
+    with request.app.state.db.session() as session:
+        user = session.get(User, user_id)
+        if user is None:
+            raise ApiError(404, "USER_NOT_FOUND", "User not found.")
+        payload = user_payload(user)
+        created_at = _iso(user.created_at)
+        jobs_total = session.execute(
+            select(func.count()).select_from(Job).where(Job.owner_id == owner_id)
+        ).scalar_one()
+        jobs_succeeded = session.execute(
+            select(func.count()).select_from(Job).where(Job.owner_id == owner_id, Job.status == "succeeded")
+        ).scalar_one()
+        jobs_failed = session.execute(
+            select(func.count()).select_from(Job).where(Job.owner_id == owner_id, Job.status == "failed")
+        ).scalar_one()
+        assets_total = session.execute(
+            select(func.count()).select_from(Asset).where(Asset.owner_id == owner_id)
+        ).scalar_one()
+        assets_purged = session.execute(
+            select(func.count()).select_from(Asset).where(Asset.owner_id == owner_id, Asset.purged_at.is_not(None))
+        ).scalar_one()
+        assets_trashed = session.execute(
+            select(func.count())
+            .select_from(Asset)
+            .where(Asset.owner_id == owner_id, Asset.deleted_at.is_not(None), Asset.purged_at.is_(None))
+        ).scalar_one()
+        assets_shared = session.execute(
+            select(func.count())
+            .select_from(Asset)
+            .where(Asset.owner_id == owner_id, Asset.shared.is_(True), Asset.deleted_at.is_(None))
+        ).scalar_one()
+        storage_bytes = session.execute(
+            select(func.coalesce(func.sum(Asset.bytes), 0)).where(
+                Asset.owner_id == owner_id, Asset.purged_at.is_(None)
+            )
+        ).scalar_one()
+        recent = list(
+            session.execute(
+                select(Asset)
+                .where(Asset.owner_id == owner_id)
+                .order_by(Asset.created_at.desc())
+                .limit(asset_limit)
+            ).scalars()
+        )
+        recent_assets = _enrich_asset_rows(session, recent, now)
+    return JSONResponse(
+        {
+            "user": {**payload, "created_at": created_at},
+            "counts": {
+                "jobs_total": int(jobs_total),
+                "jobs_succeeded": int(jobs_succeeded),
+                "jobs_failed": int(jobs_failed),
+                "assets_total": int(assets_total),
+                "assets_trashed": int(assets_trashed),
+                "assets_purged": int(assets_purged),
+                "assets_shared": int(assets_shared),
+                "storage_bytes": int(storage_bytes),
+            },
+            "recent_assets": recent_assets,
+        }
+    )

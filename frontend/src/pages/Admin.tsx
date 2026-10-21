@@ -3,7 +3,8 @@ import { NavLink, useLocation, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, AuthUser, SiteInfo } from "../api";
 import { AreaChart, BarChart, Sparkline } from "../components/charts";
-import { Avatar, Delta, Progress, StatusPill } from "../components/ui";
+import { Avatar, Delta, Progress, StatusPill, fmtTime } from "../components/ui";
+import { usePlayer } from "../components/PlayerContext";
 
 interface AdminUser {
   id: string;
@@ -15,6 +16,49 @@ interface AdminUser {
   credits_balance: number;
   jobs_count: number;
   stripe_customer_id: string | null;
+}
+interface AdminAsset {
+  asset_id: string;
+  owner_id: string;
+  user: string;
+  role: string;
+  kind: string;
+  mime: string;
+  bytes: number;
+  duration_seconds: number | null;
+  title: string | null;
+  slug: string | null;
+  shared: boolean;
+  workspace_id: string | null;
+  job_id: string | null;
+  model_id: string | null;
+  seed: number | null;
+  state: string;
+  byte_present: boolean;
+  playable: boolean;
+  content_url: string;
+  waveform_url: string | null;
+  download_name: string;
+  created_at: string | null;
+  finalized_at: string | null;
+  expires_at: string | null;
+  deleted_at: string | null;
+  purge_after: string | null;
+  purged_at: string | null;
+}
+interface AdminUserDetail {
+  user: AuthUser & { created_at: string | null };
+  counts: {
+    jobs_total: number;
+    jobs_succeeded: number;
+    jobs_failed: number;
+    assets_total: number;
+    assets_trashed: number;
+    assets_purged: number;
+    assets_shared: number;
+    storage_bytes: number;
+  };
+  recent_assets: AdminAsset[];
 }
 interface Page<T> {
   items: T[];
@@ -210,6 +254,7 @@ interface VastInstanceRow {
 const SIDEBAR = [
   { to: "/admin", label: "Overview", icon: "⌂" },
   { to: "/admin/users", label: "Users", icon: "☺" },
+  { to: "/admin/library", label: "Media Library", icon: "♪" },
   { to: "/admin/jobs", label: "Generation Jobs", icon: "⇍" },
   { to: "/admin/services", label: "Model Services", icon: "▣" },
   { to: "/admin/workers", label: "GPU Workers", icon: "▦" },
@@ -255,10 +300,34 @@ function pctDelta(now: number, prev: number): number | null {
   return Math.round(((now - prev) / prev) * 100);
 }
 
+const ASSET_PILL: Record<string, string> = {
+  live: "ok",
+  shared: "info",
+  expired: "warn",
+  trashed: "warn",
+  purged: "err",
+};
+
+function assetPill(state: string) {
+  return <span className={`pill ${ASSET_PILL[state] || "muted"}`}>{state}</span>;
+}
+
+const ASSET_STATUS_OPTIONS = [
+  { value: "all", label: "All (incl. expired/trashed)" },
+  { value: "live", label: "Live" },
+  { value: "shared", label: "Shared" },
+  { value: "trashed", label: "In Trash" },
+  { value: "expired", label: "Expired" },
+  { value: "purged", label: "Purged (metadata)" },
+  { value: "uploads", label: "User uploads" },
+  { value: "stems", label: "Stems" },
+];
+
 export default function AdminPage() {
   const qc = useQueryClient();
   const location = useLocation();
   const [params] = useSearchParams();
+  const player = usePlayer();
   const section = location.pathname.replace(/^\/admin\/?/, "") || "overview";
 
   const [days, setDays] = useState(14);
@@ -281,6 +350,19 @@ export default function AdminPage() {
   const [keyName, setKeyName] = useState("");
   const [newSecret, setNewSecret] = useState<string | null>(null);
   const [, setTick] = useState(0);
+  const [libQ, setLibQ] = useState("");
+  const [libStatus, setLibStatus] = useState("all");
+  const [libOffset, setLibOffset] = useState(0);
+  const [catalogFor, setCatalogFor] = useState<AdminUser | null>(null);
+  const [catalogStatus, setCatalogStatus] = useState("all");
+  const [catalogOffset, setCatalogOffset] = useState(0);
+
+  useEffect(() => {
+    setLibOffset(0);
+  }, [libQ, libStatus]);
+  useEffect(() => {
+    setCatalogOffset(0);
+  }, [catalogFor?.id, catalogStatus]);
 
   useEffect(() => {
     setJobTask(params.get("task") || "");
@@ -489,6 +571,131 @@ export default function AdminPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+
+  const library = useQuery({
+    queryKey: ["admin-assets", "lib", libStatus, libQ, libOffset],
+    queryFn: () =>
+      api.get<Page<AdminAsset>>(
+        `/api/v1/admin/assets?limit=50&offset=${libOffset}&status=${libStatus}${libQ ? `&q=${encodeURIComponent(libQ)}` : ""}`
+      ),
+    enabled: enabled && section === "library",
+  });
+  const latest = useQuery({
+    queryKey: ["admin-assets", "latest"],
+    queryFn: () => api.get<Page<AdminAsset>>("/api/v1/admin/assets?limit=8&status=live"),
+    enabled,
+    refetchInterval: 30000,
+  });
+  const catalog = useQuery({
+    queryKey: ["admin-assets", "catalog", catalogFor?.id, catalogStatus, catalogOffset],
+    queryFn: () =>
+      api.get<Page<AdminAsset>>(
+        `/api/v1/admin/users/${catalogFor?.id}/assets?limit=50&offset=${catalogOffset}&status=${catalogStatus}`
+      ),
+    enabled: !!catalogFor,
+  });
+  const catalogDetail = useQuery({
+    queryKey: ["admin-user-detail", catalogFor?.id],
+    queryFn: () => api.get<AdminUserDetail>(`/api/v1/admin/users/${catalogFor?.id}`),
+    enabled: !!catalogFor,
+  });
+
+  const invalidateAssets = () => {
+    qc.invalidateQueries({ queryKey: ["admin-assets"] });
+    qc.invalidateQueries({ queryKey: ["admin-user-detail"] });
+    qc.invalidateQueries({ queryKey: ["admin-users"] });
+    qc.invalidateQueries({ queryKey: ["admin-stats"] });
+    qc.invalidateQueries({ queryKey: ["admin-storage"] });
+  };
+  const patchAsset = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Record<string, boolean> }) =>
+      api.patch(`/api/v1/admin/assets/${id}`, body),
+    onSuccess: invalidateAssets,
+    onError: (e: Error) => setError(e.message),
+  });
+  const purgeAsset = useMutation({
+    mutationFn: (id: string) => api.post<{ purged: boolean }>(`/api/v1/admin/assets/${id}/purge`),
+    onSuccess: invalidateAssets,
+    onError: (e: Error) => setError(e.message),
+  });
+  const purgeUserContent = useMutation({
+    mutationFn: (userId: string) => api.post<{ assets_purged: number }>(`/api/v1/admin/users/${userId}/purge-content`),
+    onSuccess: invalidateAssets,
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const playAsset = (a: AdminAsset) =>
+    player.play({
+      asset_id: a.asset_id,
+      title: a.title || a.download_name,
+      url: a.content_url,
+      duration: a.duration_seconds,
+      subtitle: a.user,
+      waveform: a.waveform_url || undefined,
+    });
+
+  const assetTable = (rows: AdminAsset[]) => (
+    <table className="table">
+      <thead>
+        <tr><th></th><th>Track</th><th>User</th><th>Type</th><th>Model</th><th>Len</th><th>State</th><th>Created</th><th>Actions</th></tr>
+      </thead>
+      <tbody>
+        {rows.map((a) => (
+          <tr key={a.asset_id}>
+            <td>
+              {a.playable ? (
+                <button className="btn btn-icon btn-primary" title="Play" onClick={() => playAsset(a)}>▶</button>
+              ) : (
+                <span className="btn btn-icon" style={{ opacity: 0.3 }} title="No audio bytes available">▶</span>
+              )}
+            </td>
+            <td>
+              <div style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.title || a.download_name}>
+                {a.title || a.slug || a.download_name}
+              </div>
+              <div className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>
+                {a.asset_id.slice(0, 8)}{a.slug ? ` · /${a.slug}` : ""}
+              </div>
+            </td>
+            <td><Avatar name={a.user} sm /> {a.user}</td>
+            <td className="mono" style={{ fontSize: 12 }}>{a.kind === "uploaded" ? "upload" : a.role}</td>
+            <td className="mono" style={{ fontSize: 12 }}>{a.model_id || "—"}</td>
+            <td>{fmtTime(a.duration_seconds)}</td>
+            <td>{assetPill(a.state)}</td>
+            <td className="mono" style={{ fontSize: 12 }}>{a.created_at?.slice(5, 16).replace("T", " ")}</td>
+            <td>
+              <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+                <a className="btn btn-ghost" href={`${a.content_url}?download=1`} download={a.download_name} title="Download">⤓</a>
+                <button
+                  className="btn btn-ghost"
+                  title={a.shared ? "Remove from public catalog" : "Publish to public catalog"}
+                  onClick={() => patchAsset.mutate({ id: a.asset_id, body: { shared: !a.shared } })}
+                >
+                  {a.shared ? "Unshare" : "Share"}
+                </button>
+                {!a.purged_at &&
+                  (a.deleted_at ? (
+                    <button className="btn btn-ghost" onClick={() => patchAsset.mutate({ id: a.asset_id, body: { trash: false } })}>Restore</button>
+                  ) : (
+                    <button className="btn btn-ghost" onClick={() => patchAsset.mutate({ id: a.asset_id, body: { trash: true } })}>Trash</button>
+                  ))}
+                {!a.purged_at && (
+                  <button
+                    className="btn btn-ghost"
+                    title="Permanently delete stored bytes (metadata kept)"
+                    onClick={() => window.confirm("Purge stored bytes for this asset? This is irreversible.") && purgeAsset.mutate(a.asset_id)}
+                  >
+                    Purge
+                  </button>
+                )}
+              </span>
+            </td>
+          </tr>
+        ))}
+        {rows.length === 0 && <tr><td colSpan={9} style={{ color: "var(--muted)" }}>No media.</td></tr>}
+      </tbody>
+    </table>
+  );
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["admin-users"] });
@@ -937,6 +1144,14 @@ export default function AdminPage() {
                 </div>
               </div>
             </div>
+            <div className="card" style={{ marginTop: 20 }}>
+              <div className="card-header">
+                <h2>Latest Generations</h2>
+                <span className="spacer" />
+                <a className="link" href="/admin/library">Browse all media →</a>
+              </div>
+              {assetTable((latest.data?.items || []).slice(0, 8))}
+            </div>
           </>
         )}
 
@@ -1008,7 +1223,12 @@ export default function AdminPage() {
                         </button>
                       )}
                     </td>
-                    <td><button className="btn btn-ghost" onClick={() => setLedgerFor(u)}>ledger</button></td>
+                    <td>
+                      <span style={{ display: "inline-flex", gap: 6 }}>
+                        <button className="btn btn-ghost" title="Browse this user's media" onClick={() => setCatalogFor(u)}>catalog</button>
+                        <button className="btn btn-ghost" onClick={() => setLedgerFor(u)}>ledger</button>
+                      </span>
+                    </td>
                     <td>
                       <button
                         className="btn btn-ghost"
@@ -1028,6 +1248,28 @@ export default function AdminPage() {
                 {Math.min(userOffset + 1, users.data?.total ?? 0)}–{Math.min(userOffset + (users.data?.users.length ?? 0), users.data?.total ?? 0)} of {users.data?.total ?? 0}
               </span>
               <button className="btn" disabled={userOffset + (users.data?.users.length ?? 0) >= (users.data?.total ?? 0)} onClick={() => setUserOffset((n) => n + 50)}>Next</button>
+            </div>
+          </div>
+        )}
+
+        {section === "library" && (
+          <div className="card">
+            <div className="card-header">
+              <h2>Media Library ({library.data?.total ?? 0})</h2>
+              <span className="spacer" />
+              <select value={libStatus} onChange={(e) => setLibStatus(e.target.value)} style={{ width: 230 }}>
+                {ASSET_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <input style={{ width: 220 }} placeholder="title, asset id, user, email…" value={libQ} onChange={(e) => setLibQ(e.target.value)} />
+            </div>
+            {error && <div style={{ marginBottom: 8 }}><span className="pill err">{error}</span></div>}
+            {assetTable(library.data?.items || [])}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
+              <button className="btn" disabled={libOffset === 0} onClick={() => setLibOffset((n) => Math.max(0, n - 50))}>Prev</button>
+              <span className="sub">
+                {Math.min(libOffset + 1, library.data?.total ?? 0)}–{Math.min(libOffset + (library.data?.items.length ?? 0), library.data?.total ?? 0)} of {library.data?.total ?? 0}
+              </span>
+              <button className="btn" disabled={libOffset + (library.data?.items.length ?? 0) >= (library.data?.total ?? 0)} onClick={() => setLibOffset((n) => n + 50)}>Next</button>
             </div>
           </div>
         )}
@@ -1067,6 +1309,52 @@ export default function AdminPage() {
                   {ledger.data && ledger.data.entries.length === 0 && <tr><td colSpan={4} style={{ color: "var(--muted)" }}>No ledger entries yet.</td></tr>}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {catalogFor && (
+          <div className="drawer-overlay" onClick={() => setCatalogFor(null)}>
+            <div className="drawer" style={{ maxWidth: 920, width: "min(920px, 96vw)" }} onClick={(e) => e.stopPropagation()}>
+              <div className="card-header">
+                <h2>{catalogFor.username} — media</h2>
+                <span className="spacer" />
+                <button
+                  className="btn btn-ghost"
+                  title="Permanently purge all this user's stored media (account is kept)"
+                  onClick={() =>
+                    window.confirm(`Purge ALL stored media for ${catalogFor.username}? This is irreversible (the account is kept).`) &&
+                    purgeUserContent.mutate(catalogFor.id)
+                  }
+                >
+                  Purge all content
+                </button>
+                <button className="btn" onClick={() => setCatalogFor(null)}>Close</button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto 1fr", gap: "6px 16px", fontSize: 13, marginBottom: 12 }}>
+                <span className="muted">Email</span><span>{catalogDetail.data?.user?.email || catalogFor.email}</span>
+                <span className="muted">Plan</span><span>{catalogFor.plan} · {catalogFor.credits_balance.toLocaleString()} cr</span>
+                <span className="muted">Storage</span><span>{fmtTb(catalogDetail.data?.counts.storage_bytes ?? 0)}</span>
+                <span className="muted">Jobs</span><span>{catalogDetail.data?.counts.jobs_succeeded ?? 0} ok / {catalogDetail.data?.counts.jobs_failed ?? 0} failed</span>
+                <span className="muted">Assets</span><span>{catalogDetail.data?.counts.assets_total ?? 0}</span>
+                <span className="muted">Shared</span><span>{catalogDetail.data?.counts.assets_shared ?? 0}</span>
+                <span className="muted">In Trash</span><span>{catalogDetail.data?.counts.assets_trashed ?? 0}</span>
+                <span className="muted">Purged</span><span>{catalogDetail.data?.counts.assets_purged ?? 0}</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center" }}>
+                <select value={catalogStatus} onChange={(e) => setCatalogStatus(e.target.value)}>
+                  {ASSET_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                <span className="sub" style={{ fontSize: 12 }}>Adjust credits via the “ledger” button on the Users page.</span>
+              </div>
+              {assetTable(catalog.data?.items || [])}
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
+                <button className="btn" disabled={catalogOffset === 0} onClick={() => setCatalogOffset((n) => Math.max(0, n - 50))}>Prev</button>
+                <span className="sub">
+                  {Math.min(catalogOffset + 1, catalog.data?.total ?? 0)}–{Math.min(catalogOffset + (catalog.data?.items.length ?? 0), catalog.data?.total ?? 0)} of {catalog.data?.total ?? 0}
+                </span>
+                <button className="btn" disabled={catalogOffset + (catalog.data?.items.length ?? 0) >= (catalog.data?.total ?? 0)} onClick={() => setCatalogOffset((n) => n + 50)}>Next</button>
+              </div>
             </div>
           </div>
         )}

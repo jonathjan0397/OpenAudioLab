@@ -10,33 +10,51 @@ from __future__ import annotations
 import argparse
 import time
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 
 from .config import Settings, get_settings
 from .db import Db
 from .models import Asset, Job, utcnow
 from .orchestration import get_job_by_id
-from .storage import Storage, build_storage
+from .storage import Storage, build_storage, delete_asset_blobs
 
 
 def expire_once(db: Db, storage: Storage, now=None) -> int:
+    """Reclaim object-storage bytes for assets whose retention or Trash window elapsed.
+
+    Two independent triggers:
+      * ``expires_at <= now``  — the ordinary retention expiry for live outputs.
+      * ``purge_after <= now`` — the 48-hour Trash window after a soft delete.
+
+    A row is purged at most once: ``purged_at`` marks the bytes as gone while the
+    metadata row is kept (the admin forensic catalog still lists it). Expired live
+    assets are also marked ``deleted_at`` so they leave the owner's library.
+    """
     now = now or utcnow()
-    expired = 0
+    purged = 0
     with db.session() as session:
         rows = list(
             session.execute(
-                select(Asset).where(Asset.deleted_at.is_(None), Asset.expires_at.is_not(None), Asset.expires_at <= now)
+                select(Asset).where(
+                    Asset.purged_at.is_(None),
+                    or_(
+                        and_(Asset.expires_at.is_not(None), Asset.expires_at <= now),
+                        and_(Asset.purge_after.is_not(None), Asset.purge_after <= now),
+                    ),
+                )
             ).scalars()
         )
         for asset in rows:
-            storage.delete(asset.storage_key)
-            asset.deleted_at = utcnow()
-            expired += 1
+            delete_asset_blobs(storage, asset.storage_key)
+            asset.purged_at = utcnow()
+            if asset.deleted_at is None:
+                asset.deleted_at = utcnow()
+            purged += 1
             job = get_job_by_id(session, asset.job_id)
-            if job is not None:
+            if job is not None and asset.expires_at is not None:
                 job.assets_expired_at = asset.expires_at
         session.commit()
-    return expired
+    return purged
 
 
 def main() -> None:

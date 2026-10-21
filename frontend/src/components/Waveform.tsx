@@ -9,11 +9,11 @@ interface Peaks {
   peaks: number[];
 }
 
-export function usePeaks(assetId: string | null, token?: string) {
+export function usePeaks(assetId: string | null, token?: string, url?: string) {
   return useQuery({
-    queryKey: ["peaks", assetId, token || ""],
-    queryFn: () => api.get<Peaks>(`/api/v1/artifacts/${assetId}/waveform${token ? `?token=${token}` : ""}`),
-    enabled: !!assetId,
+    queryKey: ["peaks", url || assetId, token || ""],
+    queryFn: () => api.get<Peaks>(url || `/api/v1/artifacts/${assetId}/waveform${token ? `?token=${token}` : ""}`),
+    enabled: !!url || !!assetId,
     staleTime: Infinity,
     retry: 0,
   });
@@ -22,18 +22,20 @@ export function usePeaks(assetId: string | null, token?: string) {
 export default function Waveform({
   assetId,
   token,
+  url,
   progress = 0,
   onSeek,
   height = 40,
 }: {
   assetId: string | null;
   token?: string;
+  url?: string;
   progress?: number;
   onSeek?: (ratio: number) => void;
   height?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const peaks = usePeaks(assetId, token);
+  const peaks = usePeaks(assetId, token, url);
 
   useEffect(() => {
     const canvas = canvasRef.current;

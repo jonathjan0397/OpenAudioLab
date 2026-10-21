@@ -18,6 +18,7 @@ export interface Playable {
   url: string;
   duration?: number | null;
   subtitle?: string;
+  waveform?: string;
 }
 
 interface PlayerState {
@@ -245,6 +246,7 @@ export function PlayerBar() {
           <Waveform
             assetId={p.current.asset_id}
             token={p.current.url.split("token=")[1]}
+            url={p.current.waveform}
             progress={p.progress}
             onSeek={p.seek}
             height={34}
