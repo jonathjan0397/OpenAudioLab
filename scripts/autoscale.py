@@ -739,7 +739,8 @@ def tick(r, st, dry_run=False):
     depth = r.llen(QUEUE_KEY) + r.llen(BURST_KEY)
     # R15: scale on estimated work, not raw count — a few XL jobs weigh more than
     # many turbo jobs. depth_eff is the workload-equivalent job count.
-    depth_eff = max(depth, math.ceil(queued_work_seconds(r) / DEFAULT_JOB_SECONDS))
+    work_seconds = queued_work_seconds(r)
+    depth_eff = max(depth, math.ceil(work_seconds / DEFAULT_JOB_SECONDS))
     now = time.time()
     nodes = st.get("nodes", [])
     if depth_eff >= SCALE_UP:
@@ -820,6 +821,14 @@ def tick(r, st, dry_run=False):
             else:
                 registry_remove(node["contract"])
         if not restarted:
+            fset = fleet_settings()
+            allow, decision, reason, fields = swappiness_gate(
+                work_seconds, depth, fset, len(nodes), daily_burst_spend(), oldest_queued_age())
+            if not allow:
+                log(f"swappiness {decision}: {reason} (work={int(work_seconds)}s nodes={len(nodes)})")
+                log_decision(fields, decision, reason)
+            allow_create = allow
+        if not restarted and allow_create:
             transport = VAST_TRANSPORT
             if transport == "ts":
                 slot = gen_ts_slot()
@@ -830,6 +839,8 @@ def tick(r, st, dry_run=False):
             else:
                 slot = None
             new = create_instance(slot, dry_run, transport)
+            if not new:
+                log_decision(fields, "DECLINE", "NO_ELIGIBLE_OFFER")
             if new:
                 node = {"contract": new, "created_at": now, "transport": transport}
                 if transport == "ts" and slot:
@@ -877,6 +888,132 @@ def tick(r, st, dry_run=False):
 
     training_tick(r, st, now, dry_run)
     return depth_eff
+
+
+REMOTE_READY_SECONDS = float(os.environ.get("OAL_REMOTE_READY_SECONDS", "360"))
+
+try:
+    from app.fleet_settings import FLEET_DEFAULTS
+except Exception:  # standalone fallback; must mirror app/fleet_settings.py
+    FLEET_DEFAULTS = {
+        "auto_burst_enabled": True, "swappiness": 50, "max_auto_burst_workers": 1,
+        "max_dph": 0.25, "min_vram_gb": 24, "min_cuda": 12.8, "countries": ["US", "CA"],
+        "min_reliability": 0.95, "preferred_download_mbps": 1000, "preferred_upload_mbps": 250,
+        "idle_grace_seconds": 300, "min_worker_uptime_seconds": 180,
+        "daily_burst_budget_usd": 3.0, "monthly_burst_budget_usd": 60.0,
+    }
+
+_FSET_CACHE = {"at": 0.0, "value": None}
+
+
+def fleet_settings():
+    """Admin-editable fleet settings (SiteSetting JSON) with 60 s cache."""
+    now = time.time()
+    if _FSET_CACHE["value"] is not None and now - _FSET_CACHE["at"] < 60:
+        return _FSET_CACHE["value"]
+    import json
+
+    merged = dict(FLEET_DEFAULTS)
+    eng = _engine()
+    if eng is not None:
+        try:
+            import sqlalchemy
+
+            with eng.connect() as conn:
+                v = conn.execute(sqlalchemy.text(
+                    "select value from site_settings where key='gpu_fleet_settings'"
+                )).scalar()
+            if v:
+                merged.update(json.loads(v))
+        except Exception:
+            pass
+    _FSET_CACHE.update({"at": now, "value": merged})
+    return merged
+
+
+def oldest_queued_age():
+    eng = _engine()
+    if eng is None:
+        return 0.0
+    try:
+        import sqlalchemy
+
+        with eng.connect() as conn:
+            v = conn.execute(sqlalchemy.text(
+                "select extract(epoch from (now() - min(created_at))) from jobs "
+                "where status='queued' and operation='music.generate'"
+            )).scalar()
+        return float(v or 0)
+    except Exception:
+        return 0.0
+
+
+def daily_burst_spend():
+    """Approximate today's burst spend: running instances' dph x hours since UTC midnight."""
+    eng = _engine()
+    if eng is None:
+        return 0.0
+    try:
+        import sqlalchemy
+
+        with eng.connect() as conn:
+            rows = conn.execute(sqlalchemy.text(
+                "select dph from vast_instances where state='running' and dph is not null"
+            )).fetchall()
+        return sum(float(r[0]) for r in rows) * (time.time() % 86400) / 3600.0
+    except Exception:
+        return 0.0
+
+
+def swappiness_gate(work_seconds, queued_jobs, fset, running_auto, spend_today, oldest_age=0.0):
+    """Explainable provisioning decision (spec §5). Returns
+    (allow, decision, reason, fields) — every outcome is logged."""
+    sw = int(fset["swappiness"])
+    fields = {
+        "queued_jobs": int(queued_jobs),
+        "oldest_job_age_seconds": round(oldest_age, 1),
+        "est_local_wait_seconds": round(work_seconds / max(1, running_auto + 1), 1),
+        "est_remote_ready_seconds": REMOTE_READY_SECONDS,
+        "swappiness": sw,
+    }
+    if not fset["auto_burst_enabled"]:
+        return False, "HOLD", "AUTO_BURST_DISABLED", fields
+    if sw == 0:
+        return True, "PROVISION", "DEPTH_POLICY", fields
+    if running_auto >= int(fset["max_auto_burst_workers"]):
+        return False, "DECLINE", "EXISTING_REMOTE_CAPACITY", fields
+    budget = float(fset["daily_burst_budget_usd"])
+    if budget > 0 and spend_today >= budget:
+        return False, "DECLINE", "BUDGET_EXHAUSTED", fields
+    local_wait = work_seconds / max(1, running_auto + 1)
+    advantage = 1.5 - sw / 100.0  # 25->1.25 conservative, 50->1.0, 100->0.5 aggressive
+    if REMOTE_READY_SECONDS <= local_wait * advantage:
+        return True, "PROVISION", "REMOTE_FASTER", fields
+    return False, "DECLINE", "REMOTE_STARTUP_TOO_SLOW", fields
+
+
+def log_decision(fields, decision, reason, offer_id=None, est_cost=None, model_group=None):
+    eng = _engine()
+    if eng is None:
+        return
+    try:
+        import sqlalchemy
+
+        with eng.begin() as conn:
+            conn.execute(
+                sqlalchemy.text(
+                    "insert into gpu_scale_decisions (id, created_at, model_group, queued_jobs,"
+                    " oldest_job_age_seconds, est_local_wait_seconds, est_remote_ready_seconds,"
+                    " selected_offer_id, est_cost_usd, swappiness, decision, reason)"
+                    " values (:id, now(), :mg, :qj, :age, :lw, :rr, :oi, :ec, :sw, :dec, :rea)"
+                ),
+                {"id": str(uuid.uuid4()), "mg": model_group, "qj": fields["queued_jobs"],
+                 "age": fields["oldest_job_age_seconds"], "lw": fields["est_local_wait_seconds"],
+                 "rr": fields["est_remote_ready_seconds"], "oi": offer_id, "ec": est_cost,
+                 "sw": fields["swappiness"], "dec": decision, "rea": reason},
+            )
+    except Exception:
+        pass
 
 
 def queued_work_seconds(r) -> float:

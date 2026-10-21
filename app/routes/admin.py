@@ -676,6 +676,131 @@ def admin_audit(
     )
 
 
+_OFFER_CACHE: dict = {"key": None, "at": 0.0, "result": None}
+
+
+def _fleet_settings(request: Request) -> dict:
+    import json
+
+    from ..fleet_settings import FLEET_DEFAULTS
+    from ..models import SiteSetting
+
+    merged = dict(FLEET_DEFAULTS)
+    with request.app.state.db.session() as session:
+        row = session.get(SiteSetting, "gpu_fleet_settings")
+    if row and row.value:
+        try:
+            merged.update(json.loads(row.value))
+        except ValueError:
+            pass
+    return merged
+
+
+@router.get("/admin/gpu-fleet/settings")
+def gpu_fleet_settings_get(request: Request) -> JSONResponse:
+    from ..fleet_settings import FLEET_DEFAULTS
+
+    return JSONResponse({"settings": _fleet_settings(request), "defaults": FLEET_DEFAULTS})
+
+
+@router.patch("/admin/gpu-fleet/settings")
+def gpu_fleet_settings_patch(request: Request, payload: dict) -> JSONResponse:
+    import json
+
+    from ..fleet_settings import SETTINGS_KEY, FleetSettingsError, validate
+    from ..models import GpuFleetEvent, SiteSetting, new_uuid
+
+    try:
+        merged = validate(payload)
+    except FleetSettingsError as exc:
+        raise ApiError(422, "FLEET_SETTING_INVALID", str(exc)) from exc
+    admin = payload.get("_actor") or "admin"
+    with request.app.state.db.session() as session:
+        row = session.get(SiteSetting, SETTINGS_KEY)
+        if row is None:
+            row = SiteSetting(key=SETTINGS_KEY, value=json.dumps(merged))
+            session.add(row)
+        else:
+            row.value = json.dumps(merged)
+        session.add(GpuFleetEvent(id=new_uuid(), actor=str(admin), action="settings_patch",
+                                  subject=SETTINGS_KEY, detail_json={"changed": sorted(payload.keys())}))
+        session.commit()
+    return JSONResponse({"settings": merged})
+
+
+@router.get("/admin/gpu-fleet/offers")
+def gpu_fleet_offers(
+    request: Request,
+    model: str | None = None,
+    max_dph: float | None = None,
+    min_vram: int | None = None,
+    country: str | None = None,
+    min_reliability: float | None = None,
+    min_download: float | None = None,
+    min_upload: float | None = None,
+    verified: bool = True,
+    refresh: bool = False,
+) -> JSONResponse:
+    """Top-10 live Vast.ai offers (advisory snapshots, 30 s server cache)."""
+    import json as _json
+    import time
+
+    import requests as _requests
+
+    from .. import vast_offers as vo
+    from ..catalog import CATALOG
+
+    settings = request.app.state.settings
+    stored = _fleet_settings(request)
+    crit = {
+        "max_dph": min(max_dph if max_dph is not None else stored["max_dph"], 1.0),
+        "min_vram_gb": min_vram if min_vram is not None else stored["min_vram_gb"],
+        "countries": [country.upper()] if country else list(stored["countries"]),
+        "min_reliability": min_reliability if min_reliability is not None else stored["min_reliability"],
+        "min_download_mbps": min_download,
+        "min_upload_mbps": min_upload,
+        "verified_only": verified,
+        "min_cuda": stored["min_cuda"],
+        "model_vram_floor_gb": 0,
+        "checkpoint_gb": 0.0,
+    }
+    if model:
+        prof = None
+        for release in CATALOG.values():
+            prof = release.profile(model)
+            if prof is not None:
+                break
+        if prof is None:
+            raise ApiError(422, "MODEL_UNKNOWN", f"Unknown execution profile: {model}")
+        crit["model_vram_floor_gb"] = max(0, prof.vram_required_mb // 1024)
+        crit["checkpoint_gb"] = vo.CHECKPOINT_GB.get(prof.native_family, 5.0)
+        crit["min_compute_cap"] = 7.5
+    key = _json.dumps(crit, sort_keys=True)
+    cache = _OFFER_CACHE
+    if not refresh and cache["key"] == key and time.time() - cache["at"] < 30:
+        result = cache["result"]
+        return JSONResponse({**result, "cached": True})
+    query = {"search": {
+        "rentable": {"eq": True},
+        "cuda_max_good": {"gte": crit["min_cuda"]},
+        "gpu_ram": {"gte": int(crit["min_vram_gb"] * 1024 * 1024 * 1024)},
+        "num_gpus": {"eq": 1},
+        "dph_total": {"lte": crit["max_dph"]},
+    }}
+    if crit["verified_only"]:
+        query["search"]["verification"] = {"eq": "verified"}
+    try:
+        resp = _requests.post(f"{settings.vast_api_url}/search/offers/", json=query, timeout=20)
+        resp.raise_for_status()
+        raw = resp.json().get("matches", [])
+    except Exception as exc:
+        raise ApiError(502, "VAST_SEARCH_FAILED", f"Vast.ai offer search failed: {exc}") from exc
+    result = vo.rank(raw, crit, limit=10)
+    result["refreshed_at"] = utcnow().isoformat()
+    cache.update({"key": key, "at": time.time(), "result": result})
+    return JSONResponse({**result, "cached": False})
+
+
 @router.get("/admin/gpu-fleet/queues")
 def gpu_fleet_queues(request: Request) -> JSONResponse:
     """SMQM view: waiting jobs per model group (DB-authoritative), worker

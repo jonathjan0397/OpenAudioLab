@@ -795,3 +795,58 @@ class WorkerCapability(Base):
     supports_staged_planner: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+class GpuScaleDecision(Base):
+    """Explainable swappiness/provisioning decisions (spec §5.2)."""
+
+    __tablename__ = "gpu_scale_decisions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    model_group: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    queued_jobs: Mapped[int] = mapped_column(Integer, default=0)
+    oldest_job_age_seconds: Mapped[float] = mapped_column(Float, default=0)
+    est_local_wait_seconds: Mapped[float] = mapped_column(Float, default=0)
+    est_remote_ready_seconds: Mapped[float] = mapped_column(Float, default=0)
+    selected_offer_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    est_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    swappiness: Mapped[int] = mapped_column(Integer, default=50)
+    decision: Mapped[str] = mapped_column(String(20))  # PROVISION|HOLD|DECLINE
+    reason: Mapped[str] = mapped_column(String(60))
+
+
+class GpuDeployment(Base):
+    """Durable provisioning intent (manual or automatic), one coordinator."""
+
+    __tablename__ = "gpu_deployments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    origin: Mapped[str] = mapped_column(String(20))  # AUTO_BURST|MANUAL_ADMIN|BASELINE_FALLBACK|TRAINING_POOL
+    purpose: Mapped[str] = mapped_column(String(40))  # auto|turbo|sft|xl-turbo|xl-sft|training
+    idempotency_key: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    offer_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    offer_snapshot_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    state: Mapped[str] = mapped_column(String(30), default="REQUESTED", index=True)
+    state_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    contract: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    worker_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    dph: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_spend_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    automatic_shutdown: Mapped[bool] = mapped_column(Boolean, default=False)
+    requested_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class GpuFleetEvent(Base):
+    """Fleet audit/event history."""
+
+    __tablename__ = "gpu_fleet_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    actor: Mapped[str] = mapped_column(String(120))
+    action: Mapped[str] = mapped_column(String(60))
+    subject: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    detail_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)

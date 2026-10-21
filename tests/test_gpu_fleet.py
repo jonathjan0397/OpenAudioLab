@@ -188,3 +188,167 @@ def test_gpu_fleet_queues_endpoint(client) -> None:
     assert body.status_code == 200
     data = body.json()
     assert "models" in data and "workers" in data and "queue_depths" in data
+
+
+# ---------------------------------------------------------------- M2: offers
+
+def _raw(offer_id="o1", **kw):
+    raw = {
+        "id": offer_id, "gpu_name": "RTX 4090", "gpu_ram": 24 * 1024**3,
+        "cuda_max_good": 12.8, "geolocation": "Los Angeles, US", "reliability2": 0.98,
+        "inet_down": 1200.0, "inet_up": 300.0, "disk_space": 150.0,
+        "dph_total": 0.20, "compute_cap": 8.9, "verified": True, "rentable": True,
+    }
+    raw.update(kw)
+    return raw
+
+
+def test_offer_hard_filters():
+    from app import vast_offers as vo
+
+    cases = [
+        (_raw(dph_total=0.30), "PRICE_ABOVE_CEILING"),      # §19.18
+        (_raw(gpu_ram=16 * 1024**3), "VRAM_BELOW_MINIMUM"),  # §19.19
+        (_raw(cuda_max_good=12.4), "CUDA_UNSUPPORTED"),      # §19.20
+        (_raw(geolocation="Toronto, CA"), None),             # §19.21 CA passes
+        (_raw(geolocation="London, UK"), "OUTSIDE_REGION"),  # §19.21 UK fails
+        (_raw(verified=False), "UNVERIFIED_HOST"),           # §19.22
+        (_raw(reliability2=0.90), "LOW_RELIABILITY"),        # §19.23
+        (_raw(disk_space=60.0), "DISK_INSUFFICIENT"),        # §19.25
+    ]
+    for raw, expected in cases:
+        reason = vo.ineligible_reason(vo.normalize(raw), vo.criteria_defaults())
+        assert reason == expected, (raw, reason)
+
+
+def test_offer_missing_network_is_neutral_not_disqualified():
+    from app import vast_offers as vo
+
+    crit = vo.criteria_defaults()
+    offer = vo.normalize(_raw(inet_down=None, inet_up=None))
+    assert vo.ineligible_reason(offer, crit) is None  # §19.24 missing != excluded
+    assert offer["download_mbps"] is None
+    assert vo.est_ready_seconds(offer, 0.0) is None  # not reported -> not estimated
+
+
+def test_offer_ranking_and_limits():
+    from app import vast_offers as vo
+
+    raws = [_raw(f"o{i}", dph_total=0.10 + i * 0.01) for i in range(14)]
+    result = vo.rank(raws, limit=10)
+    assert result["eligible_count"] == 14
+    assert len(result["offers"]) == 10  # §19.26 subset when >10 eligible
+    assert result["offers"][0]["rank"] == 1
+    assert result["offers"][0]["dph"] <= result["offers"][-1]["dph"]  # cheaper ranks higher
+    empty = vo.rank([_raw(dph_total=0.99)], limit=10)
+    assert empty["offers"] == [] and empty["excluded"].get("PRICE_ABOVE_CEILING") == 1  # §19.27
+
+
+def test_offer_expired_or_changed_revalidation():
+    from app import vast_offers as vo
+
+    # §19.28/29: deployment-time revalidation uses the same hard filters.
+    snap = vo.normalize(_raw(dph_total=0.20))
+    crit = vo.criteria_defaults()
+    assert vo.ineligible_reason(snap, crit) is None
+    changed = vo.normalize(_raw(dph_total=0.42))  # price jumped before deploy
+    assert vo.ineligible_reason(changed, crit) == "PRICE_ABOVE_CEILING"
+
+
+# ---------------------------------------------------------- M2: swappiness
+
+def _fset(**kw):
+    from app.fleet_settings import FLEET_DEFAULTS
+
+    return {**FLEET_DEFAULTS, **kw}
+
+
+def test_swappiness_local_sufficient_declines():
+    import importlib.util, pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("autoscale_m2", root / "scripts" / "autoscale.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    # §19.9: tiny queue -> remote startup not justified
+    allow, decision, reason, _ = mod.swappiness_gate(120, 1, _fset(), 0, 0.0)
+    assert allow is False and reason == "REMOTE_STARTUP_TOO_SLOW"
+    # §19.10: heavy queue -> provision
+    allow, decision, reason, _ = mod.swappiness_gate(3600, 20, _fset(), 0, 0.0)
+    assert allow is True and reason == "REMOTE_FASTER"
+    # §19.12: budget
+    allow, _, reason, _ = mod.swappiness_gate(3600, 20, _fset(daily_burst_budget_usd=1.0), 0, 5.0)
+    assert allow is False and reason == "BUDGET_EXHAUSTED"
+    # capacity already present
+    allow, _, reason, _ = mod.swappiness_gate(3600, 20, _fset(max_auto_burst_workers=1), 1, 0.0)
+    assert allow is False and reason == "EXISTING_REMOTE_CAPACITY"
+    # auto burst disabled
+    allow, decision, reason, _ = mod.swappiness_gate(3600, 20, _fset(auto_burst_enabled=False), 0, 0.0)
+    assert allow is False and decision == "HOLD" and reason == "AUTO_BURST_DISABLED"
+    # §19 swappiness 0 -> depth policy provisions without cost-benefit
+    allow, _, reason, _ = mod.swappiness_gate(60, 1, _fset(swappiness=0), 0, 0.0)
+    assert allow is True and reason == "DEPTH_POLICY"
+
+
+# ---------------------------------------------------------- M2: endpoints
+
+def _login_admin(client, email):
+    from app.models import User
+
+    client.post("/api/v1/auth/logout")
+    r = client.post("/api/v1/auth/register",
+                    json={"email": email, "username": email.split("@")[0].replace(".", ""),
+                          "password": "super-secret-1"})
+    if r.status_code == 201:
+        uid = r.json()["user"]["id"]
+        with client.app.state.db.session() as session:
+            session.get(User, uid).role = "admin"
+            session.commit()
+
+
+def test_fleet_settings_get_patch(client):
+    _login_admin(client, "fleet2@example.com")
+    r = client.get("/api/v1/admin/gpu-fleet/settings")
+    assert r.status_code == 200
+    assert r.json()["settings"]["swappiness"] == 50
+    r = client.patch("/api/v1/admin/gpu-fleet/settings", json={"swappiness": 75})
+    assert r.status_code == 200
+    assert r.json()["settings"]["swappiness"] == 75
+    assert client.get("/api/v1/admin/gpu-fleet/settings").json()["settings"]["swappiness"] == 75
+    bad = client.patch("/api/v1/admin/gpu-fleet/settings", json={"swappiness": 150})
+    assert bad.status_code == 422
+    bad2 = client.patch("/api/v1/admin/gpu-fleet/settings", json={"nope": 1})
+    assert bad2.status_code == 422
+
+
+def test_fleet_offers_endpoint_mocked(client, monkeypatch):
+    import requests
+
+    _login_admin(client, "fleet3@example.com")
+
+    class Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"matches": [_raw("a"), _raw("b", dph_total=0.15), _raw("c", dph_total=0.99)]}
+
+    calls = []
+    monkeypatch.setattr(requests, "post", lambda url, json=None, timeout=None: calls.append(url) or Resp())
+    import app.routes.admin as adm
+    adm._OFFER_CACHE.update({"key": None, "at": 0.0, "result": None})
+    r = client.get("/api/v1/admin/gpu-fleet/offers")
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["offers"]) == 2  # c excluded by price ceiling
+    assert data["excluded"].get("PRICE_ABOVE_CEILING") == 1
+    assert data["cached"] is False
+    r2 = client.get("/api/v1/admin/gpu-fleet/offers")
+    assert r2.json()["cached"] is True  # 30 s server cache
+    assert len(calls) == 1
+    # §19.30 provider failure surfaces as 502
+    def boom(url, json=None, timeout=None):
+        raise RuntimeError("provider down")
+    monkeypatch.setattr(requests, "post", boom)
+    adm._OFFER_CACHE.update({"key": None, "at": 0.0, "result": None})
+    assert client.get("/api/v1/admin/gpu-fleet/offers").status_code == 502
