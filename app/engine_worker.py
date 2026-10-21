@@ -302,7 +302,7 @@ class EngineWorker:
         """
         import json
 
-        for model_id in (self.settings.train_queue_model_id, self.settings.evaluate_queue_model_id):
+        for model_id in (self.settings.train_queue_model_id,):
             try:
                 if self.queue.length(RedisQueue.queue_name(model_id)) > 0:
                     return True
@@ -311,12 +311,15 @@ class EngineWorker:
         try:
             from sqlalchemy import select
 
-            from .models import TrainingRun
+            from .models import Job
 
             with self.db.session() as session:
                 row = session.execute(
-                    select(TrainingRun.id)
-                    .where(TrainingRun.status.in_(("queued", "running")))
+                    select(Job.id)
+                    .where(
+                        Job.operation.in_(("voice.analyze", "voice.train", "voice.validate")),
+                        Job.status.in_(("queued", "waiting_for_worker", "running")),
+                    )
                     .limit(1)
                 ).first()
             if row is not None:
@@ -576,13 +579,16 @@ class EngineWorker:
                 job = get_job_by_id(session, claimed_job)
                 payload = self._payload_for(job)
                 profile_artifacts: dict | None = None
-                profile_version_id = dict(job.request_json).get("artist_profile_version_id")
-                if profile_version_id:
-                    from .models import ArtistProfileVersion
+                voice = dict(job.request_json or {}).get("_voice") or {}
+                if voice.get("voice_method") == "native" and voice.get("adapter_id"):
+                    from .models import VoiceAdapter
 
-                    version = session.get(ArtistProfileVersion, profile_version_id)
-                    if version is not None:
-                        profile_artifacts = dict(version.artifacts_json or {})
+                    adapter_row = session.get(VoiceAdapter, voice["adapter_id"])
+                    if adapter_row is not None and adapter_row.storage_prefix and adapter_row.files_json:
+                        profile_artifacts = {
+                            "adapter_object_prefix": adapter_row.storage_prefix,
+                            "adapter_files": list(adapter_row.files_json),
+                        }
                 lora_artifacts: dict | None = None
                 lora_id = dict(job.request_json).get("lora_id")
                 if lora_id:

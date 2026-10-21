@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 
 from ..deps import owner_from_request
 from ..errors import ApiError
-from ..models import ArtistProfile, ArtistProfileVersion, Asset, Job, User, Workspace, WorkspaceSong, new_uuid
+from ..models import ArtistProfile, Asset, Job, User, VoiceAdapter, Workspace, WorkspaceSong, new_uuid
 from ..schemas import StrictModel
 
 router = APIRouter(tags=["workspaces"])
@@ -79,7 +79,7 @@ def _ws_json(ws: Workspace, song_count: int = 0, asset_count: int = 0, artist: d
 
 
 def _workspace_artist_map(session, workspaces) -> dict[str, dict]:
-    """Attached-artist details (incl. active version + base model) per workspace."""
+    """Attached-artist details (UAIS voice state) per workspace."""
     profile_ids = sorted({ws.artist_profile_id for ws in workspaces if ws.artist_profile_id})
     if not profile_ids:
         return {}
@@ -87,27 +87,32 @@ def _workspace_artist_map(session, workspaces) -> dict[str, dict]:
         p.id: p
         for p in session.execute(select(ArtistProfile).where(ArtistProfile.id.in_(profile_ids))).scalars()
     }
-    version_ids = sorted({p.active_version_id for p in profiles.values() if p.active_version_id})
-    versions: dict[str, ArtistProfileVersion] = {}
-    if version_ids:
-        for v in session.execute(select(ArtistProfileVersion).where(ArtistProfileVersion.id.in_(version_ids))).scalars():
-            versions[v.id] = v
+    adapters: dict[str, list] = {}
+    for a in session.execute(
+        select(VoiceAdapter).where(
+            VoiceAdapter.artist_profile_id.in_(profile_ids),
+            VoiceAdapter.state.in_(("validated", "ready", "stale")),
+        ).order_by(VoiceAdapter.created_at.desc())
+    ).scalars():
+        adapters.setdefault(a.artist_profile_id, []).append(a)
+    rank = {"validated": 0, "ready": 1, "stale": 2}
     out: dict[str, dict] = {}
     for ws in workspaces:
         profile = profiles.get(ws.artist_profile_id or "")
         if profile is None:
             continue
-        version = versions.get(profile.active_version_id or "")
+        best = sorted(adapters.get(profile.id, []), key=lambda a: rank.get(a.state, 9))[0] if adapters.get(profile.id) else None
         out[ws.id] = {
             "profile_id": profile.id,
             "name": profile.name,
             "slug": profile.slug,
             "is_main": bool(profile.is_main),
             "sharing_policy": profile.sharing_policy,
-            "active_version_id": profile.active_version_id,
-            "base_model_id": version.base_model_id if version else None,
-            "version_state": version.state if version else None,
-            "applicable": bool(version and version.state in ("active", "candidate")),
+            "default_voice_profile_id": profile.default_voice_profile_id,
+            "default_adapter_id": best.id if best else None,
+            "adapter_model_selection": best.model_selection if best else None,
+            "adapter_state": best.state if best else None,
+            "applicable": best is not None,
         }
     return out
 

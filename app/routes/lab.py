@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from ..errors import ApiError
-from ..models import ArtistProfile, ArtistProfileVersion, Asset, Job, Lora, new_uuid, utcnow
+from ..models import ArtistProfile, Asset, Job, Lora, VoiceAdapter, new_uuid, utcnow
 from ..orchestration import as_utc
 from ..schemas import GenerateJobRequest
 from .. import tagging
@@ -42,7 +42,7 @@ class LabGenerate(BaseModel):
     instrumental: bool = True
     model_id: str = "ace-step-1.5"
     seed: int | None = Field(default=None, ge=0, le=2**63 - 1)
-    artist_profile_version_id: str | None = None
+    voice_adapter_id: str | None = None
     lora_id: str | None = None
 
 
@@ -145,13 +145,13 @@ def lab_generate(
     owner = _lab_owner(settings.lab_owner_token)
     if payload.lora_id:
         body["lora_id"] = payload.lora_id
-    if payload.artist_profile_version_id:
-        body["artist_profile_version_id"] = payload.artist_profile_version_id
+    if payload.voice_adapter_id:
+        body["voice_adapter_id"] = payload.voice_adapter_id
         with request.app.state.db.session() as session:
-            version = session.get(ArtistProfileVersion, payload.artist_profile_version_id)
-        if version is None:
-            raise ApiError(404, "PROFILE_VERSION_NOT_FOUND", "Artist profile version not found.")
-        owner = version.owner_id
+            adapter = session.get(VoiceAdapter, payload.voice_adapter_id)
+        if adapter is None:
+            raise ApiError(404, "ADAPTER_NOT_FOUND", "Voice adapter not found.")
+        owner = adapter.owner_id
     gen = GenerateJobRequest(**body)
     shim = _RequestShim(request.app, {"Idempotency-Key": f"lab-{uuid4().hex}"})
     return create_job(gen, shim, owner)
@@ -189,26 +189,26 @@ def lab_profiles(
     with request.app.state.db.session() as session:
         rows = list(
             session.execute(
-                select(ArtistProfileVersion, ArtistProfile.name)
-                .join(ArtistProfile, ArtistProfile.id == ArtistProfileVersion.profile_id)
+                select(VoiceAdapter, ArtistProfile.name)
+                .join(ArtistProfile, ArtistProfile.id == VoiceAdapter.artist_profile_id)
                 .where(ArtistProfile.deleted_at.is_(None))
-                .order_by(ArtistProfileVersion.created_at.desc())
+                .order_by(VoiceAdapter.created_at.desc())
                 .limit(50)
             )
             .tuples()
         )
     items = [
         {
-            "version_id": version.id,
-            "profile_id": version.profile_id,
+            "version_id": adapter.id,
+            "profile_id": adapter.artist_profile_id,
             "profile_name": name,
-            "mechanism": version.mechanism,
-            "base_model_id": version.base_model_id,
-            "state": version.state,
-            "evaluation_status": version.evaluation_status,
-            "created_at": version.created_at.isoformat() if version.created_at else None,
+            "mechanism": adapter.adapter_format,
+            "base_model_id": adapter.model_selection,
+            "state": adapter.state,
+            "evaluation_status": "validated" if adapter.state == "validated" else "none",
+            "created_at": adapter.created_at.isoformat() if adapter.created_at else None,
         }
-        for version, name in rows
+        for adapter, name in rows
     ]
     return JSONResponse({"profiles": items})
 
@@ -568,7 +568,7 @@ function generate() {
     model_id: "ace-step-1.5"
   };
   if ($("seed").value !== "") body.seed = parseInt($("seed").value, 10);
-  if ($("profile").value) body.artist_profile_version_id = $("profile").value;
+  if ($("profile").value) body.voice_adapter_id = $("profile").value;
   if ($("lora").value) body.lora_id = $("lora").value;
   $("go").disabled = true; $("result").innerHTML = ""; setStatus("Submitting...");
   xhr("POST", "/lab/api/generate", JSON.stringify(body), function (x) {

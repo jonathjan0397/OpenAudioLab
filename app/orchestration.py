@@ -290,7 +290,7 @@ def _generation_manifest(
             "seed": request.get("seed"),
             "controls": controls,
             "outputs": request.get("outputs") or [],
-            "artist_profile_version_id": request.get("artist_profile_version_id"),
+            "voice": request.get("_voice"),
             "lora_id": request.get("lora_id"),
             "client_reference": job.client_reference,
             "task_type": request.get("task_type") or "text2music",

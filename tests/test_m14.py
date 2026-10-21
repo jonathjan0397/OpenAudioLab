@@ -214,7 +214,7 @@ def _seed_admin(client, email: str, username: str) -> str:
 
 
 def test_admin_lora_pipeline(client) -> None:
-    from app.models import ArtistProfileVersion, Job
+    from app.models import Job, VoiceAdapter
     from sqlalchemy import select as _select
 
     owner = _seed_admin(client, "m14-lora@example.com", "m14lora")
@@ -233,23 +233,23 @@ def test_admin_lora_pipeline(client) -> None:
     assert body["titles"] == ["Midnight Drive", "Sunrise Avenue"]
     with client.app.state.db.session() as session:
         job = session.execute(_select(Job).where(Job.id == body["job_id"])).scalar_one()
-        assert job.operation == "artist.train"
+        assert job.operation == "voice.train"
 
     assert client.get("/api/v1/admin/loras").json()["loras"] == []
 
     with client.app.state.db.session() as session:
-        version = ArtistProfileVersion(
-            profile_id="p1", owner_id="usr_" + owner, mechanism="fine_tuned_adapter",
-            base_model_id="ace-step-1.5", base_revision="r", recipe_revision="rec",
-            artifacts_json={"adapter_object_prefix": "owners/x/adapters/v1", "adapter_files": ["a.safetensors"]},
-            state="candidate",
+        adapter = VoiceAdapter(
+            artist_profile_id="p1", owner_id="usr_" + owner,
+            model_selection="ace-step-1.5-turbo", engine_model="acestep-v15-turbo",
+            base_revision="r", storage_prefix="owners/x/adapters/v1",
+            files_json=["a.safetensors"], state="ready",
         )
-        session.add(version)
+        session.add(adapter)
         session.commit()
-        version_id = version.id
+        adapter_id = adapter.id
     response = client.post(
         "/api/v1/admin/loras",
-        json={"profile_version_id": version_id, "name": "Test Artist Style", "tags": "lofi, midnight drive"},
+        json={"adapter_id": adapter_id, "name": "Test Artist Style", "tags": "lofi, midnight drive"},
     )
     assert response.status_code == 201
     lora_id = response.json()["id"]

@@ -29,6 +29,7 @@ from .routes import (
     features_router,
     billing_router,
     uploads_router,
+    voice_router,
     workspaces_router,
 )
 from .storage import build_storage
@@ -112,6 +113,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(uploads_router, prefix=API_V1_PREFIX)
     app.include_router(exports_router, prefix=API_V1_PREFIX)
     app.include_router(artist_router, prefix=API_V1_PREFIX)
+    app.include_router(voice_router, prefix=API_V1_PREFIX)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     app.include_router(admin_router, prefix=API_V1_PREFIX)
     app.include_router(llm_router, prefix=API_V1_PREFIX)

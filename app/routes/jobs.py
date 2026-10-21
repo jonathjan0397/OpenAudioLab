@@ -461,27 +461,62 @@ def create_job(
     status_url, events_url = None, None
 
     with request.app.state.db.session() as session:
-        if payload.lora_id is not None and payload.artist_profile_version_id is not None:
+        from ..models import ArtistProfile, VoiceAdapter
+        from ..uais.resolver import resolve_plan
+
+        if payload.lora_id is not None and (
+            payload.artist_id is not None or payload.voice_adapter_id is not None
+        ):
             raise ApiError(
                 422,
                 "LORA_PROFILE_CONFLICT",
-                "Choose either a registry LoRA or an artist profile version, not both.",
+                "Choose either a registry LoRA or an artist voice, not both.",
             )
-        if payload.artist_profile_version_id is not None:
-            from ..models import ArtistProfileVersion
-
-            profile_version = session.get(ArtistProfileVersion, payload.artist_profile_version_id)
-            if profile_version is None or profile_version.owner_id != owner_id:
-                raise ApiError(404, "PROFILE_VERSION_NOT_FOUND", "Artist profile version not found.")
-            if profile_version.base_model_id != payload.model_id:
+        if payload.artist_id is not None and payload.voice_adapter_id is not None:
+            raise ApiError(
+                422,
+                "VOICE_BINDING_CONFLICT",
+                "Choose either an artist (the resolver picks the voice method) or an explicit voice adapter, not both.",
+            )
+        voice_selection = None
+        if payload.artist_id is not None or payload.voice_adapter_id is not None:
+            try:
+                voice_selection = _resolve_catalog(payload)[0].selection
+            except _catalog.CatalogError:
+                voice_selection = None  # canonical model error surfaces at admission below
+        voice_plan: dict | None = None
+        if payload.voice_adapter_id is not None:
+            adapter = session.get(VoiceAdapter, payload.voice_adapter_id)
+            if adapter is None or adapter.owner_id != owner_id:
+                raise ApiError(404, "ADAPTER_NOT_FOUND", "Voice adapter not found.")
+            if adapter.state not in ("validated", "ready", "stale"):
+                raise ApiError(409, "STATE_CONFLICT",
+                               f"Adapter in state '{adapter.state}' cannot be used for new jobs.")
+            if voice_selection is not None and adapter.model_selection != voice_selection:
                 raise ApiError(
                     422,
-                    "PROFILE_INCOMPATIBLE",
-                    "The profile version was trained for a different base model.",
-                    {"profile_base_model_id": profile_version.base_model_id, "model_id": payload.model_id},
+                    "VOICE_INCOMPATIBLE",
+                    "The voice adapter was trained for a different model selection.",
+                    {"adapter_model_selection": adapter.model_selection, "model_selection": voice_selection},
                 )
-            if profile_version.state not in ("active", "candidate"):
-                raise ApiError(409, "STATE_CONFLICT", "Retired profile versions cannot be used for new jobs.")
+            voice_plan = {
+                "artist_id": adapter.artist_profile_id,
+                "voice_profile_version": None,
+                "model": adapter.model_selection,
+                "voice_method": "native",
+                "adapter_id": adapter.id,
+                "dataset_version": adapter.dataset_version_id,
+                "reference_asset_id": None,
+                "validation_status": "VALIDATED" if adapter.state == "validated" else "LOAD_TESTED",
+                "generation_ready": True,
+            }
+        elif payload.artist_id is not None:
+            profile = session.get(ArtistProfile, payload.artist_id)
+            if profile is None or profile.owner_id != owner_id or profile.deleted_at is not None:
+                raise ApiError(404, "PROFILE_NOT_FOUND", "Artist profile not found.")
+            if voice_selection is not None:
+                voice_plan = resolve_plan(session, owner_id, payload.artist_id, voice_selection,
+                                          payload.voice_fidelity or "best")
         if payload.lora_id is not None:
             from ..models import Lora
 
@@ -523,6 +558,11 @@ def create_job(
             )
             quote = _bind_quote(session, owner_id, payload, profile, admission_cost)
             request_json = payload.model_dump(mode="json")
+            if voice_plan is not None:
+                request_json["_voice"] = voice_plan
+                if voice_plan["voice_method"] == "reference" and not request_json.get("src_asset_id"):
+                    request_json["task_type"] = "cover"
+                    request_json["src_asset_id"] = voice_plan["reference_asset_id"]
             if payload.operation == "music.generate" and request_json.get("seed") is None:
                 request_json["seed"] = random.randint(1, 1_000_000_000)
             request_json["_admission"] = {
@@ -560,7 +600,8 @@ def create_job(
                 client_reference=payload.client_reference,
                 idempotency_key=key,
             )
-            if payload.lora_id is None and payload.operation == "music.generate":
+            if (payload.lora_id is None and payload.artist_id is None
+                    and payload.voice_adapter_id is None and payload.operation == "music.generate"):
                 auto = _auto_lora_match(session, payload)
                 if auto is not None:
                     job.request_json = {**job.request_json, **auto}

@@ -166,29 +166,31 @@ def export_artifact(
 
 @router.get("/trainings")
 def my_trainings(request: Request, owner_id: str = Depends(owner_from_request)) -> JSONResponse:
-    from ..models import TrainingRun
+    """Recent UAIS voice jobs (training / analysis / validation) for this owner."""
 
     with request.app.state.db.session() as session:
         rows = list(
             session.execute(
-                select(TrainingRun, Job)
-                .join(Job, TrainingRun.job_id == Job.id)
-                .where(Job.owner_id == owner_id)
-                .order_by(Job.created_at.desc())
+                select(Job)
+                .where(
+                    Job.owner_id == owner_id,
+                    Job.operation.in_(("voice.analyze", "voice.train", "voice.validate")),
+                )
+                .order_by(Job.seq.desc())
                 .limit(20)
-            )
+            ).scalars()
         )
     items = [
         {
-            "run_id": run.id,
             "job_id": job.id,
-            "status": run.status,
-            "stage": (run.metrics_json or {}).get("stage"),
-            "progress": (run.metrics_json or {}).get("progress"),
-            "hardware": run.hardware,
+            "operation": job.operation,
+            "status": job.status,
+            "stage": job.stage,
+            "progress": job.progress,
+            "error_code": job.error_code,
             "created_at": job.created_at.isoformat() if job.created_at else None,
         }
-        for run, job in rows
+        for job in rows
     ]
     return JSONResponse({"trainings": items})
 
