@@ -83,9 +83,9 @@ export default function App() {
         </span>
         <span className="spacer" />
         <span className="bell-wrap">
-          <span className="bell" title="Notifications" onClick={() => setBellOpen((o) => !o)}>
+          <button className="bell" title="Notifications" aria-label="Notifications" onClick={() => setBellOpen((o) => !o)}>
             🔔{notes.data && notes.data.active_count > 0 && <span className="dot" />}
-          </span>
+          </button>
           {bellOpen && (
             <div className="card bell-menu">
               <div className="card-header">

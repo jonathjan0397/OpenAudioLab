@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
-import { Progress, StatusPill } from "../components/ui";
+import { Progress, StatusPill, humanizeStage } from "../components/ui";
 
 interface VoiceJob {
   job_id: string;
@@ -40,11 +40,11 @@ export default function TrainingPage() {
               <StatusPill status={t.status} />
             </div>
             <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>
-              {t.stage ? `${t.stage}…` : t.status}
+              {humanizeStage(t.stage) || t.status}
               {t.progress != null ? ` · ${Math.round(t.progress * 100)}%` : ""}
               {t.error_code ? ` · ${t.error_code}` : ""}
             </div>
-            <Progress value={t.progress ?? (t.status === "succeeded" ? 1 : 0)} />
+            <Progress value={t.progress ?? (t.status === "succeeded" ? 1 : null)} />
           </div>
         ))}
         {(runs.data?.trainings || []).length === 0 && (

@@ -874,3 +874,38 @@ Validation evidence: tests/test_artist.py extended (vocal-stem provenance + iden
 summary assertions; new full-mix fallback test with NullSeparator) — 14 UAIS tests pass;
 full backend suite and frontend build re-run below. Commits follow on
 feat/uais-artist-voice.
+
+## 2026-10-21 — Remediation Phases 1–3 (feat/uais-artist-voice, per docs/REMEDIATION_PLAN.md)
+
+Decisions:
+1. **Phase 1 (P0 job safety, commit b6325f5).** Migration 0034 adds `jobs.next_retry_at`
+   and `job_attempts.upstream_task_id`. Retryable engine/storage failures requeue with
+   capped exponential backoff (5s·2^n, max 60s + jitter) up to `MAX_ATTEMPTS`; terminal
+   failure refunds `usr_` generation debits by count-pairing `generation` vs
+   `generation-refund` entries, and explicit retry re-charges. The engine persists the
+   upstream task id at submit and `_recover_upstream` repolls it before ever resubmitting
+   (succeeded→finalize, pending→resume, unknown→fresh submit). A stranded-queued
+   sweeper (`republish_stranded_once`, 120 s grace) re-publishes queued jobs with no
+   outbox row, and `publish_once` skips outbox rows whose job is inside its retry
+   window; `claim_attempt` rejects early duplicate deliveries and clears `next_retry_at`.
+2. **Phase 2 (P1 worker/GPU recovery, commit ec2d02d).** Engine worker quarantines after
+   an unhealthy failure (claim-time gate, no new claims during cooldown); ENGINE_TIMEOUT
+   now restarts the engine process after the job is failed. Audio worker heartbeats via a
+   background thread (interval `max(5, lease/3)`) so long ffmpeg passes keep the lease.
+   docker-compose: `restart: unless-stopped` on all long-running services and
+   `healthcheck: disable: true` on workers (no healthcheck binary in image). autoscale:
+   `MAX_DPH` default 0.40, state file default `/var/tmp/oal_autoscale_state.json`, and
+   scale-down holds while a burst attempt is actively running (drain, don't cut).
+3. **Phase 3 (P2 UI correctness).** Backend adds `GET /tracks/stats`
+   (total/shared/favorites, aggregate — not page-limited) and `allowance
+   {plan, monthly_credits}` in `/auth/me` (plan "free" → 0). Frontend: sidebar dedupe +
+   NavLink-native active state (was hardcoded first-item), stats from the endpoint,
+   credit denominator from plan allowance (no invented "of 5,000"), indeterminate
+   animated progress bar whenever the server has no percentage (no fabricated 8%/6%),
+   `humanizeStage()` label map shared by widget/Studio/Voice/Training, Retry button on
+   failed widget jobs (POST /jobs/{id}/retry), active job id persisted in sessionStorage,
+   `:focus-visible` outlines + `prefers-reduced-motion` CSS, bell is a real button.
+
+Validation evidence: backend suite 296 passed (7 recovery + 2 autoscale/worker + 2
+stats/allowance tests added); frontend `tsc -b && vite build` clean, 17 vitest tests
+pass. Hub DB still at 0033 — 0034 applies on next deploy.

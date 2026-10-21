@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "../api";
-import { Progress, StatusPill } from "../components/ui";
+import { Progress, StatusPill, humanizeStage } from "../components/ui";
 
 interface ArtistRow {
   profile_id: string;
@@ -287,10 +287,10 @@ export default function VoiceStudioPage() {
                   <StatusPill status={j.status} />
                 </div>
                 <div className="sub" style={{ fontSize: 11 }}>
-                  {j.stage ? `${j.stage}…` : j.status}
+                  {humanizeStage(j.stage) || j.status}
                   {j.progress != null ? ` · ${Math.round(j.progress * 100)}%` : ""}
                 </div>
-                <Progress value={j.progress ?? (j.status === "succeeded" ? 1 : 0)} />
+                <Progress value={j.progress ?? (j.status === "succeeded" ? 1 : null)} />
               </div>
             ))}
           </>

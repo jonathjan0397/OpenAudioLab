@@ -1307,6 +1307,25 @@ def public_tracks(
     return JSONResponse({"tracks": items})
 
 
+@router.get("/tracks/stats")
+def my_track_stats(request: Request, owner_id: str = Depends(owner_from_request)) -> JSONResponse:
+    """Authoritative aggregate counts for the library (R10) — not page-limited."""
+    from sqlalchemy import func
+
+    from ..models import Favorite
+
+    with request.app.state.db.session() as session:
+        base = select(func.count()).select_from(Asset).where(
+            Asset.owner_id == owner_id, Asset.deleted_at.is_(None), Asset.mime.like("audio/%")
+        )
+        total = session.execute(base).scalar() or 0
+        shared = session.execute(base.where(Asset.shared.is_(True))).scalar() or 0
+        favorites = session.execute(
+            select(func.count()).select_from(Favorite).where(Favorite.owner_id == owner_id)
+        ).scalar() or 0
+    return JSONResponse({"total": int(total), "shared": int(shared), "favorites": int(favorites)})
+
+
 @router.get("/tracks")
 def my_tracks(
     request: Request,

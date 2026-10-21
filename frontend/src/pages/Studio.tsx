@@ -7,7 +7,7 @@ import ArtworkTile from "../components/ArtworkTile";
 import Waveform from "../components/Waveform";
 import { usePlayer } from "../components/PlayerContext";
 import { useWorkspace } from "../components/WorkspaceContext";
-import { Donut, Progress, StatusPill, fmtTime } from "../components/ui";
+import { Donut, Progress, StatusPill, fmtTime, humanizeStage } from "../components/ui";
 import { exportArtifact } from "../components/social";
 import { buildGenerationRequest } from "../lib/generation";
 
@@ -75,9 +75,8 @@ interface ArtistRow {
 }
 
 const SIDEBAR = [
-  { to: "/studio", label: "Dashboard", icon: "⌂" },
+  { to: "/studio", label: "My Studio", icon: "⌂" },
   { to: "/", label: "Create Music", icon: "✦" },
-  { to: "/studio", label: "My Tracks", icon: "♪" },
   { to: "/artists", label: "Artist Profiles", icon: "☺" },
   { to: "/training", label: "Training", icon: "◈" },
   { to: "/voice", label: "Voice Studio", icon: "◉" },
@@ -130,8 +129,13 @@ export default function StudioPage() {
   const navigate = useNavigate();
   const me = useQuery({
     queryKey: ["me"],
-    queryFn: () => api.get<{ user: AuthUser }>("/api/v1/auth/me"),
+    queryFn: () => api.get<{ user: AuthUser; allowance?: { plan: string; monthly_credits: number } }>("/api/v1/auth/me"),
     retry: false,
+  });
+  const stats = useQuery({
+    queryKey: ["track-stats"],
+    queryFn: () => api.get<{ total: number; shared: number; favorites: number }>("/api/v1/tracks/stats"),
+    enabled: !!me.data?.user,
   });
   const { activeId } = useWorkspace();
   const [wsFilter, setWsFilter] = useState<string>("all");
@@ -426,19 +430,20 @@ export default function StudioPage() {
     ["queued", "waiting_for_worker", "running"].includes(j.status)
   );
   const balance = credits.data?.balance ?? 0;
+  const allowance = me.data?.allowance?.monthly_credits ?? 0;
 
   return (
     <div className="dash">
       <aside className="dash-sidebar">
         {SIDEBAR.map((s, i) => (
-          <NavLink key={i} to={s.to} className={i === 0 ? "active" : ""}>
+          <NavLink key={i} to={s.to} end={s.to === "/"}>
             <span aria-hidden>{s.icon}</span> {s.label}
           </NavLink>
         ))}
         <div className="side-note">
           <strong>{balance.toLocaleString()}</strong> credits remaining
           <div style={{ marginTop: 6 }}>
-            <Progress value={balance / 5000} />
+            <Progress value={allowance > 0 ? balance / allowance : null} />
           </div>
         </div>
       </aside>
@@ -453,7 +458,7 @@ export default function StudioPage() {
             <span className="icon">♪</span>
             <div>
               <div className="label">Tracks Created</div>
-              <div className="value">{all.length}</div>
+              <div className="value">{(stats.data?.total ?? all.length).toLocaleString()}</div>
             </div>
           </div>
           <div className="card stat-card">
@@ -461,10 +466,11 @@ export default function StudioPage() {
             <div style={{ flex: 1 }}>
               <div className="label">Credits Remaining</div>
               <div className="value">{balance.toLocaleString()}</div>
-              <div className="sub">of 5,000</div>
+              <div className="sub">{allowance > 0 ? `of ${allowance.toLocaleString()} monthly` : "purchased balance"}</div>
             </div>
             <span className="chart">
-              <Donut value={balance / 5000} size={58} label={`${Math.round((balance / 5000) * 100)}%`} />
+              <Donut value={allowance > 0 ? balance / allowance : 0} size={58}
+                     label={allowance > 0 ? `${Math.round((balance / allowance) * 100)}%` : "—"} />
             </span>
           </div>
           <div className="card stat-card">
@@ -479,7 +485,7 @@ export default function StudioPage() {
             <span className="icon">☺</span>
             <div>
               <div className="label">Shared Tracks</div>
-              <div className="value">{all.filter((t) => t.shared).length}</div>
+              <div className="value">{(stats.data?.shared ?? all.filter((t) => t.shared).length).toLocaleString()}</div>
               <div className="sub">visible in Trending</div>
             </div>
           </div>
@@ -905,9 +911,10 @@ export default function StudioPage() {
                     <StatusPill status={j.status} />
                   </div>
                   <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>
-                    {j.stage ? `${j.stage}…` : "queued…"}
+                    {humanizeStage(j.stage) || "Queued"}
+                    {j.progress != null ? ` · ${Math.round(j.progress * 100)}%` : ""}
                   </div>
-                  <Progress value={j.progress ?? 0.06} />
+                  <Progress value={j.progress ?? null} />
                 </div>
               ))}
             </div>

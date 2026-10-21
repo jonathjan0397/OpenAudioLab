@@ -6,6 +6,19 @@ feature branches; `master` remains the documentation/planning baseline until the
 owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_N.md`.
 
 ## [Unreleased]
+### Remediation Phases 1–3 (2026-10-21, feat/uais-artist-voice)
+- **P0 job safety:** retryable failures requeue with capped backoff (`jobs.next_retry_at`),
+  terminal failure refunds generation credits (explicit retry re-charges), upstream ACE-Step
+  task id persisted per attempt (`job_attempts.upstream_task_id`) and repolled after worker
+  restarts, stranded-queued sweeper + retry-window publish eligibility (migration 0034).
+- **P1 worker/GPU recovery:** engine quarantine after unhealthy failures, engine restart
+  after stalls, audio-worker heartbeat thread, compose restart policies + worker healthcheck
+  disables, autoscale $0.40/day cap, persistent state file, mid-job scale-down drain hold.
+- **P2 UI correctness:** `GET /tracks/stats` + plan `allowance` in `/auth/me`; sidebar
+  active-state/dedupe, endpoint-backed stats, plan-based credit denominator, honest
+  indeterminate progress bars, humanized stage labels, widget Retry button, persisted job
+  tracking, focus-visible + reduced-motion styles, accessible notification bell.
+
 ### UAIS: Universal Artist Identity System replaces experimental artist training (2026-10-21)
 - **Hard replace** of the rights/dataset/training-run/evaluation stack (migration 0033 drops
   the old experimental tables; no customer data existed). New tables: `voice_profiles`,

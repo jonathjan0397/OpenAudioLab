@@ -7,7 +7,7 @@ import Waveform from "./Waveform";
 import { usePlayer } from "./PlayerContext";
 import { useWorkspace } from "./WorkspaceContext";
 import { exportArtifact } from "./social";
-import { fmtTime } from "./ui";
+import { fmtTime, humanizeStage, Progress } from "./ui";
 
 interface JobAccepted {
   job_id: string;
@@ -174,7 +174,7 @@ export default function CreateWidget({
   const [quality, setQuality] = useState(Number(saved.quality ?? 8));
   const [variations, setVariations] = useState(Number(saved.variations ?? 1));
   const [chipSeed, setChipSeed] = useState(() => Math.floor(Math.random() * 1e9));
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(() => sessionStorage.getItem("oal-active-job"));
   const [error, setError] = useState("");
   const [history, setHistory] = useState<DraftSnapshot[]>([]);
   const [lockTitle, setLockTitle] = useState(false);
@@ -376,6 +376,17 @@ export default function CreateWidget({
       setError(err?.controlHint() || err?.message || "Generation failed. Please try again.");
       qc.invalidateQueries({ queryKey: ["guest"] });
     },
+  });
+
+  useEffect(() => {
+    if (jobId) sessionStorage.setItem("oal-active-job", jobId);
+    else sessionStorage.removeItem("oal-active-job");
+  }, [jobId]);
+
+  const retry = useMutation({
+    mutationFn: () => api.post<JobDetail>(`/api/v1/jobs/${jobId}/retry`),
+    onSuccess: () => setError(""),
+    onError: (e: Error) => setError(e.message),
   });
 
   const job = useQuery({
@@ -831,17 +842,18 @@ export default function CreateWidget({
       {status === "failed" && (
         <p className="pill err" style={{ marginTop: 12 }}>
           {job.data?.error_code}: {job.data?.error_message}
+          <button className="btn" style={{ marginLeft: 10 }} disabled={retry.isPending} onClick={() => retry.mutate()}>
+            {retry.isPending ? "Retrying…" : "Retry"}
+          </button>
         </p>
       )}
       {busy && (
         <div style={{ marginTop: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--muted)", marginBottom: 5 }}>
-            <span>{job.data?.stage ? `${job.data.stage}…` : "Queued…"}</span>
+            <span>{humanizeStage(job.data?.stage) || "Queued"}</span>
             <span>{job.data?.progress != null ? `${Math.round(job.data.progress * 100)}%` : ""}</span>
           </div>
-          <div className="progress">
-            <i style={{ width: `${Math.round((job.data?.progress ?? 0.08) * 100)}%` }} />
-          </div>
+          <Progress value={job.data?.progress ?? null} />
         </div>
       )}
       {results.map((result) => {
