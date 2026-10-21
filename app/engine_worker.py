@@ -496,9 +496,14 @@ class EngineWorker:
                 break
         telemetry = _gpu_telemetry()
         if telemetry and required_mb:
-            _util, used_mb, total_mb = telemetry
-            if total_mb and (total_mb - used_mb) < required_mb:
-                return False, f"free VRAM {total_mb - used_mb} MB < required {required_mb} MB"
+            _util, _used, total_mb = telemetry
+            # The worker is serialized: at claim time the engine is idle and its
+            # resident model is reclaimed by the swap, so the floor is TOTAL VRAM
+            # (the same test as advertising). Counting our own engine as occupied
+            # here requeue-loops XL jobs on the shared 24 GB card. Live pressure
+            # is caught by ENGINE_OOM quarantine (R5), not by this check.
+            if total_mb and total_mb < required_mb:
+                return False, f"total VRAM {total_mb} MB < required {required_mb} MB"
         return True, ""
 
     def _target_engine_model(self, request_json: dict) -> str:
