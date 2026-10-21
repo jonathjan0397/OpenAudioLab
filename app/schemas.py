@@ -287,6 +287,7 @@ class ArtistProfileResponse(BaseModel):
     sharing_policy: str
     active_version_id: str | None
     etag: str
+    is_main: bool = False
     created_at: datetime
     updated_at: datetime
 

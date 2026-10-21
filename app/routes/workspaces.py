@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 
 from ..deps import owner_from_request
 from ..errors import ApiError
-from ..models import Asset, Job, User, Workspace, WorkspaceSong, new_uuid
+from ..models import ArtistProfile, ArtistProfileVersion, Asset, Job, User, Workspace, WorkspaceSong, new_uuid
 from ..schemas import StrictModel
 
 router = APIRouter(tags=["workspaces"])
@@ -40,6 +40,10 @@ class ActiveWorkspaceSet(StrictModel):
     workspace_id: str | None = Field(default=None, max_length=36)
 
 
+class WorkspaceArtistSet(StrictModel):
+    artist_profile_id: str | None = Field(default=None, max_length=36)
+
+
 def ensure_default_workspace(session, owner_id: str) -> Workspace:
     """Return the owner's always-present 'My Default Space' (create if missing)."""
     ws = session.execute(
@@ -61,15 +65,51 @@ def _get_owned(session, workspace_id: str, owner_id: str) -> Workspace:
     return ws
 
 
-def _ws_json(ws: Workspace, song_count: int = 0, asset_count: int = 0) -> dict:
+def _ws_json(ws: Workspace, song_count: int = 0, asset_count: int = 0, artist: dict | None = None) -> dict:
     return {
         "workspace_id": ws.id,
         "name": ws.name,
         "is_default": bool(ws.is_default),
+        "artist_profile_id": ws.artist_profile_id,
+        "artist": artist,
         "song_count": song_count,
         "asset_count": asset_count,
         "created_at": ws.created_at.isoformat() if ws.created_at else None,
     }
+
+
+def _workspace_artist_map(session, workspaces) -> dict[str, dict]:
+    """Attached-artist details (incl. active version + base model) per workspace."""
+    profile_ids = sorted({ws.artist_profile_id for ws in workspaces if ws.artist_profile_id})
+    if not profile_ids:
+        return {}
+    profiles = {
+        p.id: p
+        for p in session.execute(select(ArtistProfile).where(ArtistProfile.id.in_(profile_ids))).scalars()
+    }
+    version_ids = sorted({p.active_version_id for p in profiles.values() if p.active_version_id})
+    versions: dict[str, ArtistProfileVersion] = {}
+    if version_ids:
+        for v in session.execute(select(ArtistProfileVersion).where(ArtistProfileVersion.id.in_(version_ids))).scalars():
+            versions[v.id] = v
+    out: dict[str, dict] = {}
+    for ws in workspaces:
+        profile = profiles.get(ws.artist_profile_id or "")
+        if profile is None:
+            continue
+        version = versions.get(profile.active_version_id or "")
+        out[ws.id] = {
+            "profile_id": profile.id,
+            "name": profile.name,
+            "slug": profile.slug,
+            "is_main": bool(profile.is_main),
+            "sharing_policy": profile.sharing_policy,
+            "active_version_id": profile.active_version_id,
+            "base_model_id": version.base_model_id if version else None,
+            "version_state": version.state if version else None,
+            "applicable": bool(version and version.state in ("active", "candidate")),
+        }
+    return out
 
 
 def _song_json(song: WorkspaceSong) -> dict:
@@ -119,7 +159,15 @@ def list_workspaces(request: Request, owner_id: str = Depends(owner_from_request
                 )
             ).scalar() or 0
             asset_counts[default.id] = asset_counts.get(default.id, 0) + unfiled
-    return JSONResponse({"workspaces": [_ws_json(ws, song_counts.get(ws.id, 0), asset_counts.get(ws.id, 0)) for ws in rows]})
+        artist_map = _workspace_artist_map(session, rows)
+    return JSONResponse(
+        {
+            "workspaces": [
+                _ws_json(ws, song_counts.get(ws.id, 0), asset_counts.get(ws.id, 0), artist_map.get(ws.id))
+                for ws in rows
+            ]
+        }
+    )
 
 
 @router.post("/workspaces", status_code=201)
@@ -192,6 +240,29 @@ def rename_workspace(workspace_id: str, payload: WorkspaceCreate, request: Reque
         ws.name = name
         session.commit()
         return JSONResponse(_ws_json(ws))
+
+
+@router.patch("/workspaces/{workspace_id}/artist")
+def set_workspace_artist(
+    workspace_id: str,
+    payload: WorkspaceArtistSet,
+    request: Request,
+    owner_id: str = Depends(owner_from_request),
+) -> JSONResponse:
+    """Attach (or detach with null) one of the owner's artist profiles to a workspace."""
+    with request.app.state.db.session() as session:
+        ws = _get_owned(session, workspace_id, owner_id)
+        if payload.artist_profile_id is None:
+            ws.artist_profile_id = None
+            session.commit()
+            return JSONResponse(_ws_json(ws))
+        profile = session.get(ArtistProfile, payload.artist_profile_id)
+        if profile is None or profile.owner_id != owner_id or profile.deleted_at is not None:
+            raise ApiError(404, "PROFILE_NOT_FOUND", "Artist profile not found.")
+        ws.artist_profile_id = profile.id
+        session.commit()
+        artist_map = _workspace_artist_map(session, [ws])
+        return JSONResponse(_ws_json(ws, artist=artist_map.get(ws.id)))
 
 
 @router.post("/workspaces/move")

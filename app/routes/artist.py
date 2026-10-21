@@ -72,6 +72,7 @@ def _profile_response(profile: ArtistProfile) -> ArtistProfileResponse:
         singer=profile.singer_json,
         sharing_policy=profile.sharing_policy,
         active_version_id=profile.active_version_id,
+        is_main=profile.is_main,
         etag=f'"{profile.etag_version}"',
         created_at=profile.created_at,
         updated_at=profile.updated_at,
@@ -198,9 +199,17 @@ def _create_job(session, request: Request, owner_id: str, route: str, operation:
 @router.post("/artist-profiles", status_code=201)
 def create_profile(payload: ArtistProfileCreate, request: Request, owner_id: str = Depends(owner_from_request)) -> JSONResponse:
     with request.app.state.db.session() as session:
+        has_existing = (
+            session.execute(
+                select(ArtistProfile.id).where(
+                    ArtistProfile.owner_id == owner_id, ArtistProfile.deleted_at.is_(None)
+                ).limit(1)
+            ).first()
+            is not None
+        )
         profile = ArtistProfile(id=new_uuid(), owner_id=owner_id, name=payload.name,
                                 style_json=payload.style, singer_json=payload.singer,
-                                bio=payload.bio,
+                                bio=payload.bio, is_main=not has_existing,
                                 slug=_unique_slug(session, payload.name))
         session.add(profile)
         session.commit()
@@ -255,6 +264,25 @@ def delete_profile(profile_id: str, request: Request, owner_id: str = Depends(ow
         profile.deleted_at = utcnow()
         session.commit()
     return Response(status_code=204)
+
+
+@router.post("/artist-profiles/{profile_id}/set-main")
+def set_main_profile(profile_id: str, request: Request, owner_id: str = Depends(owner_from_request)) -> JSONResponse:
+    """Designate this artist as the account's Main profile (exactly one per owner)."""
+    with request.app.state.db.session() as session:
+        profile = _get_owned_profile(session, profile_id, owner_id)
+        for other in session.execute(
+            select(ArtistProfile).where(
+                ArtistProfile.owner_id == owner_id,
+                ArtistProfile.deleted_at.is_(None),
+                ArtistProfile.id != profile.id,
+            )
+        ).scalars():
+            other.is_main = False
+        profile.is_main = True
+        session.commit()
+        body = _profile_response(profile)
+    return JSONResponse(content=body.model_dump(mode="json"), headers={"ETag": body.etag})
 
 
 # --- M17: artist avatar + curated songs --------------------------------------
