@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "../api";
 import { Progress, StatusPill, humanizeStage } from "../components/ui";
@@ -72,7 +73,8 @@ const STATE_LABEL: Record<string, string> = {
 
 export default function VoiceStudioPage() {
   const qc = useQueryClient();
-  const [artistId, setArtistId] = useState("");
+  const [params] = useSearchParams();
+  const [artistId, setArtistId] = useState(params.get("artist") || "");
   const [consent, setConsent] = useState(false);
   const [model, setModel] = useState("ace-step-1.5-turbo");
   const [error, setError] = useState("");
@@ -208,12 +210,12 @@ export default function VoiceStudioPage() {
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
               <label className="btn" style={{ cursor: "pointer" }}>
                 + Add recording
-                <input type="file" accept=".wav,.flac,.mp3" hidden disabled={busy || frozen}
+                <input type="file" accept=".wav,.flac,.mp3" hidden disabled={busy || frozen || !consent}
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); e.currentTarget.value = ""; }} />
               </label>
               <label style={{ fontSize: 12, display: "inline-flex", gap: 6, alignItems: "center" }}>
                 <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-                consent on file
+                consent on file (required to upload)
               </label>
               <span className="spacer" style={{ flex: 1 }} />
               <button className="btn" disabled={!active.length || busy} onClick={() => finalize.mutate()}>

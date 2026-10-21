@@ -163,9 +163,6 @@ export default function CreateWidget({
     !isGuest && !loraId && !!activeArtist && activeArtist.applicable &&
     activeArtist.adapter_model_selection === modelSelection;
   const workspaceAdapterId = wsArtistCompatible ? activeArtist!.default_adapter_id || undefined : undefined;
-  const wsArtistBlocked =
-    !isGuest && !!activeArtist && !wsArtistCompatible &&
-    (!!loraId || !activeArtist.applicable || activeArtist.adapter_model_selection !== modelSelection);
   const [bpm, setBpm] = useState(String(saved.bpm || ""));
   const [keyScale, setKeyScale] = useState(String(saved.keyScale || ""));
   const [timeSignature, setTimeSignature] = useState(String(saved.timeSignature || ""));
@@ -661,13 +658,18 @@ export default function CreateWidget({
               <button type="button" className="chip chip-shuffle" title="Shuffle tags" onClick={() => setChipSeed(Math.floor(Math.random() * 1e9))}>♻</button>
             </div>
           </div>
-          {(wsArtistCompatible || wsArtistBlocked) && (
-            <div className={`ws-artist-note${wsArtistCompatible ? " on" : " off"}`}>
-              {wsArtistCompatible
-                ? `♪ ${activeArtist!.name} — this workspace's artist will be applied`
-                : `${activeArtist!.name} — voice adapter not applied (pick the model it was trained for, or train it for this model)`}
-            </div>
-          )}
+          {(() => {
+            if (isGuest || !activeArtist) return null;
+            const a = activeArtist;
+            let state: string;
+            if (wsArtistCompatible) state = `♪ ${a.name} — voice applied on this model`;
+            else if (loraId) state = `${a.name} — style LoRA selected; voice adapter skipped`;
+            else if (!a.applicable) state = `${a.name} — voice unavailable for generation`;
+            else if (!a.default_adapter_id) state = `${a.name} — no voice adapter yet (train in Voice Studio)`;
+            else if (a.adapter_state === "stale") state = `${a.name} — adapter stale (retrain in Voice Studio)`;
+            else state = `${a.name} — adapter trained for ${a.adapter_model_selection || "another model"}; switch model or train for this one`;
+            return <div className={`ws-artist-note${wsArtistCompatible ? " on" : " off"}`}>{state}</div>;
+          })()}
           <div className="create-bottom-row">
             <button type="button" className="more-toggle" onClick={() => setMoreOpen((o) => !o)}>More controls {moreOpen ? "▴" : "▾"}</button>
             <span className="spacer" />

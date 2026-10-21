@@ -952,3 +952,18 @@ Decisions:
 
 Validation evidence: `tsc -b && vite build` clean; 17 vitest tests; 300 backend tests
 unchanged (frontend-only phase). 320–1920 px visual audit pending the redeploy pass.
+
+## 2026-10-21 — Remediation Phase 6 (P5: R19–R20, same branch)
+
+Decisions:
+1. **R19 — artist journey.** Artist rows gain inline name/bio editing (PATCH
+   `/artist-profiles/{id}` already supported both fields); the Voice Studio checkbox now
+   actually gates recording upload (disabled until consent is on file); the per-profile
+   "Voice" link deep-links `/voice?artist=<id>` and Voice Studio preselects it, joining
+   the Artist → Voice workflow without a page rewrite.
+2. **R20 — per-model voice state.** The widget note is now a state machine over the
+   bound artist's compatibility data: applied / style-LoRA-selected / voice-unavailable /
+   no-adapter-yet / stale-adapter / trained-for-another-model — visible before submit.
+
+Validation evidence: `tsc -b && vite build` clean; 17 vitest; 300 backend tests
+(backend untouched this phase). §22 Creator-workflow click-through pending redeploy.

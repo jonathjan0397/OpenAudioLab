@@ -6,6 +6,12 @@ feature branches; `master` remains the documentation/planning baseline until the
 owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_N.md`.
 
 ## [Unreleased]
+### Remediation Phase 6 (2026-10-21, feat/uais-artist-voice)
+- **Artist UX (R19):** inline name/bio editing on artist rows; consent checkbox now
+  gates recording upload in Voice Studio; per-profile deep link into Voice Studio.
+- **Voice state visibility (R20):** Create widget shows the bound artist's per-model
+  adapter state (applied / stale / no adapter / wrong model / unavailable) before submit.
+
 ### Remediation Phase 5 (2026-10-21, feat/uais-artist-voice)
 - **Creator (R16):** pre-submit premium price preview (`≈ N credits`, debounced,
   pricing-fields only), draft writes debounced to ≤1/s, cross-tab draft sync via
