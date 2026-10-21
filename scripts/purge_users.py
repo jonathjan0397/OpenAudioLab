@@ -28,12 +28,23 @@ _OWNER_TABLES = [
     "upload_sessions", "artist_profiles", "artist_profile_versions", "rights_records",
     "datasets", "dataset_tracks", "dataset_versions", "favorites", "artist_follows",
     "api_keys", "credit_entries", "billing_events", "workspaces", "workspace_songs",
-    "artist_songs", "quotes", "guest_sessions",
+    "artist_songs", "quotes",
 ]
 # job-linked tables (job_id)
 _JOB_TABLES = ["job_attempts", "job_events", "outbox_records"]
 # user_id-keyed (not owner_id)
 _USERID_TABLES = ["user_sessions", "auth_tokens", "subscription_periods"]
+
+
+def _tables_with_column(session, column: str) -> set[str]:
+    return {
+        r[0] for r in session.execute(
+            sa.text(
+                "select table_name from information_schema.columns where table_schema='public' and column_name=:c"
+            ),
+            {"c": column},
+        )
+    }
 
 
 def _resolve(session: Session, ident: str) -> User | None:
@@ -70,20 +81,26 @@ def _preview_and_delete(session: Session, storage, user: User, execute: bool) ->
             return
         session.execute(sa.text(f"DELETE FROM {table} WHERE {column} IN :v").bindparams(v=tuple(values)))
 
+    owner_tabs = _tables_with_column(session, "owner_id")
+    user_tabs = _tables_with_column(session, "user_id")
+
     for t in _JOB_TABLES:
-        _del(t, "job_id", job_ids)
-    _del("favorites", "asset_id", asset_ids)  # belt-and-suspenders; also owner_id below
+        if t in owner_tabs or t in _tables_with_column(session, "job_id"):
+            _del(t, "job_id", job_ids)
     for t in _OWNER_TABLES:
-        try:
+        if t in owner_tabs:
             session.execute(sa.text(f"DELETE FROM {t} WHERE owner_id = :o"), {"o": owner})
-        except Exception as exc:  # table may not exist in some deployments
-            print(f"  ! skip {t}: {exc}", file=sys.stderr)
+    if "favorites" in owner_tabs:
+        _del("favorites", "asset_id", asset_ids)
     for t in _USERID_TABLES:
-        try:
+        if t in user_tabs:
             session.execute(sa.text(f"DELETE FROM {t} WHERE user_id = :o"), {"o": user.id})
-        except Exception as exc:
-            print(f"  ! skip {t}: {exc}", file=sys.stderr)
-    session.execute(sa.text("DELETE FROM abuse_reports WHERE reporter_owner_id = :o"), {"o": owner})
+    if "guest_sessions" in owner_tabs or "guest_sessions" in user_tabs:
+        gs_cols = _tables_with_column(session, "claimed_user_id")
+        if "guest_sessions" in gs_cols:
+            session.execute(sa.text("DELETE FROM guest_sessions WHERE claimed_user_id = :o"), {"o": user.id})
+    if "abuse_reports" in owner_tabs:
+        session.execute(sa.text("DELETE FROM abuse_reports WHERE reporter_owner_id = :o"), {"o": owner})
     # storage bytes
     for k in sorted(set(asset_keys) | set(obj_keys)):
         try:
