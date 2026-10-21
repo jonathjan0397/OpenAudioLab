@@ -22,6 +22,7 @@ interface Track {
   url: string;
   job_id?: string | null;
   seed?: number | null;
+  workspace_id?: string | null;
 }
 interface JobRow {
   job_id: string;
@@ -33,7 +34,9 @@ interface JobRow {
 interface Workspace {
   workspace_id: string;
   name: string;
+  is_default: boolean;
   song_count: number;
+  asset_count: number;
 }
 interface WorkspaceSong {
   song_id: string;
@@ -115,9 +118,10 @@ export default function StudioPage() {
     queryFn: () => api.get<{ user: AuthUser }>("/api/v1/auth/me"),
     retry: false,
   });
+  const [wsFilter, setWsFilter] = useState<string>("all");
   const tracks = useQuery({
-    queryKey: ["my-tracks"],
-    queryFn: () => api.get<{ tracks: Track[] }>("/api/v1/tracks?limit=50"),
+    queryKey: ["my-tracks", wsFilter],
+    queryFn: () => api.get<{ tracks: Track[] }>(`/api/v1/tracks?limit=50${wsFilter !== "all" ? `&workspace_id=${encodeURIComponent(wsFilter)}` : ""}`),
     enabled: !!me.data?.user,
   });
   const credits = useQuery({
@@ -145,6 +149,8 @@ export default function StudioPage() {
   const [newArtistName, setNewArtistName] = useState("");
   const [wsActive, setWsActive] = useState<string | null>(null);
   const [wsNewName, setWsNewName] = useState("");
+  const [wsRenaming, setWsRenaming] = useState<string | null>(null);
+  const [wsRenameValue, setWsRenameValue] = useState("");
   const [showIndivStems, setShowIndivStems] = useState(false);
   const [copiedRaw, setCopiedRaw] = useState(false);
   const stemsQuery = useQuery<{ asset_id: string; stems: { category: string | null; asset_id: string; url: string }[]; zip: { asset_id: string | null; url: string; bytes?: number } | null }>({
@@ -201,15 +207,24 @@ export default function StudioPage() {
     mutationFn: (id: string) => api.delete(`/api/v1/workspaces/${id}`),
     onSuccess: () => {
       setWsActive(null);
+      setWsFilter("all");
+      qc.invalidateQueries({ queryKey: ["workspaces"] });
+      qc.invalidateQueries({ queryKey: ["my-tracks"] });
+    },
+  });
+  const wsMove = useMutation({
+    mutationFn: ({ assetIds, workspaceId }: { assetIds: string[]; workspaceId: string | null }) =>
+      api.post("/api/v1/workspaces/move", { asset_ids: assetIds, workspace_id: workspaceId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["my-tracks"] });
       qc.invalidateQueries({ queryKey: ["workspaces"] });
     },
   });
-  const wsSave = useMutation({
-    mutationFn: ({ wsId, jobId, title }: { wsId: string; jobId: string; title: string }) =>
-      api.post(`/api/v1/workspaces/${wsId}/songs`, { job_id: jobId, title }),
+  const wsRename = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => api.patch(`/api/v1/workspaces/${id}`, { name }),
     onSuccess: () => {
+      setWsRenaming(null);
       qc.invalidateQueries({ queryKey: ["workspaces"] });
-      qc.invalidateQueries({ queryKey: ["workspace-songs"] });
     },
   });
   const wsRemove = useMutation({
@@ -453,7 +468,20 @@ export default function StudioPage() {
                   <button type="button" className={filter === "shared" ? "active" : ""} onClick={() => setFilter("shared")}>Shared</button>
                 </div>
               </div>
-              {shown.length === 0 && <p style={{ color: "var(--muted)" }}>No tracks yet — generate one above.</p>}
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "6px 0 4px" }}>
+                <button type="button" className={`chip${wsFilter === "all" ? " chip-picked" : ""}`} onClick={() => setWsFilter("all")}>All spaces</button>
+                {(workspaces.data?.workspaces || []).map((w) => (
+                  <button
+                    key={w.workspace_id}
+                    type="button"
+                    className={`chip${wsFilter === w.workspace_id ? " chip-picked" : ""}`}
+                    onClick={() => setWsFilter(wsFilter === w.workspace_id ? "all" : w.workspace_id)}
+                  >
+                    {w.name} ({w.asset_count})
+                  </button>
+                ))}
+              </div>
+              {shown.length === 0 && <p style={{ color: "var(--muted)" }}>No tracks here yet — generate one above or pick another space.</p>}
               {shown.map((t) => (
                 <>
                 <div className="track-row" key={t.asset_id}>
@@ -518,20 +546,22 @@ export default function StudioPage() {
                     </button>
                     <a className="btn" href={t.url} download>WAV</a>
                     <button className="btn" onClick={() => exportArtifact(t.asset_id, "mp3")}>MP3</button>
-                    {t.job_id && (workspaces.data?.workspaces || []).length > 0 && (
-                      <button
-                        className="btn"
-                        title="Save recipe to workspace"
-                        onClick={() => {
-                          const wsId = wsActive && (workspaces.data?.workspaces || []).some((w) => w.workspace_id === wsActive)
-                            ? wsActive
-                            : workspaces.data!.workspaces[0].workspace_id;
-                          wsSave.mutate({ wsId, jobId: t.job_id!, title: t.title || "Untitled" });
-                        }}
-                      >
-                        + Workspace
-                      </button>
-                    )}
+                    {(workspaces.data?.workspaces || []).length > 0 && (() => {
+                      const ws = workspaces.data!.workspaces;
+                      const defId = (ws.find((w) => w.is_default) || ws[0]).workspace_id;
+                      const current = t.workspace_id || defId;
+                      return (
+                        <select
+                          className="btn"
+                          title="Move this track to a workspace"
+                          value={current}
+                          style={{ fontSize: 12 }}
+                          onChange={(ev) => wsMove.mutate({ assetIds: [t.asset_id], workspaceId: ev.target.value === defId ? null : ev.target.value })}
+                        >
+                          {ws.map((w) => <option key={w.workspace_id} value={w.workspace_id}>{`♪ ${w.name}`}</option>)}
+                        </select>
+                      );
+                    })()}
                     <button
                       className="btn"
                       style={stemsFor === t.asset_id ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
@@ -707,21 +737,36 @@ export default function StudioPage() {
                 <p style={{ color: "var(--muted)", fontSize: 13 }}>No workspaces yet — create one and save tracks into it.</p>
               )}
               <div className="style-chips">
-                {(workspaces.data?.workspaces || []).map((w) => (
-                  <button
-                    key={w.workspace_id}
-                    type="button"
-                    className={`chip${wsActive === w.workspace_id ? " chip-picked" : ""}`}
-                    onClick={() => setWsActive(wsActive === w.workspace_id ? null : w.workspace_id)}
-                  >
-                    {w.name} ({w.song_count})
-                  </button>
-                ))}
+                {(workspaces.data?.workspaces || []).map((w) =>
+                  wsRenaming === w.workspace_id ? (
+                    <span key={w.workspace_id} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                      <input value={wsRenameValue} onChange={(e) => setWsRenameValue(e.target.value)} maxLength={80} style={{ width: 160 }} />
+                      <button className="btn" disabled={!wsRenameValue.trim()} onClick={() => wsRename.mutate({ id: w.workspace_id, name: wsRenameValue.trim() })}>Save</button>
+                      <button className="btn btn-ghost" onClick={() => setWsRenaming(null)}>Cancel</button>
+                    </span>
+                  ) : (
+                    <span key={w.workspace_id} style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+                      <button
+                        type="button"
+                        className={`chip${wsActive === w.workspace_id ? " chip-picked" : ""}`}
+                        onClick={() => setWsActive(wsActive === w.workspace_id ? null : w.workspace_id)}
+                      >
+                        {w.name} ({w.asset_count}{w.song_count ? ` · ${w.song_count} saved` : ""}){w.is_default ? " ★" : ""}
+                      </button>
+                      {!w.is_default && (
+                        <>
+                          <button className="btn btn-ghost" title="Rename" onClick={() => { setWsRenaming(w.workspace_id); setWsRenameValue(w.name); }}>✎</button>
+                          <button className="btn btn-ghost" title="Delete (tracks return to My Default Space)" onClick={() => { if (window.confirm(`Delete "${w.name}"? Its tracks move to My Default Space.`)) wsDelete.mutate(w.workspace_id); }}>🗑</button>
+                        </>
+                      )}
+                    </span>
+                  )
+                )}
               </div>
               {wsActive && (
                 <div style={{ marginTop: 10 }}>
                   {(wsSongs.data?.songs || []).length === 0 && (
-                    <p style={{ color: "var(--muted)", fontSize: 13 }}>Empty — use “+ Workspace” on any track below.</p>
+                    <p style={{ color: "var(--muted)", fontSize: 13 }}>No saved recipes here yet — use the “♪ space” move control on a track, or “+ Add” above.</p>
                   )}
                   {(wsSongs.data?.songs || []).map((s) => (
                     <div key={s.song_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid color-mix(in srgb, var(--border) 40%, transparent)" }}>
