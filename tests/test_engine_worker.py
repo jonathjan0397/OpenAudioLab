@@ -265,3 +265,17 @@ def test_payload_for_turbo_stays_dit_only(orch) -> None:
     assert payload["thinking"] is False
     # turbo has no planner LM -> None (build_payload omits lm_model_path from the real request)
     assert payload.get("lm_model_path") is None
+
+
+def test_lora_compatible_guards_2b_lora_on_xl() -> None:
+    from app.engine_worker import _lora_compatible
+    # 2B-trained mood/artist LoRA must NOT be applied to the 4B XL DiT
+    assert _lora_compatible("ace-step-1.5", "acestep-v15-xl-sft") is False
+    assert _lora_compatible("ace-step-1.5", "acestep-v15-xl-turbo") is False
+    # same-family (2B LoRA on turbo/sft) is fine
+    assert _lora_compatible("ace-step-1.5", "acestep-v15-turbo") is True
+    assert _lora_compatible("ace-step-1.5", "acestep-v15-sft") is True
+    # a genuine XL LoRA on XL is fine; unknown base/target -> allow (no behavior change)
+    assert _lora_compatible("acestep-v15-xl-sft", "acestep-v15-xl-sft") is True
+    assert _lora_compatible("", "acestep-v15-xl-sft") is True
+    assert _lora_compatible("ace-step-1.5", "") is True

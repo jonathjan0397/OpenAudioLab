@@ -154,6 +154,20 @@ def _is_oom_message(message: str | None) -> bool:
     return "out of memory" in text or "oom" in text or "cuda oom" in text
 
 
+def _lora_compatible(base_model_id: str | None, engine_model: str | None) -> bool:
+    """A LoRA trained against one checkpoint family cannot be applied to another:
+    the 2B ``ace-step-1.5``-based adapters fail PeftModel state_dict load on the 4B
+    ``xl_*`` DiT (and vice versa). Families here are distinguished by the ``xl``
+    token; same-family (or an unknown/blank base, which we allow to preserve prior
+    behavior) is compatible. Guards mood/auto LoRAs from crashing XL renders."""
+    def is_xl(s: str | None) -> bool:
+        return "xl" in (s or "").lower()
+    base, engine = (base_model_id or "").strip(), (engine_model or "").strip()
+    if not base or not engine:      # unknown target/base -> don't change behavior
+        return True
+    return is_xl(base) == is_xl(engine)
+
+
 def _gpu_telemetry() -> tuple[int, int, int] | None:
     """Read (util%, used MB, total MB) for the device this worker uses."""
     import subprocess
@@ -576,10 +590,17 @@ class EngineWorker:
 
                     lora = session.get(Lora, lora_id)
                     if lora is not None and lora.state == "active" and lora.storage_prefix and lora.files_json:
-                        lora_artifacts = {
-                            "adapter_object_prefix": lora.storage_prefix,
-                            "adapter_files": list(lora.files_json),
-                        }
+                        # Skip a LoRA whose base family can't load onto this checkpoint
+                        # (e.g. a 2B mood-LoRA on the 4B XL DiT -> state_dict crash);
+                        # keep its style tags as text and render anyway.
+                        if _lora_compatible(getattr(lora, "base_model_id", None), target_model):
+                            lora_artifacts = {
+                                "adapter_object_prefix": lora.storage_prefix,
+                                "adapter_files": list(lora.files_json),
+                            }
+                        else:
+                            append_event(session, claimed_job, "notice", "running",
+                                         message=f"LoRA '{lora.name}' not compatible with {target_model}; rendering without its adapter.")
                         # M14e: the LoRA's tags act as style keywords guiding generation.
                         extra = ", ".join(t for t in (lora.tags_json or []) if t)
                         if extra:
@@ -596,7 +617,15 @@ class EngineWorker:
                     self.adapter.unload_lora()
                 except EngineError:
                     pass
-                self.adapter.load_lora(profile_path, adapter_name=f"oal-{uuid4().hex[:8]}")
+                try:
+                    self.adapter.load_lora(profile_path, adapter_name=f"oal-{uuid4().hex[:8]}")
+                except EngineError as exc:
+                    # Incompatible/failed adapter load must not fail the render: drop it
+                    # and continue DiT-only (XL + 2B LoRA hit exactly this).
+                    log.warning("adapter load failed for %s (%s); rendering without it", claimed_job, exc.message)
+                    append_event(self.db, claimed_job, "notice", "running",
+                                 message="Style adapter failed to load; rendering without it.")
+                    profile_path = None
 
             try:
                 submit = self.adapter.submit(payload)
