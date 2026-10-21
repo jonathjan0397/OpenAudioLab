@@ -6,6 +6,24 @@ feature branches; `master` remains the documentation/planning baseline until the
 owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_N.md`.
 
 ## [Unreleased]
+### GPU Orchestration run (2026-10-21, feat/gpu-orchestration)
+- **Smart Model Queue Manager:** peek-window model-affinity job selection over the
+  shared queue (claim-then-LREM, Postgres authoritative), immediate cross-model
+  switch on loaded-group exhaustion (no 600 s idle-stop wait), fairness batch/aging
+  caps; `workers.loaded_model` (migration 0036).
+- **Swappiness (0–100, default 50):** explainable local-vs-remote provisioning
+  decisions logged to `gpu_scale_decisions`; fleet settings persisted + validated
+  (`PATCH /admin/gpu-fleet/settings`); autoscaler reads DB settings.
+- **Offer discovery:** `app/vast_offers.py` REST search with hard filters and a
+  documented weighted ranking; Top-10 admin endpoint with 30 s server cache and
+  "Not reported" for missing provider fields.
+- **Unified provisioning:** durable `gpu_deployments` intents (idempotent,
+  offer-revalidated, budget-guarded), autoscaler as sole Vast CLI owner, manual
+  workers immune to routine scale-down, worker stop/restart/destroy API with
+  busy guard, costs + fleet events (migration 0037).
+- **GPU Fleet console:** Admin → GPU Fleet (Overview / Smart Queue / Settings /
+  Top-10 Offers + deploy flow / Deployments / Instances / Costs / Events).
+
 ### Remediation Phase 6 (2026-10-21, feat/uais-artist-voice)
 - **Artist UX (R19):** inline name/bio editing on artist rows; consent checkbox now
   gates recording upload in Voice Studio; per-profile deep link into Voice Studio.

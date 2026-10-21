@@ -533,11 +533,18 @@ def create_instance(
     min_vram=None,
     image=None,
     train_queue=None,
+    offer_id=None,
+    offer_dph=None,
 ):
-    offer = pick_offer(max_dph=max_dph, min_compute=min_compute, min_vram=min_vram)
-    if not offer:
-        log("no eligible North-American offer; will retry")
-        return None
+    if offer_id:
+        offer = offer_id
+        if offer_dph:
+            _OFFER_DPH[str(offer_id)] = float(offer_dph)
+    else:
+        offer = pick_offer(max_dph=max_dph, min_compute=min_compute, min_vram=min_vram)
+        if not offer:
+            log("no eligible North-American offer; will retry")
+            return None
     if dry_run:
         log(f"[dry-run] would create instance on offer {offer}")
         return -1
@@ -735,11 +742,131 @@ def desired_nodes(depth, low_since, now, current, effective_baseline=None):
     return 0            # sustained drain: tear everything down
 
 
+def manual_contracts():
+    """Contracts owned by manual deployments that must not be auto-destroyed."""
+    eng = _engine()
+    if eng is None:
+        return set()
+    try:
+        import sqlalchemy
+
+        with eng.connect() as conn:
+            rows = conn.execute(sqlalchemy.text(
+                "select contract from gpu_deployments where origin='MANUAL_ADMIN' "
+                "and automatic_shutdown=false and contract is not null "
+                "and state in ('PROVISIONING','READY','BUSY')"
+            )).fetchall()
+        return {int(r[0]) for r in rows}
+    except Exception:
+        return set()
+
+
+def record_auto_deployment(contract, dph, dry_run=False):
+    eng = _engine()
+    if eng is None or dry_run or not contract:
+        return
+    try:
+        import sqlalchemy
+
+        with eng.begin() as conn:
+            conn.execute(sqlalchemy.text(
+                "insert into gpu_deployments (id, created_at, updated_at, origin, purpose, state,"
+                " contract, dph, automatic_shutdown) values (:id, now(), now(), 'AUTO_BURST',"
+                " 'auto', 'READY', :c, :d, true)"
+            ), {"id": str(uuid.uuid4()), "c": int(contract), "d": float(dph or 0)})
+    except Exception:
+        pass
+
+
+def end_auto_deployment(contract, dry_run=False):
+    eng = _engine()
+    if eng is None or dry_run or not contract:
+        return
+    try:
+        import sqlalchemy
+
+        with eng.begin() as conn:
+            conn.execute(sqlalchemy.text(
+                "update gpu_deployments set state='STOPPED', ended_at=now(), updated_at=now()"
+                " where contract=:c and origin='AUTO_BURST' and state in ('READY','BUSY')"
+            ), {"c": int(contract)})
+    except Exception:
+        pass
+
+
+def fulfill_intents(dry_run=False):
+    """Single provisioning coordinator: the autoscaler is the only Vast CLI
+    owner, so manual and automatic intents are fulfilled here (spec §12)."""
+    eng = _engine()
+    if eng is None:
+        return
+    import sqlalchemy
+
+    try:
+        with eng.connect() as conn:
+            rows = conn.execute(sqlalchemy.text(
+                "select id, purpose, offer_id, dph from gpu_deployments"
+                " where state='REQUESTED' order by created_at limit 1"
+            )).fetchall()
+    except Exception:
+        return
+    for did, purpose, offer_id, dph in rows:
+        role = "training_worker" if purpose == "training" else "engine_worker"
+        train_queue = "training" if purpose == "training" else None
+        with eng.begin() as conn:
+            conn.execute(sqlalchemy.text(
+                "update gpu_deployments set state='PROVISIONING', updated_at=now()"
+                " where id=:id and state='REQUESTED'"), {"id": did})
+        cid = create_instance(None, dry_run, VAST_TRANSPORT, role=role, train_queue=train_queue,
+                              offer_id=offer_id, offer_dph=dph)
+        if cid:
+            with eng.begin() as conn:
+                conn.execute(sqlalchemy.text(
+                    "update gpu_deployments set contract=:c, state='PROVISIONING', updated_at=now()"
+                    " where id=:id"), {"c": int(cid), "id": did})
+            log(f"deployment {str(did)[:8]} provisioning on contract {cid} (offer {offer_id})")
+        else:
+            with eng.begin() as conn:
+                conn.execute(sqlalchemy.text(
+                    "update gpu_deployments set state='FAILED',"
+                    " state_reason='NO_OFFER_OR_CREATE_FAILED', updated_at=now(), ended_at=now()"
+                    " where id=:id"), {"id": did})
+
+
+def mark_ready_deployments():
+    """PROVISIONING -> READY once the node's worker has registered."""
+    eng = _engine()
+    if eng is None:
+        return
+    try:
+        import sqlalchemy
+
+        with eng.connect() as conn:
+            rows = conn.execute(sqlalchemy.text(
+                "select d.id, v.hostname from gpu_deployments d join vast_instances v"
+                " on v.vast_instance_id = cast(d.contract as text)"
+                " where d.state='PROVISIONING' and d.contract is not null"
+            )).fetchall()
+            for did, hostname in rows:
+                if not hostname:
+                    continue
+                seen = conn.execute(sqlalchemy.text(
+                    "select 1 from workers where id like :pat limit 1"),
+                    {"pat": f"%{hostname}%"}).scalar()
+                if seen:
+                    conn.execute(sqlalchemy.text(
+                        "update gpu_deployments set state='READY', ready_at=now(), updated_at=now()"
+                        " where id=:id"), {"id": did})
+    except Exception:
+        pass
+
+
 def tick(r, st, dry_run=False):
     depth = r.llen(QUEUE_KEY) + r.llen(BURST_KEY)
     # R15: scale on estimated work, not raw count — a few XL jobs weigh more than
     # many turbo jobs. depth_eff is the workload-equivalent job count.
-    depth_eff = max(depth, math.ceil(queued_work_seconds(r) / DEFAULT_JOB_SECONDS))
+    work_seconds = queued_work_seconds(r)
+    depth_eff = max(depth, math.ceil(work_seconds / DEFAULT_JOB_SECONDS))
     now = time.time()
     nodes = st.get("nodes", [])
     if depth_eff >= SCALE_UP:
@@ -820,6 +947,14 @@ def tick(r, st, dry_run=False):
             else:
                 registry_remove(node["contract"])
         if not restarted:
+            fset = fleet_settings()
+            allow, decision, reason, fields = swappiness_gate(
+                work_seconds, depth, fset, len(nodes), daily_burst_spend(), oldest_queued_age())
+            if not allow:
+                log(f"swappiness {decision}: {reason} (work={int(work_seconds)}s nodes={len(nodes)})")
+                log_decision(fields, decision, reason)
+            allow_create = allow
+        if not restarted and allow_create:
             transport = VAST_TRANSPORT
             if transport == "ts":
                 slot = gen_ts_slot()
@@ -830,6 +965,8 @@ def tick(r, st, dry_run=False):
             else:
                 slot = None
             new = create_instance(slot, dry_run, transport)
+            if not new:
+                log_decision(fields, "DECLINE", "NO_ELIGIBLE_OFFER")
             if new:
                 node = {"contract": new, "created_at": now, "transport": transport}
                 if transport == "ts" and slot:
@@ -838,10 +975,13 @@ def tick(r, st, dry_run=False):
                     node.update({"wg_ip": slot["ip"], "wg_pubkey": slot["pubkey"],
                                  "wg_privkey": slot["privkey"]})
                 nodes.append(node)
+                record_auto_deployment(new, _OFFER_DPH.get(_OFFER_OF_CONTRACT.get(str(new), "")), dry_run)
                 log(f"depth={depth_eff} want={want} -> +1 node {new} via {transport} (now {len(nodes)})")
         st["nodes"] = nodes
     elif len(nodes) > want:
-        removable = [n for n in nodes if now - n["created_at"] >= MIN_UPTIME]
+        manual = manual_contracts()
+        removable = [n for n in nodes if now - n["created_at"] >= MIN_UPTIME
+                     and n["contract"] not in manual]
         burst_depth = r.llen(BURST_KEY)
         if removable and burst_depth > 0:
             removable = []
@@ -858,6 +998,7 @@ def tick(r, st, dry_run=False):
             if REUSE:
                 stop_instance(victim["contract"], dry_run)
                 registry_set(victim["contract"], "stopped")
+                end_auto_deployment(victim["contract"], dry_run)
                 st.setdefault("stopped", []).insert(0, victim)
                 while len(st["stopped"]) > KEEP_STOPPED:
                     old = st["stopped"].pop()
@@ -871,12 +1012,141 @@ def tick(r, st, dry_run=False):
                 if victim.get("wg_pubkey") and not dry_run:
                     wg_remove_peer(victim["wg_pubkey"])
                 registry_remove(victim["contract"])
+                end_auto_deployment(victim["contract"], dry_run)
             nodes.remove(victim)
             st["nodes"] = nodes
             log(f"depth={depth_eff} want={want} -> -1 node {victim['contract']} (now {len(nodes)})")
 
     training_tick(r, st, now, dry_run)
+    fulfill_intents(dry_run)
+    mark_ready_deployments()
     return depth_eff
+
+
+REMOTE_READY_SECONDS = float(os.environ.get("OAL_REMOTE_READY_SECONDS", "360"))
+
+try:
+    from app.fleet_settings import FLEET_DEFAULTS
+except Exception:  # standalone fallback; must mirror app/fleet_settings.py
+    FLEET_DEFAULTS = {
+        "auto_burst_enabled": True, "swappiness": 50, "max_auto_burst_workers": 1,
+        "max_dph": 0.25, "min_vram_gb": 24, "min_cuda": 12.8, "countries": ["US", "CA"],
+        "min_reliability": 0.95, "preferred_download_mbps": 1000, "preferred_upload_mbps": 250,
+        "idle_grace_seconds": 300, "min_worker_uptime_seconds": 180,
+        "daily_burst_budget_usd": 3.0, "monthly_burst_budget_usd": 60.0,
+    }
+
+_FSET_CACHE = {"at": 0.0, "value": None}
+
+
+def fleet_settings():
+    """Admin-editable fleet settings (SiteSetting JSON) with 60 s cache."""
+    now = time.time()
+    if _FSET_CACHE["value"] is not None and now - _FSET_CACHE["at"] < 60:
+        return _FSET_CACHE["value"]
+    import json
+
+    merged = dict(FLEET_DEFAULTS)
+    eng = _engine()
+    if eng is not None:
+        try:
+            import sqlalchemy
+
+            with eng.connect() as conn:
+                v = conn.execute(sqlalchemy.text(
+                    "select value from site_settings where key='gpu_fleet_settings'"
+                )).scalar()
+            if v:
+                merged.update(json.loads(v))
+        except Exception:
+            pass
+    _FSET_CACHE.update({"at": now, "value": merged})
+    return merged
+
+
+def oldest_queued_age():
+    eng = _engine()
+    if eng is None:
+        return 0.0
+    try:
+        import sqlalchemy
+
+        with eng.connect() as conn:
+            v = conn.execute(sqlalchemy.text(
+                "select extract(epoch from (now() - min(created_at))) from jobs "
+                "where status='queued' and operation='music.generate'"
+            )).scalar()
+        return float(v or 0)
+    except Exception:
+        return 0.0
+
+
+def daily_burst_spend():
+    """Approximate today's burst spend: running instances' dph x hours since UTC midnight."""
+    eng = _engine()
+    if eng is None:
+        return 0.0
+    try:
+        import sqlalchemy
+
+        with eng.connect() as conn:
+            rows = conn.execute(sqlalchemy.text(
+                "select dph from vast_instances where state='running' and dph is not null"
+            )).fetchall()
+        return sum(float(r[0]) for r in rows) * (time.time() % 86400) / 3600.0
+    except Exception:
+        return 0.0
+
+
+def swappiness_gate(work_seconds, queued_jobs, fset, running_auto, spend_today, oldest_age=0.0):
+    """Explainable provisioning decision (spec §5). Returns
+    (allow, decision, reason, fields) — every outcome is logged."""
+    sw = int(fset["swappiness"])
+    fields = {
+        "queued_jobs": int(queued_jobs),
+        "oldest_job_age_seconds": round(oldest_age, 1),
+        "est_local_wait_seconds": round(work_seconds / max(1, running_auto + 1), 1),
+        "est_remote_ready_seconds": REMOTE_READY_SECONDS,
+        "swappiness": sw,
+    }
+    if not fset["auto_burst_enabled"]:
+        return False, "HOLD", "AUTO_BURST_DISABLED", fields
+    if sw == 0:
+        return True, "PROVISION", "DEPTH_POLICY", fields
+    if running_auto >= int(fset["max_auto_burst_workers"]):
+        return False, "DECLINE", "EXISTING_REMOTE_CAPACITY", fields
+    budget = float(fset["daily_burst_budget_usd"])
+    if budget > 0 and spend_today >= budget:
+        return False, "DECLINE", "BUDGET_EXHAUSTED", fields
+    local_wait = work_seconds / max(1, running_auto + 1)
+    advantage = 1.5 - sw / 100.0  # 25->1.25 conservative, 50->1.0, 100->0.5 aggressive
+    if REMOTE_READY_SECONDS <= local_wait * advantage:
+        return True, "PROVISION", "REMOTE_FASTER", fields
+    return False, "DECLINE", "REMOTE_STARTUP_TOO_SLOW", fields
+
+
+def log_decision(fields, decision, reason, offer_id=None, est_cost=None, model_group=None):
+    eng = _engine()
+    if eng is None:
+        return
+    try:
+        import sqlalchemy
+
+        with eng.begin() as conn:
+            conn.execute(
+                sqlalchemy.text(
+                    "insert into gpu_scale_decisions (id, created_at, model_group, queued_jobs,"
+                    " oldest_job_age_seconds, est_local_wait_seconds, est_remote_ready_seconds,"
+                    " selected_offer_id, est_cost_usd, swappiness, decision, reason)"
+                    " values (:id, now(), :mg, :qj, :age, :lw, :rr, :oi, :ec, :sw, :dec, :rea)"
+                ),
+                {"id": str(uuid.uuid4()), "mg": model_group, "qj": fields["queued_jobs"],
+                 "age": fields["oldest_job_age_seconds"], "lw": fields["est_local_wait_seconds"],
+                 "rr": fields["est_remote_ready_seconds"], "oi": offer_id, "ec": est_cost,
+                 "sw": fields["swappiness"], "dec": decision, "rea": reason},
+            )
+    except Exception:
+        pass
 
 
 def queued_work_seconds(r) -> float:

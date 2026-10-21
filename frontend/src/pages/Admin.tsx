@@ -5,6 +5,7 @@ import { api, AuthUser, SiteInfo } from "../api";
 import { AreaChart, BarChart, Sparkline } from "../components/charts";
 import { Avatar, Delta, Progress, StatusPill, fmtTime } from "../components/ui";
 import { usePlayer } from "../components/PlayerContext";
+import GpuFleetPage from "./admin/GpuFleet";
 
 interface AdminUser {
   id: string;
@@ -259,6 +260,7 @@ const SIDEBAR = [
   { to: "/admin/jobs", label: "Generation Jobs", icon: "⇍" },
   { to: "/admin/services", label: "Model Services", icon: "▣" },
   { to: "/admin/workers", label: "GPU Workers", icon: "▦" },
+  { to: "/admin/fleet", label: "GPU Fleet", icon: "⛁" },
   { to: "/admin/vast", label: "Vast Cloud", icon: "☁" },
   { to: "/admin/training", label: "Artist Training", icon: "◈" },
   { to: "/admin/loras", label: "Style Models", icon: "♪" },
@@ -1511,6 +1513,8 @@ export default function AdminPage() {
             {purge.data != null && <p style={{ color: "var(--muted)", fontSize: 12 }}>Last purge removed {purge.data.purged} worker(s).</p>}
           </div>
         )}
+
+        {section === "fleet" && <GpuFleetPage />}
 
         {section === "vast" && (
           <div className="card">

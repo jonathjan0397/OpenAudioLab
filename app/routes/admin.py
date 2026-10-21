@@ -676,6 +676,478 @@ def admin_audit(
     )
 
 
+_OFFER_CACHE: dict = {"key": None, "at": 0.0, "result": None}
+
+
+def _fleet_settings(request: Request) -> dict:
+    import json
+
+    from ..fleet_settings import FLEET_DEFAULTS
+    from ..models import SiteSetting
+
+    merged = dict(FLEET_DEFAULTS)
+    with request.app.state.db.session() as session:
+        row = session.get(SiteSetting, "gpu_fleet_settings")
+    if row and row.value:
+        try:
+            merged.update(json.loads(row.value))
+        except ValueError:
+            pass
+    return merged
+
+
+@router.get("/admin/gpu-fleet/settings")
+def gpu_fleet_settings_get(request: Request) -> JSONResponse:
+    from ..fleet_settings import FLEET_DEFAULTS
+
+    return JSONResponse({"settings": _fleet_settings(request), "defaults": FLEET_DEFAULTS})
+
+
+@router.patch("/admin/gpu-fleet/settings")
+def gpu_fleet_settings_patch(request: Request, payload: dict) -> JSONResponse:
+    import json
+
+    from ..fleet_settings import SETTINGS_KEY, FleetSettingsError, validate
+    from ..models import GpuFleetEvent, SiteSetting, new_uuid
+
+    try:
+        merged = validate(payload)
+    except FleetSettingsError as exc:
+        raise ApiError(422, "FLEET_SETTING_INVALID", str(exc)) from exc
+    admin = payload.get("_actor") or "admin"
+    with request.app.state.db.session() as session:
+        row = session.get(SiteSetting, SETTINGS_KEY)
+        if row is None:
+            row = SiteSetting(key=SETTINGS_KEY, value=json.dumps(merged))
+            session.add(row)
+        else:
+            row.value = json.dumps(merged)
+        session.add(GpuFleetEvent(id=new_uuid(), actor=str(admin), action="settings_patch",
+                                  subject=SETTINGS_KEY, detail_json={"changed": sorted(payload.keys())}))
+        session.commit()
+    return JSONResponse({"settings": merged})
+
+
+@router.get("/admin/gpu-fleet/offers")
+def gpu_fleet_offers(
+    request: Request,
+    model: str | None = None,
+    max_dph: float | None = None,
+    min_vram: int | None = None,
+    country: str | None = None,
+    min_reliability: float | None = None,
+    min_download: float | None = None,
+    min_upload: float | None = None,
+    verified: bool = True,
+    refresh: bool = False,
+) -> JSONResponse:
+    """Top-10 live Vast.ai offers (advisory snapshots, 30 s server cache)."""
+    import json as _json
+    import time
+
+    import requests as _requests
+
+    from .. import vast_offers as vo
+    from ..catalog import CATALOG
+
+    settings = request.app.state.settings
+    stored = _fleet_settings(request)
+    crit = {
+        "max_dph": min(max_dph if max_dph is not None else stored["max_dph"], 1.0),
+        "min_vram_gb": min_vram if min_vram is not None else stored["min_vram_gb"],
+        "countries": [country.upper()] if country else list(stored["countries"]),
+        "min_reliability": min_reliability if min_reliability is not None else stored["min_reliability"],
+        "min_download_mbps": min_download,
+        "min_upload_mbps": min_upload,
+        "verified_only": verified,
+        "min_cuda": stored["min_cuda"],
+        "model_vram_floor_gb": 0,
+        "checkpoint_gb": 0.0,
+    }
+    if model:
+        prof = None
+        for release in CATALOG.values():
+            prof = release.profile(model)
+            if prof is not None:
+                break
+        if prof is None:
+            raise ApiError(422, "MODEL_UNKNOWN", f"Unknown execution profile: {model}")
+        crit["model_vram_floor_gb"] = max(0, prof.vram_required_mb // 1024)
+        crit["checkpoint_gb"] = vo.CHECKPOINT_GB.get(prof.native_family, 5.0)
+        crit["min_compute_cap"] = 7.5
+    key = _json.dumps(crit, sort_keys=True)
+    cache = _OFFER_CACHE
+    if not refresh and cache["key"] == key and time.time() - cache["at"] < 30:
+        result = cache["result"]
+        return JSONResponse({**result, "cached": True})
+    query = {"search": {
+        "rentable": {"eq": True},
+        "cuda_max_good": {"gte": crit["min_cuda"]},
+        "gpu_ram": {"gte": int(crit["min_vram_gb"] * 1024 * 1024 * 1024)},
+        "num_gpus": {"eq": 1},
+        "dph_total": {"lte": crit["max_dph"]},
+    }}
+    if crit["verified_only"]:
+        query["search"]["verification"] = {"eq": "verified"}
+    try:
+        resp = _requests.post(f"{settings.vast_api_url}/search/offers/", json=query, timeout=20)
+        resp.raise_for_status()
+        raw = resp.json().get("matches", [])
+    except Exception as exc:
+        raise ApiError(502, "VAST_SEARCH_FAILED", f"Vast.ai offer search failed: {exc}") from exc
+    result = vo.rank(raw, crit, limit=10)
+    result["refreshed_at"] = utcnow().isoformat()
+    cache.update({"key": key, "at": time.time(), "result": result})
+    return JSONResponse({**result, "cached": False})
+
+
+def _dep_json(d) -> dict:
+    return {
+        "id": d.id, "origin": d.origin, "purpose": d.purpose, "state": d.state,
+        "state_reason": d.state_reason, "offer_id": d.offer_id, "contract": d.contract,
+        "dph": d.dph, "max_spend_usd": d.max_spend_usd, "automatic_shutdown": d.automatic_shutdown,
+        "requested_by": d.requested_by, "idempotency_key": d.idempotency_key,
+        "created_at": d.created_at.isoformat() if d.created_at else None,
+        "ready_at": d.ready_at.isoformat() if d.ready_at else None,
+        "ended_at": d.ended_at.isoformat() if d.ended_at else None,
+    }
+
+
+def _burst_spend_today(session) -> float:
+    from ..models import VastInstance
+
+    rows = session.execute(
+        select(VastInstance.dph).where(VastInstance.state == "running", VastInstance.dph.is_not(None))
+    ).scalars().all()
+    now = utcnow()
+    hours_today = (now.hour * 3600 + now.minute * 60 + now.second) / 3600.0
+    return round(sum(float(d) for d in rows) * hours_today, 4)
+
+
+@router.post("/admin/gpu-fleet/deployments", status_code=201)
+def gpu_fleet_deploy(payload: dict, request: Request, admin: User = Depends(require_admin)) -> JSONResponse:
+    """Durable manual deployment intent; the autoscaler fulfils it (one CLI owner)."""
+    from .. import vast_offers as vo
+    from ..models import GpuDeployment, GpuFleetEvent, new_uuid
+
+    purpose = str(payload.get("purpose", "auto"))
+    if purpose not in {"auto", "turbo", "sft", "xl-turbo", "xl-sft", "training"}:
+        raise ApiError(422, "PURPOSE_INVALID", "Unknown deployment purpose.")
+    offer_id = payload.get("offer_id")
+    idem = str(payload.get("idempotency_key") or new_uuid())
+    stored = _fleet_settings(request)
+    with request.app.state.db.session() as session:
+        existing = session.execute(
+            select(GpuDeployment).where(GpuDeployment.idempotency_key == idem)
+        ).scalars().first()
+        if existing is not None:
+            return JSONResponse({"deployment": _dep_json(existing), "created": False}, status_code=200)
+        dph = None
+        snapshot = None
+        if offer_id:
+            try:
+                matches = _vast_request(
+                    request, "POST", "/search/offers/", {"search": {"id": {"eq": int(offer_id)}}}
+                ).get("matches", [])
+            except ApiError:
+                raise
+            except Exception as exc:
+                raise ApiError(502, "VAST_SEARCH_FAILED", f"Offer revalidation failed: {exc}") from exc
+            if not matches:
+                raise ApiError(409, "OFFER_UNAVAILABLE", "Offer is no longer available.")
+            norm = vo.normalize(matches[0])
+            if norm["dph"] is None or norm["dph"] > float(stored["max_dph"]):
+                raise ApiError(409, "OFFER_CHANGED",
+                               f"Offer price {norm['dph']} exceeds the ${stored['max_dph']}/h ceiling.")
+            dph = norm["dph"]
+            snapshot = norm
+        budget = float(stored["daily_burst_budget_usd"])
+        spend = _burst_spend_today(session)
+        if budget > 0 and spend + float(dph or stored["max_dph"]) > budget:
+            raise ApiError(409, "BUDGET_EXHAUSTED",
+                           f"Today's burst spend ${spend:.2f} + this instance exceeds ${budget:.2f}.")
+        dep = GpuDeployment(
+            id=new_uuid(), origin="MANUAL_ADMIN", purpose=purpose, idempotency_key=idem,
+            offer_id=str(offer_id) if offer_id else None, offer_snapshot_json=snapshot,
+            state="REQUESTED", dph=dph, max_spend_usd=payload.get("max_spend_usd"),
+            automatic_shutdown=bool(payload.get("automatic_shutdown", False)),
+            requested_by=admin.username or admin.id,
+        )
+        session.add(dep)
+        session.add(GpuFleetEvent(id=new_uuid(), actor=admin.username or admin.id,
+                                  action="deploy_requested", subject=str(offer_id or purpose),
+                                  detail_json={"purpose": purpose, "dph": dph}))
+        session.commit()
+        return JSONResponse({"deployment": _dep_json(dep), "created": True}, status_code=201)
+
+
+@router.get("/admin/gpu-fleet/deployments")
+def gpu_fleet_deployments(request: Request, state: str | None = None) -> JSONResponse:
+    from ..models import GpuDeployment
+
+    with request.app.state.db.session() as session:
+        stmt = select(GpuDeployment).order_by(GpuDeployment.created_at.desc()).limit(100)
+        if state:
+            stmt = stmt.where(GpuDeployment.state == state)
+        rows = list(session.execute(stmt).scalars())
+    return JSONResponse({"deployments": [_dep_json(d) for d in rows]})
+
+
+@router.get("/admin/gpu-fleet/deployments/{deployment_id}")
+def gpu_fleet_deployment_detail(deployment_id: str, request: Request) -> JSONResponse:
+    from ..models import GpuDeployment
+
+    with request.app.state.db.session() as session:
+        dep = session.get(GpuDeployment, deployment_id)
+    if dep is None:
+        raise ApiError(404, "DEPLOYMENT_NOT_FOUND", "Deployment not found.")
+    return JSONResponse({"deployment": _dep_json(dep)})
+
+
+def _worker_instance_and_busy(request: Request, worker_id: str):
+    from ..models import JobAttempt, VastInstance
+
+    with request.app.state.db.session() as session:
+        inst = None
+        for v in session.execute(select(VastInstance).where(VastInstance.hostname.is_not(None))).scalars():
+            if v.hostname and v.hostname in worker_id:
+                inst = v
+                break
+        busy = session.execute(
+            select(JobAttempt.id).where(JobAttempt.worker_id == worker_id, JobAttempt.status == "running").limit(1)
+        ).scalars().first()
+        if inst is None:
+            raise ApiError(404, "WORKER_NOT_INSTANCE", "Worker is not backed by a tracked Vast instance.")
+        return inst, bool(busy)
+
+
+@router.post("/admin/gpu-fleet/workers/{worker_id}/stop")
+def gpu_fleet_worker_stop(worker_id: str, request: Request, force: bool = False) -> JSONResponse:
+    from ..models import GpuFleetEvent, VastInstance, new_uuid
+
+    inst, busy = _worker_instance_and_busy(request, worker_id)
+    if busy and not force:
+        raise ApiError(409, "WORKER_BUSY", "Worker has a running attempt; use ?force=true to stop anyway.")
+    _vast_request(request, "POST", f"/instances/{inst.vast_instance_id}/action/", {"action_type": "stop"})
+    with request.app.state.db.session() as session:
+        rec = session.get(VastInstance, inst.id)
+        if rec is not None:
+            rec.state = "stopped"
+            rec.stopped_at = utcnow()
+        session.add(GpuFleetEvent(id=new_uuid(), actor="admin", action="worker_stop", subject=worker_id))
+        session.commit()
+    return JSONResponse({"ok": True, "action": "stop"})
+
+
+@router.post("/admin/gpu-fleet/workers/{worker_id}/restart")
+def gpu_fleet_worker_restart(worker_id: str, request: Request, force: bool = False) -> JSONResponse:
+    from ..models import GpuFleetEvent, VastInstance, new_uuid
+
+    inst, busy = _worker_instance_and_busy(request, worker_id)
+    if busy and not force:
+        raise ApiError(409, "WORKER_BUSY", "Worker has a running attempt; use ?force=true to restart anyway.")
+    _vast_request(request, "POST", f"/instances/{inst.vast_instance_id}/action/", {"action_type": "stop"})
+    _vast_request(request, "POST", f"/instances/{inst.vast_instance_id}/action/", {"action_type": "start"})
+    with request.app.state.db.session() as session:
+        rec = session.get(VastInstance, inst.id)
+        if rec is not None:
+            rec.state = "running"
+        session.add(GpuFleetEvent(id=new_uuid(), actor="admin", action="worker_restart", subject=worker_id))
+        session.commit()
+    return JSONResponse({"ok": True, "action": "restart"})
+
+
+@router.delete("/admin/gpu-fleet/workers/{worker_id}")
+def gpu_fleet_worker_destroy(worker_id: str, request: Request, force: bool = False) -> JSONResponse:
+    from ..models import GpuFleetEvent, VastInstance, new_uuid
+
+    inst, busy = _worker_instance_and_busy(request, worker_id)
+    if busy and not force:
+        raise ApiError(409, "WORKER_BUSY", "Never silently destroy a worker with an in-progress task.")
+    _vast_request(request, "POST", f"/instances/{inst.vast_instance_id}/action/", {"action_type": "destroy"})
+    with request.app.state.db.session() as session:
+        rec = session.get(VastInstance, inst.id)
+        if rec is not None:
+            session.delete(rec)
+        session.add(GpuFleetEvent(id=new_uuid(), actor="admin", action="worker_destroy", subject=worker_id))
+        session.commit()
+    return JSONResponse({"ok": True, "action": "destroy"})
+
+
+@router.get("/admin/gpu-fleet/costs")
+def gpu_fleet_costs(request: Request) -> JSONResponse:
+    from ..models import GpuDeployment, VastInstance
+
+    now = utcnow()
+    hours_today = (now.hour * 3600 + now.minute * 60 + now.second) / 3600.0
+    with request.app.state.db.session() as session:
+        running = list(session.execute(
+            select(VastInstance).where(VastInstance.state == "running", VastInstance.dph.is_not(None))
+        ).scalars())
+        deps = list(session.execute(select(GpuDeployment)).scalars())
+    categories: dict[str, float] = {}
+    for d in deps:
+        if not d.dph:
+            continue
+        start = as_utc(d.ready_at) or as_utc(d.created_at) or now
+        end = as_utc(d.ended_at) or now
+        hours = max(0.0, (end - start).total_seconds() / 3600.0)
+        categories[d.origin] = round(categories.get(d.origin, 0.0) + float(d.dph) * hours, 4)
+    return JSONResponse({
+        "running": [
+            {"instance": v.vast_instance_id, "hostname": v.hostname, "dph": v.dph, "gpu": v.gpu_model}
+            for v in running
+        ],
+        "today_usd": round(sum(float(v.dph) for v in running) * hours_today, 4),
+        "categories_usd": categories,
+        "combined_fleet_usd": round(sum(categories.values()), 4),
+    })
+
+
+@router.get("/admin/gpu-fleet/events")
+def gpu_fleet_events(request: Request, limit: int = 50) -> JSONResponse:
+    from ..models import GpuFleetEvent, GpuScaleDecision
+
+    limit = max(1, min(limit, 200))
+    with request.app.state.db.session() as session:
+        events = list(session.execute(
+            select(GpuFleetEvent).order_by(GpuFleetEvent.created_at.desc()).limit(limit)
+        ).scalars())
+        decisions = list(session.execute(
+            select(GpuScaleDecision).order_by(GpuScaleDecision.created_at.desc()).limit(limit)
+        ).scalars())
+    return JSONResponse({
+        "events": [
+            {"id": e.id, "created_at": e.created_at.isoformat() if e.created_at else None,
+             "actor": e.actor, "action": e.action, "subject": e.subject, "detail": e.detail_json}
+            for e in events
+        ],
+        "decisions": [
+            {"id": d.id, "created_at": d.created_at.isoformat() if d.created_at else None,
+             "model_group": d.model_group, "queued_jobs": d.queued_jobs,
+             "oldest_job_age_seconds": d.oldest_job_age_seconds,
+             "est_local_wait_seconds": d.est_local_wait_seconds,
+             "est_remote_ready_seconds": d.est_remote_ready_seconds,
+             "selected_offer_id": d.selected_offer_id, "est_cost_usd": d.est_cost_usd,
+             "swappiness": d.swappiness, "decision": d.decision, "reason": d.reason}
+            for d in decisions
+        ],
+    })
+
+
+@router.get("/admin/gpu-fleet")
+def gpu_fleet_overview(request: Request) -> JSONResponse:
+    """Fleet overview: workers (local vs remote), waiting work, cost snapshot."""
+    from ..models import GpuDeployment, Job, VastInstance, Worker
+    from ..orchestration import as_utc
+
+    now = utcnow()
+    with request.app.state.db.session() as session:
+        workers = list(session.execute(
+            select(Worker).where(Worker.kind.in_(("acestep", "audio", "training")))
+        ).scalars())
+        hostnames = [v.hostname for v in session.execute(
+            select(VastInstance).where(VastInstance.hostname.is_not(None))
+        ).scalars() if v.hostname]
+        waiting = session.execute(
+            select(Job.request_json).where(Job.operation == "music.generate", Job.status == "queued")
+        ).scalars().all()
+        active_deps = session.execute(
+            select(GpuDeployment).where(GpuDeployment.state.in_(("REQUESTED", "PROVISIONING", "READY", "BUSY")))
+        ).scalars().all()
+    by_model: dict[str, int] = {}
+    for rjson in waiting:
+        fam = ((rjson or {}).get("_admission") or {}).get("family") or "turbo"
+        by_model[fam] = by_model.get(fam, 0) + 1
+    ready = busy = quarantined = 0
+    remote_ids = set()
+    for w in workers:
+        fresh = w.last_heartbeat is not None and (now - as_utc(w.last_heartbeat)).total_seconds() < 120
+        if any(h in w.id for h in hostnames):
+            remote_ids.add(w.id)
+        if w.unhealthy_until is not None and as_utc(w.unhealthy_until) > now:
+            quarantined += 1
+        elif fresh and w.drain:
+            busy += 1
+        elif fresh:
+            ready += 1
+    return JSONResponse({
+        "workers": len(workers),
+        "ready": ready,
+        "draining_or_busy": busy,
+        "quarantined": quarantined,
+        "local_gpus": len([w for w in workers if w.id not in remote_ids]),
+        "remote_gpus": len(remote_ids),
+        "jobs_waiting_by_family": by_model,
+        "active_deployments": len(active_deps),
+        "spend_today_usd": _burst_spend_today(session),
+    })
+
+
+@router.get("/admin/gpu-fleet/queues")
+def gpu_fleet_queues(request: Request) -> JSONResponse:
+    """SMQM view: waiting jobs per model group (DB-authoritative), worker
+    loaded checkpoints, and Redis delivery-hint depths."""
+    from ..models import Job, Worker
+    from ..orchestration import as_utc
+
+    settings = request.app.state.settings
+    now = utcnow()
+    with request.app.state.db.session() as session:
+        rows = session.execute(
+            select(Job.request_json, Job.created_at).where(
+                Job.operation == "music.generate", Job.status == "queued"
+            )
+        ).all()
+        workers = list(
+            session.execute(
+                select(Worker).where(Worker.kind == "acestep").order_by(Worker.last_heartbeat.desc())
+            ).scalars()
+        )
+    by_model: dict[str, dict] = {}
+    for rjson, created in rows:
+        adm = (rjson or {}).get("_admission") or {}
+        fam = adm.get("family") or "turbo"
+        key = adm.get("execution_profile_id") or f"family:{fam}"
+        entry = by_model.setdefault(
+            key, {"model_group": key, "family": fam, "waiting": 0, "oldest_age_seconds": 0.0}
+        )
+        entry["waiting"] += 1
+        if created is not None:
+            age = (now - as_utc(created)).total_seconds()
+            entry["oldest_age_seconds"] = round(max(entry["oldest_age_seconds"], age), 1)
+    depths = None
+    try:
+        from ..queue import build_redis
+
+        r = build_redis(settings.redis_url)
+        try:
+            depths = {
+                "main": int(r.llen("oal:queue:ace-step-1.5")),
+                "burst": int(r.llen("oal:queue:ace-step-1.5:burst")),
+            }
+        finally:
+            r.close()
+    except Exception:
+        depths = None
+    return JSONResponse(
+        {
+            "models": sorted(by_model.values(), key=lambda m: -m["waiting"]),
+            "workers": [
+                {
+                    "id": w.id,
+                    "loaded_model": w.loaded_model,
+                    "drain": w.drain,
+                    "quarantined": w.unhealthy_until is not None and as_utc(w.unhealthy_until) > now,
+                    "last_heartbeat": w.last_heartbeat.isoformat() if w.last_heartbeat else None,
+                }
+                for w in workers
+            ],
+            "queue_depths": depths,
+        }
+    )
+
+
 @router.get("/admin/workers")
 def admin_workers(request: Request) -> JSONResponse:
     """All registered workers with derived status."""

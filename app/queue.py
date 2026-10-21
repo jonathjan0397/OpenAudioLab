@@ -52,3 +52,20 @@ class RedisQueue:
 
     def depth(self, queue: str) -> int:
         return int(self.client.llen(queue))
+
+    def peek(self, queue: str, count: int) -> list[str]:
+        """Non-blocking window of the NEXT items BRPOP would consume.
+
+        LPUSH+BRPOP is FIFO: the head of the *list* is the newest item, so the
+        consumption window is the list TAIL (LRANGE -count..-1)."""
+        items = self.client.lrange(queue, -count, -1)
+        out = []
+        for item in items:
+            if isinstance(item, bytes):
+                item = item.decode("utf-8")
+            out.append(str(item))
+        return out
+
+    def remove(self, queue: str, job_id: str) -> int:
+        """LREM one occurrence after a successful DB claim (Redis is a hint)."""
+        return int(self.client.lrem(queue, 1, job_id))
