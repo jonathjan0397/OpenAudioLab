@@ -6,6 +6,27 @@ feature branches; `master` remains the documentation/planning baseline until the
 owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_N.md`.
 
 ## [Unreleased]
+### UAIS: Universal Artist Identity System replaces experimental artist training (2026-10-21)
+- **Hard replace** of the rights/dataset/training-run/evaluation stack (migration 0033 drops
+  the old experimental tables; no customer data existed). New tables: `voice_profiles`,
+  `voice_datasets`, `voice_recordings`, `voice_dataset_versions`, `voice_adapters`,
+  `voice_analyses`.
+- **Voice pipeline API** under `/artist-profiles/{id}/voice/*`: dataset create/get, recording
+  upload (ffmpeg QC + SHA-256 dedupe) / delete, version freeze (adapters go `stale`),
+  `analyze` / `train` (50 cr) / `validate` (10 cr) jobs, `status`, per-model
+  `compatibility`, `adapters`, `adapters/capabilities`, voice-profile list/patch/set-default.
+- **Generation binding**: `artist_id` + `voice_fidelity` (`native|reference|best`) or explicit
+  `voice_adapter_id` (mutually exclusive with `lora_id`); resolved plan frozen into the job;
+  reference plans run `task_type=cover` with the artist reference asset. No silent fallback.
+- **Capability registry**: per-model voice manifests; only turbo is adapter-load-verified;
+  unknown models fail closed (`UNSUPPORTED`), never silently routed.
+- **Vast training worker**: `training_worker` role runs voice jobs; autoscaler gains a 2B pool
+  (`oal:queue:training`) and an XL pool (`oal:queue:training-xl`, ≥32 GB offers, dph cap);
+  nodes are queue-pinned and `dph` is recorded for cost accounting.
+- **Frontend**: new Voice Studio page (`/voice`), create widget binds the workspace artist's
+  default adapter when model-compatible, Training page lists voice jobs, Admin training/LoRA
+  surfaces moved to job-id/adapter-id.
+
 ### My Tracks UX, workspaces, FAQ, and test-data cleanup (2026-10-21)
 - **Details** card now shows formatted generation info (model/engine/planner, task, duration,
   seed, lyrics origin+hash, prompt/idea/style, controls, cover/repaint source, created) with

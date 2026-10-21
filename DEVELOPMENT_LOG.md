@@ -827,3 +827,29 @@ operator-approved exact checkpoint/revision/license.
  failed XL jobs can now be retried (LoRA skipped + int8 XL); and the earlier XL int8 note
  in gpu_config/docs says compile "required for quantization" which is the opposite of what
  actually happens (compile breaks it) — flagged, not yet corrected upstream-side.
+
+## 2026-10-21 — UAIS milestones A–D + Vast training worker (branch feat/uais-artist-voice)
+
+Decisions:
+1. **Hard replace, no migration.** The old rights/dataset/training-run/evaluation stack was
+   experimental with no customers; migration 0033 drops those tables and creates the six
+   UAIS tables. `artist_profiles.default_voice_profile_id` replaces `active_version_id`;
+   `loras.adapter_id` replaces `profile_version_id`.
+2. **No LLM in the voice path.** QC (ffmpeg), embeddings (`mfcc-stats-v1`, pure-Python
+   log-mel stats) and validation similarity are deterministic; the embedding is an analysis
+   artifact only, never a conditioning input. Threshold 0.5 is a calibration default.
+3. **Capability manifests fail closed.** Only `ace-step-1.5-turbo` has
+   `adapter_load_verified=true`; SFT/XL/merge report honest unverified states; unknown
+   selections get `UNSUPPORTED`, never silent routing.
+4. **DB is truth.** Voice jobs ride the durable job system (`voice.analyze/train/validate`);
+   queue keys `oal:queue:training[-xl]` are delivery hints. Credits (50/10) charged at
+   admission, refunded by the worker on failure via `voice-refund:{job}`.
+5. **Vast training = slim image + runtime download**, two autoscaler pools (2B on default
+   offers; XL on ≥32 GB / ≤$0.60 dph), queue-pinned via `OAL_TRAIN_(XL_)QUEUE_MODEL_ID`;
+   `dph_total` recorded to `vast_instances.dph` for cost accounting.
+
+Validation evidence: backend suite 284 passed (13 UAIS API tests in tests/test_artist.py;
+autoscale pool tests in tests/test_autoscale.py); frontend `tsc -b && vite build` clean and
+vitest 17 passed. Commits 56c188e (backend), f35498f (Vast worker), 2c32f23 (frontend+docs).
+Still open: real-GPU training run (first XL VRAM/time benchmark), SVC/VIPE phase E,
+genre-independence phase F, and owner review before merge.
