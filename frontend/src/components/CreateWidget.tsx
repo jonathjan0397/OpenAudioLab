@@ -187,7 +187,8 @@ export default function CreateWidget({
   }, [duration, guest.data?.max_duration_seconds, isGuest]);
 
   useEffect(() => {
-    localStorage.setItem(
+    // R16: at most one write/second while typing.
+    const t = setTimeout(() => localStorage.setItem(
       DRAFT_KEY,
       JSON.stringify({
         title,
@@ -209,9 +210,29 @@ export default function CreateWidget({
         drafted,
         draftOpen,
         modelSelection,
-      })
-    );
+      })), 500);
+    return () => clearTimeout(t);
   }, [title, desc, styles, lyrics, mood, instrumental, gender, loraId, bpm, keyScale, timeSignature, language, shift, quality, variations, duration, drafted, draftOpen, modelSelection]);
+
+  // R16: another tab saved a draft -> adopt it (storage events fire only in
+  // the other tabs, so this never echoes our own writes).
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== DRAFT_KEY || !e.newValue) return;
+      try {
+        const d = JSON.parse(e.newValue);
+        setTitle(d.title ?? ""); setDesc(d.desc ?? ""); setStyles(d.styles ?? "");
+        setLyrics(d.lyrics ?? ""); setMood(d.mood ?? ""); setInstrumental(Boolean(d.instrumental));
+        setGender(d.gender ?? ""); setLoraId(d.loraId ?? ""); setBpm(d.bpm ?? "");
+        setKeyScale(d.keyScale ?? ""); setTimeSignature(d.timeSignature ?? "");
+        setLanguage(d.language ?? ""); setShift(d.shift ?? 1); setQuality(d.quality ?? 8);
+        setVariations(d.variations ?? 1); setDuration(d.duration ?? 120);
+        if (d.modelSelection) setModelSelection(d.modelSelection);
+      } catch { /* ignore malformed drafts */ }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   // When the selected model's step band changes, reset Quality to that profile's
   // default so a value carried from another model (e.g. Turbo's 8, or a premium
@@ -308,8 +329,55 @@ export default function CreateWidget({
     onError: (e: Error) => setError(e.message),
   });
 
+  // R16: pre-submit price preview for premium selections. Keyed only on
+  // pricing-relevant fields so typing the idea never hits the quote endpoint.
+  const [previewOn, setPreviewOn] = useState(false);
+  useEffect(() => {
+    if (!premiumSelected) { setPreviewOn(false); return; }
+    setPreviewOn(false);
+    const t = setTimeout(() => setPreviewOn(true), 600);
+    return () => clearTimeout(t);
+  }, [premiumSelected, quality, variations, duration, modelSelection]);
+  const quotePreview = useQuery({
+    queryKey: ["quote-preview", modelSelection, quality, variations, duration, mode],
+    queryFn: () => api.post<GenerationQuote>("/api/v1/generation/quote", makeBody(lyrics, lyrics.trim().length > 0)),
+    enabled: premiumSelected && previewOn && desc.trim().length >= 3 && !isGuest,
+  });
+
   const canDraft = desc.trim().length >= 8;
   const assistantBusy = draft.isPending || rewriteLyrics.isPending || rewriteStyle.isPending || rewriteTitle.isPending;
+
+  const makeBody = (finalLyrics: string, lyricsProvided: boolean) => {
+    const durationSeconds = mode === "extend" ? Math.min(duration + 60, 600) : duration;
+    return buildGenerationRequest(
+      {
+        idea: desc,
+        styles,
+        mood,
+        gender,
+        bpm,
+        keyScale,
+        timeSignature,
+        language,
+        shift,
+        quality,
+        guidance: 0,
+        variations,
+        title: title.trim() || draftTitle,
+        lyrics: finalLyrics,
+        lyricsProvided,
+        instrumental,
+        durationSeconds,
+        loraId,
+        modelSelection: premiumSelected ? modelSelection : undefined,
+        executionProfileId: premiumSelected ? selectedProfile!.execution_profile_id : undefined,
+        seed: mode === "remix" ? Math.floor(Math.random() * 1_000_000_000) : undefined,
+        workspaceId: isGuest ? undefined : activeId || undefined,
+        voiceAdapterId: workspaceAdapterId,
+      },
+      { supportedControls: caps.data?.supported_controls, controlRanges: selectedProfile?.control_ranges },
+    );
+  };
 
   const generate = useMutation({
     mutationFn: async () => {
@@ -320,35 +388,7 @@ export default function CreateWidget({
         const r = await api.post<{ text: string }>("/api/v1/llm/lyrics", { prompt: desc, mode: "write" });
         finalLyrics = r.text;
       }
-      const durationSeconds = mode === "extend" ? Math.min(duration + 60, 600) : duration;
-      const body = buildGenerationRequest(
-        {
-          idea: desc,
-          styles,
-          mood,
-          gender,
-          bpm,
-          keyScale,
-          timeSignature,
-          language,
-          shift,
-          quality,
-          guidance: 0,
-          variations,
-          title: title.trim() || draftTitle,
-          lyrics: finalLyrics,
-          lyricsProvided,
-          instrumental,
-          durationSeconds,
-          loraId,
-          modelSelection: premiumSelected ? modelSelection : undefined,
-          executionProfileId: premiumSelected ? selectedProfile!.execution_profile_id : undefined,
-          seed: mode === "remix" ? Math.floor(Math.random() * 1_000_000_000) : undefined,
-          workspaceId: isGuest ? undefined : activeId || undefined,
-          voiceAdapterId: workspaceAdapterId,
-        },
-        { supportedControls: caps.data?.supported_controls, controlRanges: selectedProfile?.control_ranges },
-      );
+      const body = makeBody(finalLyrics, lyricsProvided);
       // Premium selection: get a server quote first, then bind it. The quote and
       // the job carry identical fields (the server hash excludes quote_id).
       if (premiumSelected) {
@@ -669,9 +709,11 @@ export default function CreateWidget({
                       {selectedModel?.display_name}: {selectedProfile.control_ranges.inference_steps.locked ? "8 steps" : ""} · effective CFG {selectedProfile.control_ranges.guidance_scale.default} (fixed).
                     </span>
                   )}
-                  {premiumSelected && quote && (
+                  {premiumSelected && (quotePreview.data || quote) && (
                     <span className="sub" style={{ fontSize: 11 }}>
-                      Quoted: {quote.reserved_credits} credits{quote.balance != null ? ` · balance ${quote.balance}` : ""}
+                      {quote
+                        ? `Quoted: ${quote.reserved_credits} credits${quote.balance != null ? ` · balance ${quote.balance}` : ""}`
+                        : `≈ ${quotePreview.data!.reserved_credits} credits per run`}
                     </span>
                   )}
                 </div>

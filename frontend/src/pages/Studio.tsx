@@ -144,7 +144,7 @@ export default function StudioPage() {
   }, [activeId]);
   const tracks = useQuery({
     queryKey: ["my-tracks", wsFilter],
-    queryFn: () => api.get<{ tracks: Track[] }>(`/api/v1/tracks?limit=50${wsFilter !== "all" ? `&workspace_id=${encodeURIComponent(wsFilter)}` : ""}`),
+    queryFn: () => api.get<{ tracks: Track[] }>(`/api/v1/tracks?limit=200${wsFilter !== "all" ? `&workspace_id=${encodeURIComponent(wsFilter)}` : ""}`),
     enabled: !!me.data?.user,
   });
   const credits = useQuery({
@@ -161,6 +161,13 @@ export default function StudioPage() {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState("newest");
+  const [page, setPage] = useState(1);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  useEffect(() => {
+    setPage(1);
+  }, [wsFilter, filter, search, sortBy]);
   const [stemsFor, setStemsFor] = useState<string | null>(null);
   const [detailsFor, setDetailsFor] = useState<string | null>(null);
   const [remixFor, setRemixFor] = useState<string | null>(null);
@@ -426,6 +433,15 @@ export default function StudioPage() {
 
   const all = tracks.data?.tracks || [];
   const shown = filter === "favorites" ? all.filter((t) => t.favorite) : filter === "shared" ? all.filter((t) => t.shared) : all;
+  const searched = search ? shown.filter((t) => (t.title || "").toLowerCase().includes(search.toLowerCase())) : shown;
+  const sorted = [...searched].sort((a, b) =>
+    sortBy === "oldest" ? (a.created_at || "").localeCompare(b.created_at || "")
+    : sortBy === "title" ? (a.title || "Untitled").localeCompare(b.title || "Untitled")
+    : sortBy === "duration" ? (b.duration_seconds || 0) - (a.duration_seconds || 0)
+    : (b.created_at || "").localeCompare(a.created_at || ""));
+  const LIB_PAGE = 25;
+  const pages = Math.max(1, Math.ceil(sorted.length / LIB_PAGE));
+  const paged = sorted.slice((page - 1) * LIB_PAGE, (page - 1) * LIB_PAGE + LIB_PAGE);
   const active = (jobs.data?.jobs || []).filter((j) =>
     ["queued", "waiting_for_worker", "running"].includes(j.status)
   );
@@ -517,8 +533,26 @@ export default function StudioPage() {
                   </button>
                 ))}
               </div>
-              {shown.length === 0 && <p style={{ color: "var(--muted)" }}>No tracks here yet — generate one above or pick another space.</p>}
-              {shown.map((t) => (
+              <div className="lib-toolbar">
+                <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Search titles…" aria-label="Search tracks" />
+                <select className="btn" style={{ fontSize: 12 }} value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="Sort tracks">
+                  <option value="newest">Newest</option>
+                  <option value="oldest">Oldest</option>
+                  <option value="title">Title A–Z</option>
+                  <option value="duration">Duration</option>
+                </select>
+                <span className="sub" style={{ fontSize: 12 }}>{sorted.length} track{sorted.length === 1 ? "" : "s"}</span>
+                <span style={{ flex: 1 }} />
+                {pages > 1 && (
+                  <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                    <button className="btn" disabled={page <= 1} onClick={() => setPage((v) => v - 1)}>←</button>
+                    <span className="sub" style={{ fontSize: 12 }}>page {page}/{pages}</span>
+                    <button className="btn" disabled={page >= pages} onClick={() => setPage((v) => v + 1)}>→</button>
+                  </span>
+                )}
+              </div>
+              {sorted.length === 0 && <p style={{ color: "var(--muted)" }}>No tracks here yet — generate one above or pick another space.</p>}
+              {paged.map((t) => (
                 <>
                 <div className="track-row" key={t.asset_id}>
                   <ArtworkTile
@@ -580,66 +614,46 @@ export default function StudioPage() {
                     <button className="btn" onClick={() => share.mutate({ id: t.asset_id, shared: !t.shared })}>
                       {t.shared ? "Shared" : "Share"}
                     </button>
-                    <a className="btn" href={`${t.url}${t.url.includes("?") ? "&" : "?"}download=1`} download>WAV</a>
-                    <button className="btn" onClick={() => exportArtifact(t.asset_id, "mp3")}>MP3</button>
-                    {(workspaces.data?.workspaces || []).length > 0 && (() => {
-                      const ws = workspaces.data!.workspaces;
-                      const defId = (ws.find((w) => w.is_default) || ws[0]).workspace_id;
-                      const current = t.workspace_id || defId;
-                      return (
-                        <select
-                          className="btn"
-                          title="Move this track to a workspace"
-                          value={current}
-                          style={{ fontSize: 12 }}
-                          onChange={(ev) => wsMove.mutate({ assetIds: [t.asset_id], workspaceId: ev.target.value === defId ? null : ev.target.value })}
-                        >
-                          {ws.map((w) => <option key={w.workspace_id} value={w.workspace_id}>{`♪ ${w.name}`}</option>)}
-                        </select>
-                      );
-                    })()}
-                    <button
-                      className="btn"
-                      style={stemsFor === t.asset_id ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
-                      onClick={() => {
-                        setStemsFor(stemsFor === t.asset_id ? null : t.asset_id);
-                        qc.invalidateQueries({ queryKey: ["stems", t.asset_id] });
-                      }}
-                    >
-                      ≋ Stems
-                    </button>
-                    <button
-                      className="btn"
-                      style={detailsFor === t.asset_id ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
-                      onClick={() => {
-                        setDetailsFor(detailsFor === t.asset_id ? null : t.asset_id);
-                        qc.invalidateQueries({ queryKey: ["generation-manifest", t.asset_id] });
-                      }}
-                     >
-                       ⓘ Details
-                     </button>
-                     <button
-                       className="btn"
-                       style={remixFor === t.asset_id ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
-                       onClick={() => {
-                         setRemixFor(remixFor === t.asset_id ? null : t.asset_id);
-                         setRemixStyle("");
-                       }}
-                      >
-                        ✦ Remix
-                      </button>
-                      <button
-                        className="btn"
-                        style={repaintFor === t.asset_id ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
-                        onClick={() => {
-                          setRepaintFor(repaintFor === t.asset_id ? null : t.asset_id);
-                          setRepaintStart("0");
-                          setRepaintEnd(String(Math.max(2, Math.round((t.duration_seconds || 15) / 2))));
-                          setRepaintCaption("");
-                        }}
-                      >
-                        ✦ Repaint
-                      </button>
+                    <span className="menu-wrap">
+                      <button className="btn" aria-label="More actions" aria-expanded={menuFor === t.asset_id}
+                              onClick={() => setMenuFor(menuFor === t.asset_id ? null : t.asset_id)}>⋯</button>
+                      {menuFor === t.asset_id && (
+                        <div className="card menu-pop" onMouseLeave={() => setMenuFor(null)}>
+                          <a className="btn" href={`${t.url}${t.url.includes("?") ? "&" : "?"}download=1`} download onClick={() => setMenuFor(null)}>WAV</a>
+                          <button className="btn" onClick={() => { exportArtifact(t.asset_id, "mp3"); setMenuFor(null); }}>MP3</button>
+                          <button className="btn" style={stemsFor === t.asset_id ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
+                                  onClick={() => { setStemsFor(stemsFor === t.asset_id ? null : t.asset_id); qc.invalidateQueries({ queryKey: ["stems", t.asset_id] }); setMenuFor(null); }}>≋ Stems</button>
+                          <button className="btn" style={detailsFor === t.asset_id ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
+                                  onClick={() => { setDetailsFor(detailsFor === t.asset_id ? null : t.asset_id); qc.invalidateQueries({ queryKey: ["generation-manifest", t.asset_id] }); setMenuFor(null); }}>ⓘ Details</button>
+                          <button className="btn" style={remixFor === t.asset_id ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
+                                  onClick={() => { setRemixFor(remixFor === t.asset_id ? null : t.asset_id); setRemixStyle(""); setMenuFor(null); }}>✦ Remix</button>
+                          <button className="btn" style={repaintFor === t.asset_id ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
+                                  onClick={() => {
+                                    setRepaintFor(repaintFor === t.asset_id ? null : t.asset_id);
+                                    setRepaintStart("0");
+                                    setRepaintEnd(String(Math.max(2, Math.round((t.duration_seconds || 15) / 2))));
+                                    setRepaintCaption("");
+                                    setMenuFor(null);
+                                  }}>✦ Repaint</button>
+                          {(workspaces.data?.workspaces || []).length > 0 && (() => {
+                            const ws = workspaces.data!.workspaces;
+                            const defId = (ws.find((w) => w.is_default) || ws[0]).workspace_id;
+                            const current = t.workspace_id || defId;
+                            return (
+                              <select
+                                className="btn"
+                                title="Move this track to a workspace"
+                                value={current}
+                                style={{ fontSize: 12 }}
+                                onChange={(ev) => { wsMove.mutate({ assetIds: [t.asset_id], workspaceId: ev.target.value === defId ? null : ev.target.value }); setMenuFor(null); }}
+                              >
+                                {ws.map((w) => <option key={w.workspace_id} value={w.workspace_id}>{`♪ ${w.name}`}</option>)}
+                              </select>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </span>
                     </div>
                   </div>
                   {repaintFor === t.asset_id && (

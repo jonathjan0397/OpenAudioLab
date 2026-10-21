@@ -932,3 +932,23 @@ Decisions:
 Validation evidence: 4 new tests (capability gating unit + requeue-without-budget +
 fallback/weighting) — 300 backend tests pass. XL benchmark (real GPU baselines) still
 pending owner Vast-spend approval; factors are provisional until recorded.
+
+## 2026-10-21 — Remediation Phase 5 (P4: R16–R18, same branch)
+
+Decisions:
+1. **R16 — creator honesty + IO.** The premium quote body is now built by one shared
+   `makeBody()` used by both submit and a debounced pre-submit preview
+   (`≈ N credits per run`, keyed only on pricing-relevant fields so typing never
+   re-quotes; 600 ms debounce, guest/short-idea guarded). Draft persistence is debounced
+   to one localStorage write/second, and a `storage` event listener adopts drafts saved
+   by other tabs (events fire only in the other tabs, so no echo loop).
+2. **R17 — library at scale.** Studio fetches 200 tracks and adds client-side title
+   search, sort (newest/oldest/title/duration) and 25-per-page pagination over the
+   filtered list. Row actions collapse to primary (play, ♥, Share) + a `⋯` overflow menu
+   (WAV, MP3, Stems, Details, Remix, Repaint, workspace move) — ≤3 primary actions per
+   the gate. Page resets on filter/search/sort change.
+3. **R18 — mobile.** Header gains a `☰` toggle (`.nav-open` column nav at ≤768 px);
+   player bar compacts (narrow now-playing, hidden volume, tighter gaps) at ≤768 px.
+
+Validation evidence: `tsc -b && vite build` clean; 17 vitest tests; 300 backend tests
+unchanged (frontend-only phase). 320–1920 px visual audit pending the redeploy pass.

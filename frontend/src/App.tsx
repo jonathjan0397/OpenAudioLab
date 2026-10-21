@@ -37,6 +37,7 @@ export default function App() {
   const navigate = useNavigate();
   const searchRef = useRef<HTMLInputElement>(null);
   const [bellOpen, setBellOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
   const notes = useQuery({
     queryKey: ["notifications"],
     queryFn: () =>
@@ -55,11 +56,19 @@ export default function App() {
     <ThemeCtx.Provider value={theme}>
     <PlayerProvider>
       <WorkspaceProvider>
-      <header className="site-header">
+      <header className={`site-header${navOpen ? " nav-open" : ""}`}>
         <NavLink to="/" className="logo">
           OpenAudioLab<span className="tld">.io</span>
         </NavLink>
-        <nav>
+        <button
+          className="nav-toggle"
+          aria-label="Toggle navigation"
+          aria-expanded={navOpen}
+          onClick={() => setNavOpen((v) => !v)}
+        >
+          ☰
+        </button>
+        <nav onClick={() => setNavOpen(false)}>
           <NavLink to="/" end>Create</NavLink>
           <NavLink to="/explore">Explore</NavLink>
           <NavLink to="/artists">Artists</NavLink>

@@ -6,6 +6,15 @@ feature branches; `master` remains the documentation/planning baseline until the
 owner approves a merge. Per-milestone acceptance records are in `docs/MILESTONE_N.md`.
 
 ## [Unreleased]
+### Remediation Phase 5 (2026-10-21, feat/uais-artist-voice)
+- **Creator (R16):** pre-submit premium price preview (`≈ N credits`, debounced,
+  pricing-fields only), draft writes debounced to ≤1/s, cross-tab draft sync via
+  `storage` events.
+- **Library (R17):** title search, sort, 25-per-page pagination over a 200-track fetch;
+  rows reduced to play/♥/Share + `⋯` overflow menu (downloads, stems, details, remix,
+  repaint, workspace move).
+- **Mobile (R18):** hamburger nav toggle at ≤768 px; compact player bar on small screens.
+
 ### Remediation Phase 4 (2026-10-21, feat/uais-artist-voice)
 - **Claim-time capability check (R14):** engine workers re-verify the job's execution
   profile (allowlist, installed checkpoint, free VRAM) after claiming and release
