@@ -9,6 +9,7 @@ import { Avatar, fmtTime } from "../components/ui";
 
 interface TrackInfo {
   asset_id: string;
+  slug?: string | null;
   title: string;
   duration_seconds: number | null;
   created_at: string | null;
@@ -97,8 +98,8 @@ export default function TrackPage() {
           </div>
         </div>
         <div className="strip-controls">
-          <button className="btn" onClick={() => copyLink(`${window.location.origin}/track/${t.asset_id}`)}>Share</button>
-          <a className="btn" href={t.url} download>⇊ WAV</a>
+          <button className="btn" onClick={() => copyLink(`${window.location.origin}/track/${t.slug || t.asset_id}`)}>Share</button>
+          <a className="btn" href={`${t.url}${t.url.includes("?") ? "&" : "?"}download=1`} download>⇊ WAV</a>
         </div>
       </div>
       <div className="card" style={{ marginTop: 20, display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>

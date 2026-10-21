@@ -435,6 +435,10 @@ def complete_attempt(
                 channels=meta[1] if meta else None,
                 duration_seconds=round(meta[2], 3) if meta else None,
             )
+            if role_name == "mix_wav":
+                from .naming import assign_asset_slug
+
+                assign_asset_slug(session, asset)
             session.add(asset)
         job.assets_expired_at = expires_at
         from .quota import commit_guest_reservation

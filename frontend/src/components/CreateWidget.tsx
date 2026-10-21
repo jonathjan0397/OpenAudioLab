@@ -879,7 +879,7 @@ export default function CreateWidget({
               />
             </div>
             <div className="actions">
-              <a className="btn" href={resultUrl} download>↓ WAV</a>
+              <a className="btn" href={`${resultUrl}${resultUrl.includes("?") ? "&" : "?"}download=1`} download>↓ WAV</a>
               <button className="btn" onClick={() => exportArtifact(result.asset_id, "mp3")}>♫ MP3</button>
               <button className="btn" onClick={() => exportArtifact(result.asset_id, "stems")}>≋ Stems</button>
             </div>

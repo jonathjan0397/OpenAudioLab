@@ -32,25 +32,21 @@ _MIME_EXT = {
 
 
 def _filename_ext(asset) -> str:
-    suffix = _MIME_EXT.get((asset.mime or "").lower())
-    if suffix:
-        return suffix
-    for known in (".wav", ".mp3", ".flac", ".ogg", ".zip", ".json"):
-        if asset.storage_key.endswith(known):
-            return known
-    return ".bin"
+    from ..naming import filename_ext
+
+    return filename_ext(asset.mime, asset.storage_key)
 
 
 def _safe_filename(base: str | None, asset_id: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", (base or "").strip()).strip("-.")
-    return cleaned or asset_id[:16]
+    from ..naming import safe_filename
+
+    return safe_filename(base, asset_id)
 
 
 def _disposition(asset) -> str:
-    name = _safe_filename(asset.slug or asset.title, asset.id) + _filename_ext(asset)
-    ascii_name = name.encode("ascii", "ignore").decode() or asset.id
-    quoted = urllib.parse.quote(name)
-    return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quoted}'
+    from ..naming import asset_disposition
+
+    return asset_disposition(asset)
 
 
 def _asset_state(asset, now) -> str:
@@ -1009,6 +1005,9 @@ async def admin_lora_upload(
                 mime=upload.content_type or "audio/wav", bytes=len(body), sha256=checksum,
                 title=title, finalized_at=_utcnow(),
             )
+            from ..naming import assign_asset_slug
+
+            assign_asset_slug(session, asset)
             session.add(asset)
             session.flush()
             session.add(

@@ -4,7 +4,8 @@ import { Playable } from "./PlayerContext";
 
 export interface PublicTrack {
   asset_id: string;
-  title: string | null;
+  title: string;
+  slug?: string | null;
   duration_seconds: number | null;
   created_at: string | null;
   like_count: number;

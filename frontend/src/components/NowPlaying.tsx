@@ -44,7 +44,8 @@ export default function NowPlaying({ tracks, big = false }: { tracks: PublicTrac
             <button
               className="btn btn-ghost"
               onClick={() => {
-                const link = `${window.location.origin}/track/${track.asset_id}`;
+                const slugFor = tracks.find((x) => x.asset_id === track.asset_id)?.slug;
+                const link = `${window.location.origin}/track/${slugFor || track.asset_id}`;
                 navigator.clipboard
                   ?.writeText(link)
                   .then(() => toast("Link copied to clipboard"))
@@ -89,7 +90,7 @@ export default function NowPlaying({ tracks, big = false }: { tracks: PublicTrac
       <div className="np-export">
         <div className="np-export-title">Export</div>
         <div className="np-export-btns">
-          <a className="btn" href={track.url} download>⇊ WAV</a>
+          <a className="btn" href={`${track.url}${track.url.includes("?") ? "&" : "?"}download=1`} download>⇊ WAV</a>
           <button className="btn" onClick={() => exportArtifact(track.asset_id, "mp3")}>♫ MP3</button>
           <button className="btn" onClick={() => exportArtifact(track.asset_id, "stems")}>≋ WAV Stems</button>
         </div>

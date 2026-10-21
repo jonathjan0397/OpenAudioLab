@@ -15,6 +15,7 @@ interface Track {
   asset_id: string;
   role?: string;
   title: string | null;
+  slug?: string | null;
   shared: boolean;
   favorite: boolean;
   duration_seconds: number | null;
@@ -571,7 +572,7 @@ export default function StudioPage() {
                     <button className="btn" onClick={() => share.mutate({ id: t.asset_id, shared: !t.shared })}>
                       {t.shared ? "Shared" : "Share"}
                     </button>
-                    <a className="btn" href={t.url} download>WAV</a>
+                    <a className="btn" href={`${t.url}${t.url.includes("?") ? "&" : "?"}download=1`} download>WAV</a>
                     <button className="btn" onClick={() => exportArtifact(t.asset_id, "mp3")}>MP3</button>
                     {(workspaces.data?.workspaces || []).length > 0 && (() => {
                       const ws = workspaces.data!.workspaces;

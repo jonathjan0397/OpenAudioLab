@@ -318,6 +318,8 @@ def public_track(asset_id: str, request: Request) -> JSONResponse:
         viewer = None
     with request.app.state.db.session() as session:
         asset = session.get(Asset, asset_id)
+        if asset is None:
+            asset = session.execute(select(Asset).where(Asset.slug == asset_id)).scalar_one_or_none()
         if (
             asset is None
             or asset.deleted_at is not None
@@ -342,6 +344,7 @@ def public_track(asset_id: str, request: Request) -> JSONResponse:
     return JSONResponse(
         {
             "asset_id": asset.id,
+            "slug": asset.slug,
             "title": asset.title or "Untitled",
             "duration_seconds": asset.duration_seconds,
             "created_at": asset.created_at.isoformat() if asset.created_at else None,

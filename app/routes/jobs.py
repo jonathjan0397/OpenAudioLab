@@ -915,6 +915,7 @@ def artifact_content(
     asset_id: str,
     request: Request,
     token: str = Query(...),
+    download: bool = Query(default=False),
 ) -> Response:
     settings = request.app.state.settings
     with request.app.state.db.session() as session:
@@ -933,6 +934,10 @@ def artifact_content(
     except FileNotFoundError:
         raise ApiError(404, "ASSET_FILE_MISSING", "Stored file is missing.")
     headers = {"Accept-Ranges": "bytes"}
+    if download:
+        from ..naming import asset_disposition
+
+        headers["Content-Disposition"] = asset_disposition(asset)
     status_code = 200
     if stored.content_range is not None:
         headers["Content-Range"] = stored.content_range
@@ -1222,6 +1227,7 @@ def public_tracks(
             {
                 "asset_id": asset.id,
                 "title": asset.title,
+                "slug": asset.slug,
                 "duration_seconds": asset.duration_seconds,
                 "created_at": asset.created_at.isoformat() if asset.created_at else None,
                 "like_count": likes.get(asset.id, 0),
@@ -1284,6 +1290,7 @@ def my_tracks(
                 "asset_id": asset.id,
                 "role": asset.role,
                 "title": asset.title,
+                "slug": asset.slug,
                 "shared": asset.shared,
                 "favorite": asset.id in favorite_ids,
                 "like_count": likes.get(asset.id, 0),

@@ -43,7 +43,8 @@ export default function ExplorePage() {
   const list: PublicTrack[] = searching
     ? (results.data?.tracks.map((t) => ({
         asset_id: t.asset_id,
-        title: t.title,
+        title: t.title ?? "Untitled",
+        slug: (t as { slug?: string | null }).slug ?? null,
         duration_seconds: t.duration_seconds,
         url: t.url,
         created_at: t.created_at ?? null,

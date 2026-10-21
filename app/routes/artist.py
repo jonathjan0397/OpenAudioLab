@@ -742,6 +742,7 @@ def public_artist(slug: str, request: Request) -> JSONResponse:
         {
             "asset_id": a.id,
             "title": a.title,
+            "slug": a.slug,
             "url": f"/api/v1/artifacts/{a.id}/content?token={make_token(settings.secret_key, a.id, expiry)}",
         }
         for _, a in tracks

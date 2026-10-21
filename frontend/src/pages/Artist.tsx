@@ -13,7 +13,7 @@ interface PublicArtist {
   avatar_url?: string | null;
 }
 interface ArtistDetail extends PublicArtist {
-  tracks: { asset_id: string; title: string | null; url: string }[];
+  tracks: { asset_id: string; title: string | null; slug?: string | null; url: string }[];
 }
 interface Profile {
   profile_id: string;
@@ -35,6 +35,7 @@ interface ProfileSong {
 interface TrackRow {
   asset_id: string;
   title: string | null;
+  slug?: string | null;
 }
 
 export default function ArtistPage() {
@@ -166,7 +167,7 @@ export default function ArtistPage() {
           {artist.data.tracks.map((t) => (
             <div className="card" key={t.asset_id} style={{ marginBottom: 10 }}>
               <strong>{t.title || "Untitled"}</strong>{" "}
-              <Link className="link" to={`/track/${t.asset_id}`}>open →</Link>
+              <Link className="link" to={`/track/${t.slug || t.asset_id}`}>open →</Link>
               <audio controls src={t.url} style={{ width: "100%", marginTop: 8 }} />
             </div>
           ))}

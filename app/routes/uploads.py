@@ -169,6 +169,9 @@ def complete_upload(
             finalized_at=utcnow(),
             expires_at=None,
         )
+        from ..naming import assign_asset_slug
+
+        assign_asset_slug(session, asset)
         session.add(asset)
         stored = session.get(UploadSession, upload_id)
         stored.status = "completed"
