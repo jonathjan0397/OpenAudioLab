@@ -967,3 +967,29 @@ Decisions:
 
 Validation evidence: `tsc -b && vite build` clean; 17 vitest; 300 backend tests
 (backend untouched this phase). §22 Creator-workflow click-through pending redeploy.
+
+## 2026-10-21 — GPU Orchestration run (feat/gpu-orchestration, spec 2026-10-21)
+
+Decisions (owner-approved before build): logical per-model queues (one physical
+list, SMQM selection), autoscale-as-provisioner (API writes intents; one CLI
+owner), full run before review, real paid provisioning enabled.
+
+1. **M1 SMQM:** peek tail-window (LRANGE -N..-1 — LPUSH/BRPOP FIFO), DB
+   eligibility (queued + backoff + `_can_run_profile`), loaded-checkpoint
+   affinity, immediate switch, batch/aging fairness, claim-then-LREM, BRPOP
+   fallback; `workers.loaded_model` (0036); `/admin/gpu-fleet/queues`.
+2. **M2:** `app/vast_offers.py` (REST search, hard filters, documented weighted
+   ranking, Not-reported semantics); Top-10 endpoint + 30 s cache; fleet
+   settings SiteSetting JSON + validated PATCH; swappiness gate in the autoscale
+   tick with every outcome logged to `gpu_scale_decisions` (0037).
+3. **M3:** `gpu_deployments` durable intents (idempotency, offer revalidation
+   OFFER_UNAVAILABLE/OFFER_CHANGED, budget guard), `fulfill_intents()` in the
+   tick (sole CLI owner), manual-ownership scale-down protection, worker
+   stop/restart/destroy API with WORKER_BUSY guard, costs + events endpoints.
+4. **M4:** `frontend/src/pages/admin/GpuFleet.tsx` console (8 tabs) wired into
+   Admin SIDEBAR; docs/GPU_ORCHESTRATION.md.
+
+Validation evidence: baseline captured pre-build (avg wait 124.5 s / max 3097 s,
+572 jobs/7 d); 320 backend tests (20 new gpu-fleet incl. §19 subsets), 17
+vitest, clean tsc+vite build. No paid Vast instances created during tests
+(mocked provider). Live fault tests + Top-10 against real Vast pending redeploy.
