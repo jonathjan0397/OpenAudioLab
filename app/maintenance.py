@@ -94,6 +94,62 @@ def expire_once(db: Db, storage: Storage, now=None) -> int:
     return purged
 
 
+def reap_orphaned_attempts(db: Db, settings: Settings, now=None) -> int:
+    """Fail model-lab attempts whose worker died mid-run (orphaned 'running').
+
+    A 'running' attempt is legitimate only while a fleet node is actively
+    training it with a fresh heartbeat. If the worker was recreated or killed,
+    no such node exists (or its heartbeat went stale), so the attempt is
+    orphaned and its budget reservation is released by settling it as failed.
+    Runs in the maintenance service so it recovers even when no training worker
+    is alive to notice.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from .fleet_nodes import NODE_STATES
+    from .model_lab_train import settle_attempt
+    from .models import FleetNode, MlBudget, MlTrainingAttempt
+
+    def _aware(dt: datetime | None) -> datetime | None:
+        # SQLite (tests) round-trips naive datetimes; treat them as UTC.
+        if dt is None:
+            return None
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+    now = _aware(now or utcnow())
+    training_states = ("draining", "training_reserved", "active", "cleanup")
+    assert training_states and all(s in NODE_STATES for s in training_states)
+    cutoff = now - timedelta(seconds=max(1.0, settings.node_stale_seconds))
+    grace = timedelta(minutes=2)
+    reaped = 0
+    with db.session() as session:
+        rows = session.execute(
+            select(MlTrainingAttempt).where(
+                MlTrainingAttempt.state == "running",
+                MlTrainingAttempt.settled.is_(False),
+            )
+        ).scalars().all()
+        for attempt in rows:
+            created = _aware(attempt.created_at)
+            if created and now - created < grace:
+                continue  # freshly claimed: let the worker wire up its node
+            node = session.execute(
+                select(FleetNode).where(
+                    FleetNode.exclusive_attempt_id == attempt.id,
+                    FleetNode.state.in_(training_states),
+                )
+            ).scalars().first()
+            if node is not None and _aware(node.heartbeat_at) is not None \
+                    and _aware(node.heartbeat_at) >= cutoff:
+                continue
+            budget = session.get(MlBudget, attempt.budget_id)
+            settle_attempt(session, attempt, state="failed",
+                           error="worker lost: no active training node",
+                           budget=budget)
+            reaped += 1
+    return reaped
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="OpenAudioLab maintenance")
     parser.add_argument("--once", action="store_true", help="run one expiry pass and exit")
@@ -110,6 +166,9 @@ def main() -> None:
         purged = purge_stale_workers(db)
         if purged:
             print(f"purged {purged} stale worker(s)")
+        reaped = reap_orphaned_attempts(db, settings)
+        if reaped:
+            print(f"reaped {reaped} orphaned model-lab attempt(s)")
         if args.once:
             break
         time.sleep(args.interval)
