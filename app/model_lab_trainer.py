@@ -69,10 +69,12 @@ def main() -> int:
         dest_name = f"{entry['sha256'][:6]}-{src.name}"
         dest = audio / dest_name
         shutil.copy2(src, dest)
-        # ACE-Step training needs a per-sample label: <basename>.caption.txt.
+        # ACE-Step training needs a per-sample label. The loader strips the
+        # audio extension first, so the caption must be <stem>.caption.txt
+        # (not <name>.mp3.caption.txt).
         caption = (entry.get("caption") or src.stem or "untitled").strip()
-        dest.with_name(dest.name + ".caption.txt").write_text(caption + "\n",
-                                                               encoding="utf-8")
+        dest.with_suffix("").with_name(dest.stem + ".caption.txt").write_text(
+            caption + "\n", encoding="utf-8")
 
     transport = RequestsTransport(settings.acestep_base_url,
                                   settings.acestep_api_key or None,
