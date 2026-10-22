@@ -1866,6 +1866,7 @@ class AdminPricingItem(BaseModel):
     credits: int = Field(default=0, ge=0)
     position: int = Field(default=0)
     visible: bool = True
+    popular: bool = False
 
 
 class AdminPricingUpdate(BaseModel):
@@ -1878,6 +1879,57 @@ def admin_get_pricing(request: Request) -> JSONResponse:
 
     with request.app.state.db.session() as session:
         return JSONResponse(load_pricing(session))
+
+
+def _model_pricing_view(session, settings) -> dict:
+    from .. import catalog as _cat
+    from .. import model_pricing as _mp
+
+    mp = _mp.load(session)
+    profiles = []
+    for release in _cat.CATALOG.values():
+        for p in release.profiles:
+            profiles.append({
+                "profile_id": p.profile_id,
+                "model_selection": release.selection,
+                "label": p.label,
+                "family": release.family,
+                "system_availability": p.availability,
+                "availability": _mp.effective_availability(p, mp),
+                "multiplier": _mp.effective_multiplier(p, mp),
+            })
+    return {
+        "base_credit_cost": _mp.base_credit_cost(mp, settings),
+        "base_default": settings.credit_cost_per_generation,
+        "profiles": profiles,
+    }
+
+
+@router.get("/admin/model-pricing")
+def admin_get_model_pricing(request: Request) -> JSONResponse:
+    with request.app.state.db.session() as session:
+        return JSONResponse(_model_pricing_view(session, request.app.state.settings))
+
+
+@router.put("/admin/model-pricing")
+def admin_put_model_pricing(
+    payload: dict,
+    request: Request,
+    admin: User = Depends(require_admin),
+) -> JSONResponse:
+    from .. import model_pricing as _mp
+    from ..audit import record_admin_audit
+
+    try:
+        with request.app.state.db.session() as session:
+            merged = _mp.save(session, payload)
+            record_admin_audit(session, admin.id, "model_pricing.update", "site_setting",
+                               _mp.SETTINGS_KEY, context_json={"payload": payload})
+            session.commit()
+    except _mp.ModelPricingError as exc:
+        raise ApiError(422, "MODEL_PRICING_INVALID", str(exc)) from exc
+    with request.app.state.db.session() as session:
+        return JSONResponse(_model_pricing_view(session, request.app.state.settings))
 
 
 class AdminAbusePatch(BaseModel):
@@ -1908,6 +1960,7 @@ def admin_put_pricing(
             row.credits = item.credits
             row.position = item.position
             row.visible = item.visible
+            row.popular = item.popular
         record_admin_audit(session, admin.id, "pricing.update", "pricing", None, context_json={"items": len(payload.items)})
         session.commit()
         return JSONResponse(load_pricing(session))

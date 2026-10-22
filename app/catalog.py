@@ -492,9 +492,11 @@ def base_charge(duration_seconds: int | None, takes: int) -> int:
     return get_settings().credit_cost_per_generation * max(1, min(4, takes))
 
 
-def quoted_credits(profile: ExecutionProfile, takes: int, compute_factor: float | None = None) -> int:
+def quoted_credits(profile: ExecutionProfile, takes: int, compute_factor: float | None = None,
+                   *, base: int | None = None, multiplier: float | None = None) -> int:
     factor = profile.compute_factor if compute_factor is None else compute_factor
     from .config import get_settings
 
-    base = get_settings().credit_cost_per_generation * max(1, min(4, takes))
-    return math.ceil(base * profile.multiplier * max(1.0, factor))
+    base_rate = get_settings().credit_cost_per_generation if base is None else base
+    mult = profile.multiplier if multiplier is None else multiplier
+    return math.ceil(base_rate * max(1, min(4, takes)) * mult * max(1.0, factor))

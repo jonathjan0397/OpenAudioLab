@@ -329,6 +329,15 @@ def _admit_context(session: Session, owner_id: str, payload: GenerateJobRequest,
     without a compatible worker 503, without an entitlement 403.
     """
     release, profile = _resolve_catalog(payload)
+    from .. import model_pricing as _mp
+
+    mp = _mp.load(session)
+    if _mp.effective_availability(profile, mp) == "disabled":
+        raise ApiError(
+            409, "MODEL_DISABLED",
+            f"Model profile '{profile.label}' is currently unavailable.",
+            {"model_selection": release.selection, "execution_profile_id": profile.profile_id},
+        )
     require_model_access(session, owner_id, release)
     _require_eligible_worker(session, profile)
     _validate_source_task(session, owner_id, payload, profile.tasks)
@@ -340,14 +349,20 @@ def _admit_context(session: Session, owner_id: str, payload: GenerateJobRequest,
             f"{profile.label} supports up to {profile.max_duration_seconds}s.",
             {"max_duration_seconds": profile.max_duration_seconds},
         )
-    cost = _catalog.quoted_credits(profile, takes)
+    cost = _catalog.quoted_credits(
+        profile, takes,
+        base=_mp.base_credit_cost(mp, settings), multiplier=_mp.effective_multiplier(profile, mp),
+    )
     return release, profile, resolved_controls, cost, takes
 
 
 def _bind_quote(session: Session, owner_id: str, payload: GenerateJobRequest, profile, cost: int):
     """Premium profiles must present an accepted, unexpired quote matching this
     exact request; Turbo keeps existing no-quote behavior for back-compat."""
-    if profile.multiplier != 1.0 and not payload.quote_id:
+    from .. import model_pricing as _mp
+
+    effective_mult = _mp.effective_multiplier(profile, _mp.load(session))
+    if effective_mult != 1.0 and not payload.quote_id:
         raise ApiError(
             422, "QUOTE_REQUIRED",
             "A server-issued quote is required for this model profile.",

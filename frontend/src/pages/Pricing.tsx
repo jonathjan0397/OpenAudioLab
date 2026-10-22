@@ -10,12 +10,14 @@ interface Plan {
   credits: number;
   monthly_credits?: number;
   visible?: boolean;
+  popular?: boolean;
 }
 interface Pack {
   id: string;
   name: string;
   price_usd: number;
   credits: number;
+  popular?: boolean;
 }
 interface PlansResp {
   plans: Plan[];
@@ -132,9 +134,12 @@ export default function PricingPage() {
         {(pricing.data?.plans || []).map((p) => {
           const isCurrent = p.id === current;
           return (
-            <div key={p.id} className="card stat-card" style={p.id === "pro" ? { borderColor: "var(--accent)" } : undefined}>
+            <div key={p.id} className="card stat-card" style={p.popular ? { borderColor: "var(--accent)", position: "relative" } : undefined}>
+              {p.popular && (
+                <span className="pill info" style={{ position: "absolute", top: -10, right: 12 }}>Most Popular</span>
+              )}
               <div>
-                <div className="label">{p.name}{p.id === "pro" ? " · most popular" : ""}</div>
+                <div className="label">{p.name}</div>
                 <div className="value" style={{ fontSize: 24 }}>{p.price_usd === 0 ? "Free" : `$${p.price_usd} / month`}</div>
                 <ul style={{ margin: "10px 0 14px", paddingLeft: 18, fontSize: 13, color: "var(--muted)" }}>
                   {(PERKS[p.id] || []).map((perk) => (
@@ -174,8 +179,8 @@ export default function PricingPage() {
           <div className="label" style={{ marginBottom: 10 }}>Credit packs (one-time)</div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {(packs.data?.packs || []).map((k) => (
-              <button key={k.id} className="btn" onClick={() => checkout({ kind: "pack", pack: k.id }, () => act("topup"))}>
-                {k.credits.toLocaleString()} credits — ${k.price_usd}
+              <button key={k.id} className="btn" style={k.popular ? { borderColor: "var(--accent)" } : undefined} onClick={() => checkout({ kind: "pack", pack: k.id }, () => act("topup"))}>
+                {k.popular ? "★ " : ""}{k.credits.toLocaleString()} credits — ${k.price_usd}
               </button>
             ))}
           </div>

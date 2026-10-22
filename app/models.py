@@ -616,6 +616,7 @@ class Pricing(Base):
     credits: Mapped[int] = mapped_column(Integer, default=0)
     position: Mapped[int] = mapped_column(Integer, default=0)
     visible: Mapped[bool] = mapped_column(Boolean, default=True)
+    popular: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class GuestSession(Base):

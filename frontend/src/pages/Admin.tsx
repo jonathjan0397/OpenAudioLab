@@ -212,6 +212,21 @@ interface PricingRow {
   credits: number;
   position: number;
   visible?: boolean;
+  popular?: boolean;
+}
+interface ModelPricingProfile {
+  profile_id: string;
+  model_selection: string;
+  label: string;
+  family: string;
+  system_availability: string;
+  availability: string;
+  multiplier: number;
+}
+interface ModelPricingView {
+  base_credit_cost: number;
+  base_default: number;
+  profiles: ModelPricingProfile[];
 }
 interface CreditRow {
   id: string;
@@ -789,6 +804,39 @@ export default function AdminPage() {
     onSuccess: () => {
       setPricingDraft(null);
       qc.invalidateQueries({ queryKey: ["admin-pricing"] });
+      qc.invalidateQueries({ queryKey: ["billing-pricing"] });
+    },
+  });
+  const movePricingRow = (id: string, dir: -1 | 1) => setPricingDraft((d) => {
+    const base = d || [...(pricing.data?.plan || []), ...(pricing.data?.pack || [])];
+    const row = base.find((r) => r.id === id);
+    if (!row) return d;
+    const sameKind = base.filter((r) => r.kind === row.kind);
+    const idx = sameKind.findIndex((r) => r.id === id);
+    const swapWith = sameKind[idx + dir];
+    if (!swapWith) return d;
+    const out = [...base];
+    const a = out.findIndex((r) => r.id === id);
+    const b = out.findIndex((r) => r.id === swapWith.id);
+    [out[a], out[b]] = [out[b], out[a]];
+    return out;
+  });
+  const modelPricing = useQuery({
+    queryKey: ["admin-model-pricing"],
+    queryFn: () => api.get<ModelPricingView>("/api/v1/admin/model-pricing"),
+    enabled: enabled && section === "pricing",
+  });
+  const [mpDraft, setMpDraft] = useState<ModelPricingView | null>(null);
+  const mpView = mpDraft || modelPricing.data || null;
+  const mpDirty = mpDraft !== null && JSON.stringify(mpDraft) !== JSON.stringify(modelPricing.data);
+  const saveModelPricing = useMutation({
+    mutationFn: () => api.put<ModelPricingView>("/api/v1/admin/model-pricing", {
+      base_credit_cost: mpView?.base_credit_cost,
+      profiles: Object.fromEntries((mpView?.profiles || []).map((pr) => [pr.profile_id, { availability: pr.availability, multiplier: pr.multiplier }])),
+    }),
+    onSuccess: () => {
+      setMpDraft(null);
+      qc.invalidateQueries({ queryKey: ["admin-model-pricing"] });
     },
   });
   const guests = useQuery({
@@ -1838,6 +1886,7 @@ export default function AdminPage() {
         )}
 
         {section === "pricing" && (
+          <>
           <div className="card" style={{ maxWidth: 640 }}>
             <div className="card-header">
               <h2>Pricing</h2>
@@ -1845,7 +1894,9 @@ export default function AdminPage() {
               <button
                 className="btn btn-primary"
                 disabled={!pricingDraft || savePricing.isPending}
-                onClick={() => pricingDraft && savePricing.mutate(pricingDraft)}
+                onClick={() => pricingDraft && savePricing.mutate(
+                  (["plan", "pack"] as const).flatMap((k) =>
+                    pricingDraft.filter((r) => r.kind === k).map((r, i) => ({ ...r, position: i }))))}
               >
                 Save
               </button>
@@ -1854,7 +1905,7 @@ export default function AdminPage() {
               <div key={kind}>
                 <div className="label" style={{ color: "var(--muted)", fontSize: 12, margin: "10px 0 6px", textTransform: "capitalize" }}>{kind}s</div>
                 <table className="table">
-                  <thead><tr><th>Name</th><th>Price USD</th><th>Credits</th><th>Visible</th></tr></thead>
+                  <thead><tr><th>Order</th><th>Name</th><th>Price USD</th><th>Credits</th><th>Visible</th><th>Popular</th></tr></thead>
                   <tbody>
                     {(kind === "plan" ? pricing.data?.plan : pricing.data?.pack)?.map((row) => {
                       const draft = pricingDraft?.find((p) => p.id === row.id) || row;
@@ -1862,6 +1913,10 @@ export default function AdminPage() {
                         setPricingDraft((d) => (d || [...(pricing.data?.plan || []), ...(pricing.data?.pack || [])]).map((p) => (p.id === row.id ? { ...p, ...patch } : p)));
                       return (
                         <tr key={row.id}>
+                          <td>
+                            <button className="btn btn-ghost" style={{ padding: "2px 6px" }} onClick={() => movePricingRow(row.id, -1)}>↑</button>
+                            <button className="btn btn-ghost" style={{ padding: "2px 6px" }} onClick={() => movePricingRow(row.id, 1)}>↓</button>
+                          </td>
                           <td>{draft.name} <span className="mono" style={{ fontSize: 11 }}>({draft.id})</span></td>
                           <td>
                             <input style={{ width: 90 }} type="number" min={0} value={draft.price_usd} onChange={(e) => set({ price_usd: Number(e.target.value) })} />
@@ -1872,6 +1927,9 @@ export default function AdminPage() {
                           <td>
                             <input type="checkbox" checked={draft.visible ?? true} onChange={(e) => set({ visible: e.target.checked })} />
                           </td>
+                          <td>
+                            <input type="checkbox" checked={draft.popular ?? false} onChange={(e) => set({ popular: e.target.checked })} />
+                          </td>
                         </tr>
                       );
                     })}
@@ -1880,9 +1938,56 @@ export default function AdminPage() {
               </div>
             ))}
             <p className="sub" style={{ fontSize: 12, marginTop: 8 }}>
-              Plan credits are monthly grants; pack credits are one-time top-ups. Changes apply immediately.
+              Plan credits are monthly grants; pack credits are one-time top-ups. ↑/↓ set the order shown on the
+              pricing page; “Popular” shows the Most Popular banner on the card. Changes apply immediately.
             </p>
           </div>
+          {modelPricing.data && mpView && (
+            <div className="card" style={{ maxWidth: 640, marginTop: 16 }}>
+              <div className="card-header">
+                <h2>Model Pricing</h2>
+                <span className="spacer" />
+                <button className="btn btn-primary" disabled={!mpDirty || saveModelPricing.isPending} onClick={() => saveModelPricing.mutate()}>
+                  {saveModelPricing.isPending ? "Saving…" : "Save"}
+                </button>
+              </div>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, margin: "6px 0 10px" }}>
+                Base credit cost
+                <input style={{ width: 80 }} type="number" min={1} max={1000} value={mpView.base_credit_cost}
+                       onChange={(e) => setMpDraft({ ...mpView, base_credit_cost: Number(e.target.value) })} />
+                <span className="sub" style={{ fontSize: 11 }}>env default {mpView.base_default}</span>
+              </label>
+              <table className="table">
+                <thead><tr><th>Model profile</th><th>Available</th><th>Credit multiplier</th></tr></thead>
+                <tbody>
+                  {mpView.profiles.map((pr) => {
+                    const unconf = pr.system_availability === "unconfigured";
+                    const patch = (p2: Partial<ModelPricingProfile>) =>
+                      setMpDraft({ ...mpView, profiles: mpView.profiles.map((x) => (x.profile_id === pr.profile_id ? { ...x, ...p2 } : x)) });
+                    return (
+                      <tr key={pr.profile_id}>
+                        <td>{pr.label} <span className="mono" style={{ fontSize: 11 }}>({pr.profile_id})</span></td>
+                        <td>
+                          <input type="checkbox" disabled={unconf} checked={pr.availability === "available"}
+                                 onChange={(e) => patch({ availability: e.target.checked ? "available" : "disabled" })} />
+                          {unconf && <span className="sub" style={{ fontSize: 11 }}> unconfigured</span>}
+                        </td>
+                        <td>
+                          <input style={{ width: 80 }} type="number" min={0.1} max={10} step={0.25} value={pr.multiplier}
+                                 onChange={(e) => patch({ multiplier: Number(e.target.value) })} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <p className="sub" style={{ fontSize: 12, marginTop: 8 }}>
+                Credits per generation = base cost × multiplier × takes. Disabled models are hidden from selection
+                and reject new jobs; unconfigured models need provisioning first.
+              </p>
+            </div>
+          )}
+          </>
         )}
 
         {section === "audit" && (

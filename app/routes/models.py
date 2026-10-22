@@ -65,6 +65,9 @@ def list_model_selections(request: Request) -> list[dict]:
                 )
             ).all()
         )
+        from .. import model_pricing as _mp
+
+        mp = _mp.load(session)
     out = []
     for release in _catalog.CATALOG.values():
         profiles = []
@@ -73,7 +76,7 @@ def list_model_selections(request: Request) -> list[dict]:
                 "execution_profile_id": p.profile_id,
                 "label": p.label,
                 "quality_note": p.quality_note,
-                "availability": p.availability,
+                "availability": _mp.effective_availability(p, mp),
                 "runnable": (p.model_selection, p.profile_id) in runnable,
                 "requires_paid": release.family != "turbo",
                 "experimental": release.experimental,
@@ -87,7 +90,7 @@ def list_model_selections(request: Request) -> list[dict]:
                 "max_duration_seconds": p.max_duration_seconds,
                 "max_batch": p.max_batch,
                 "planner_model": p.planner_model,
-                "pricing": {"multiplier": p.multiplier, "policy_version": _catalog.PRICE_POLICY_VERSION, "provisional": True},
+                "pricing": {"multiplier": _mp.effective_multiplier(p, mp), "policy_version": _catalog.PRICE_POLICY_VERSION, "provisional": True},
             })
         out.append({
             "model_selection": release.selection,

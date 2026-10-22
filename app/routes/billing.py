@@ -100,6 +100,7 @@ def load_pricing(session) -> dict[str, list[dict]]:
                 "credits": p.credits,
                 "position": p.position,
                 "visible": bool(getattr(p, "visible", True)),
+                "popular": bool(getattr(p, "popular", False)),
             }
         )
     return out
