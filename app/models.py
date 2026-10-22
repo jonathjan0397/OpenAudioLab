@@ -440,6 +440,23 @@ class SiteSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class FleetNode(Base):
+    """Durable GPU-node identity surviving instance churn (exclusive-training gate)."""
+
+    __tablename__ = "fleet_nodes"
+
+    id: Mapped[str] = mapped_column(String(120), primary_key=True)  # durable node_key
+    instance_id: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    worker_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    state: Mapped[str] = mapped_column(String(20), default="shared_ready")
+    exclusive_attempt_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    in_flight_jobs: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class VastInstance(Base):
     """Recently used Vast.ai nodes kept for fast restart instead of fresh create."""
 

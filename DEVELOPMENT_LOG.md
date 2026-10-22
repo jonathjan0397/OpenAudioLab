@@ -1083,3 +1083,24 @@ No migration. Validation: 388 backend tests (2 new), 17 vitest, clean build.
 - `swappiness_gate`: sw==0 no longer bypasses capacity/budget hard gates.
 - Validation: 398 backend tests pass (8 new in tests/test_model_lab_m1_repairs.py);
   m5/m6/m16/gpu-fleet tests updated for the async-merge and lifecycle contracts.
+
+## 2026-10-22 — Pipeline M2: fleet-node contract (feat/model-lab-pipeline)
+
+- New durable `fleet_nodes` table (migration 0045): node identity survives Vast
+  instance churn; `node_key` = OAL_NODE_KEY or hostname.
+- Exclusive-training state machine in `app/fleet_nodes.py`:
+  shared_ready → draining → training_reserved → active → cleanup → shared_ready,
+  any→quarantined, quarantined→reset. Every transition is a conditional UPDATE,
+  so the claim-vs-reservation race has exactly one winner.
+- `claim_for_training` is the worker-side atomic claim: self-reserves from
+  shared_ready, activates from training_reserved, loses against active or
+  quarantined; unregistered nodes proceed (backward compatible).
+- Training worker: registers its node, heartbeats + runs `supervisor_tick` every
+  loop (stale mid-training heartbeats → quarantine), claims the node before the
+  trainer runs (NODE_NOT_RESERVED on loss) and releases it (cleanup→shared_ready)
+  after settlement.
+- Admin endpoints: GET /admin/gpu-fleet/nodes; POST .../drain, /quarantine,
+  /reset (audited via GpuFleetEvent).
+- Dockerfile.worker gains the BYOL singer-identity layer (pinned weights baked,
+  OAL_BYOL_MODEL_PATH="" keeps it config-gated off until calibration).
+- Validation: 405 backend tests pass (7 new in tests/test_fleet_nodes.py).

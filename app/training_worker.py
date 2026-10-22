@@ -98,6 +98,7 @@ class TrainingWorker:
         self.queues = [RedisQueue.queue_name(settings.train_queue_model_id)]
         if settings.train_xl_queue_model_id != settings.train_queue_model_id:
             self.queues.append(RedisQueue.queue_name(settings.train_xl_queue_model_id))
+        self.node_key = (settings.node_key or socket.gethostname())
         self._stop = False
         if settings.train_cuda_device and "CUDA_VISIBLE_DEVICES" not in os.environ:
             os.environ["CUDA_VISIBLE_DEVICES"] = settings.train_cuda_device
@@ -151,8 +152,11 @@ class TrainingWorker:
                 return resp.read()
 
     def register(self) -> None:
+        from .fleet_nodes import register_node
         from .uais.capabilities import VOICE_CAPABILITIES
 
+        with self.db.session() as session:
+            register_node(session, self.node_key, worker_id=self.worker_id)
         total_mb = self._gpu_total_mb()
         with self.db.session() as session:
             worker = session.get(Worker, self.worker_id)
@@ -712,6 +716,25 @@ class TrainingWorker:
                 attempt.state = "running"  # running only after claim
                 attempt.worker_id = self.worker_id
                 session.commit()
+        from .fleet_nodes import claim_for_training
+        with self.db.session() as session:
+            reserved = claim_for_training(session, self.node_key, request.get("attempt_id", ""))
+        if not reserved:
+            # A node record exists but is not exclusively reserved for us:
+            # another claim won the race or the node is not in training pool.
+            from .fleet_nodes import NODE_STATES  # noqa: F401
+            with self.db.session() as session:
+                job2 = get_job_by_id(session, job_id)
+                req2 = dict(job2.request_json)
+                attempt = session.get(MlTrainingAttempt, req2.get("attempt_id"))
+                if attempt is not None:
+                    settle_attempt(session, attempt, state="failed",
+                                   error="NODE_NOT_RESERVED",
+                                   budget=session.get(MlBudget, attempt.budget_id))
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         "NODE_NOT_RESERVED",
+                         f"node {self.node_key} is not in training_reserved state.")
+            return
         env = dict(os.environ)
         env["OAL_ML_ATTEMPT_ID"] = request.get("attempt_id", "")
         env["OAL_ML_DATASET_SHA"] = request.get("frozen_sha256", "")
@@ -734,6 +757,7 @@ class TrainingWorker:
                                hours=result.get("hours"), spend_usd=result.get("spend_usd"),
                                error=None if ok else (code + ": " + (stderr or "")[-200:]),
                                budget=budget)
+        self._release_node()
         if not ok:
             fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
                          code or "TRAINING_FAILED", (stderr or code or "trainer failed")[-280:])
@@ -742,6 +766,14 @@ class TrainingWorker:
                          lease_token, ("train-result", json.dumps(result).encode()),
                          synthetic=False,
                          engine_result={"trainer": command.split()[0], "result": result})
+
+    def _release_node(self) -> None:
+        """active -> cleanup -> shared_ready (no-op when not under contract)."""
+        from .fleet_nodes import cleanup_done, finish_training
+
+        with self.db.session() as session:
+            finish_training(session, self.node_key)
+            cleanup_done(session, self.node_key)
 
     def _model_lab_merge(self, job_id: str, attempt_id: str, lease_token: str) -> None:
         from .model_lab_merge import finish_merge_build
@@ -892,10 +924,17 @@ class TrainingWorker:
     # -- loop --------------------------------------------------------------------------
 
     def run_forever(self) -> None:
+        from .fleet_nodes import heartbeat_node, supervisor_tick
+
         self.register()
         while not self._stop:
             try:
                 self.run_once()
+                with self.db.session() as session:
+                    heartbeat_node(session, self.node_key)
+                    stale = supervisor_tick(session, self.settings.node_stale_seconds)
+                for node_id in stale:
+                    log.warning("supervisor quarantined node %s (stale heartbeat)", node_id)
             except Exception:
                 log.exception("training worker iteration failed")
                 time.sleep(2)

@@ -168,6 +168,9 @@ class Settings(BaseSettings):
     model_lab_merge_wall_hours: float = 1.0  # hard merge-build deadline
     model_lab_est_hours: float = 1.0  # reservation estimate per attempt
     model_lab_est_spend_usd: float = 0.25  # reservation estimate per attempt
+    node_key: str = ""  # durable fleet-node identity (default: hostname)
+    node_stale_seconds: int = 180  # supervisor heartbeat staleness
+    byol_model_path: str = ""  # singer-identity encoder weights; empty = BYOL off
     # Calibration default, not a scientifically established voice-accuracy claim.
     voice_similarity_threshold: float = 0.5
     voice_max_recording_seconds: int = 600

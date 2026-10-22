@@ -85,10 +85,11 @@ def _worker(client):
     w = SimpleNamespace(db=client.app.state.db, queue=None,
                         storage=client.app.state.storage,
                         settings=client.app.state.settings,
-                        worker_id="m1-worker")
+                        worker_id="m1-worker", node_key="m1-test-node")
     w._supervised_run = lambda *a, **k: TrainingWorker._supervised_run(w, *a, **k)
     w._kill_group = TrainingWorker._kill_group
     w._last_json = TrainingWorker._last_json
+    w._release_node = lambda: TrainingWorker._release_node(w)
     return w
 
 

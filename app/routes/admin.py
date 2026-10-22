@@ -999,6 +999,69 @@ def gpu_fleet_worker_destroy(worker_id: str, request: Request, force: bool = Fal
     return JSONResponse({"ok": True, "action": "destroy"})
 
 
+class FleetNodeActionRequest(BaseModel):
+    reason: str = "admin"
+    attempt_id: str | None = None
+
+
+@router.get("/admin/gpu-fleet/nodes")
+def gpu_fleet_nodes(request: Request) -> JSONResponse:
+    from sqlalchemy import select as _select
+
+    from ..fleet_nodes import node_view
+    from ..models import FleetNode
+
+    with request.app.state.db.session() as session:
+        nodes = session.execute(_select(FleetNode).order_by(FleetNode.id)).scalars().all()
+        return JSONResponse({"nodes": [node_view(n) for n in nodes]})
+
+
+@router.post("/admin/gpu-fleet/nodes/{node_key}/drain")
+def gpu_fleet_node_drain(node_key: str, body: FleetNodeActionRequest,
+                         request: Request) -> JSONResponse:
+    from ..fleet_nodes import drain_for_training, node_view
+    from ..models import FleetNode, GpuFleetEvent, new_uuid
+
+    with request.app.state.db.session() as session:
+        if session.get(FleetNode, node_key) is None:
+            raise ApiError(404, "NODE_NOT_FOUND", f"unknown fleet node: {node_key}")
+        ok = drain_for_training(session, node_key, body.attempt_id or "")
+        session.add(GpuFleetEvent(id=new_uuid(), actor="admin",
+                                  action="fleet_node_drain", subject=node_key))
+        session.commit()
+        return JSONResponse(node_view(session.get(FleetNode, node_key)),
+                            status_code=200 if ok else 409)
+
+
+@router.post("/admin/gpu-fleet/nodes/{node_key}/quarantine")
+def gpu_fleet_node_quarantine(node_key: str, body: FleetNodeActionRequest,
+                              request: Request) -> JSONResponse:
+    from ..fleet_nodes import node_view, quarantine
+    from ..models import FleetNode, GpuFleetEvent, new_uuid
+
+    with request.app.state.db.session() as session:
+        ok = quarantine(session, node_key, body.reason)
+        session.add(GpuFleetEvent(id=new_uuid(), actor="admin",
+                                  action="fleet_node_quarantine", subject=node_key))
+        session.commit()
+        return JSONResponse(node_view(session.get(FleetNode, node_key)),
+                            status_code=200 if ok else 409)
+
+
+@router.post("/admin/gpu-fleet/nodes/{node_key}/reset")
+def gpu_fleet_node_reset(node_key: str, request: Request) -> JSONResponse:
+    from ..fleet_nodes import node_view, reset_quarantine
+    from ..models import FleetNode, GpuFleetEvent, new_uuid
+
+    with request.app.state.db.session() as session:
+        ok = reset_quarantine(session, node_key)
+        session.add(GpuFleetEvent(id=new_uuid(), actor="admin",
+                                  action="fleet_node_reset", subject=node_key))
+        session.commit()
+        return JSONResponse(node_view(session.get(FleetNode, node_key)),
+                            status_code=200 if ok else 409)
+
+
 @router.get("/admin/gpu-fleet/costs")
 def gpu_fleet_costs(request: Request) -> JSONResponse:
     from ..models import GpuDeployment, VastInstance
