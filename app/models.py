@@ -1181,6 +1181,8 @@ class MlReleaseChannel(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     name: Mapped[str] = mapped_column(String(30), unique=True)
     bundle_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    previous_bundle_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    canary_percent: Mapped[int] = mapped_column(Integer, default=100)
     min_credits: Mapped[int] = mapped_column(Integer, default=0)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

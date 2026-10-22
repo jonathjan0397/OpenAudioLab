@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from .models import Lora, MlMergeRecipe, MlModelBundle, new_uuid, utcnow
 
 MERGE_METHODS = ("slerp", "dare")
-BUNDLE_STATES = ("building", "candidate", "released", "retired", "failed")
+BUNDLE_STATES = ("building", "candidate", "released", "retired", "failed", "archived")
 SATISFACTORY = ("win", "pass")
 
 
@@ -132,6 +132,10 @@ def transition_bundle(session, bundle: MlModelBundle, action: str) -> MlModelBun
         if bundle.state != "released":
             raise MergeError(f"only released bundles can be retired (state={bundle.state})")
         bundle.state = "retired"
+    elif action == "archive":
+        if bundle.state not in ("retired", "candidate", "failed"):
+            raise MergeError(f"cannot archive a {bundle.state} bundle")
+        bundle.state = "archived"
     else:
         raise MergeError(f"unknown bundle action: {action}")
     session.commit()

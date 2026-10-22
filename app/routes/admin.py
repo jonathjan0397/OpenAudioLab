@@ -3335,6 +3335,22 @@ def admin_model_lab_bundle_release(bundle_id: str, request: Request) -> JSONResp
         return JSONResponse({"id": bundle.id, "state": bundle.state})
 
 
+@router.post("/admin/model-lab/bundles/{bundle_id}/archive")
+def admin_model_lab_bundle_archive(bundle_id: str, request: Request) -> JSONResponse:
+    from ..model_lab_merge import MergeError, bundle_view, transition_bundle
+    from ..models import MlModelBundle
+
+    with request.app.state.db.session() as session:
+        bundle = session.get(MlModelBundle, bundle_id)
+        if bundle is None:
+            raise ApiError(404, "NOT_FOUND", "bundle not found")
+        try:
+            transition_bundle(session, bundle, "archive")
+        except MergeError as exc:
+            raise ApiError(409, "BUNDLE_STATE", str(exc)) from exc
+        return JSONResponse(bundle_view(bundle))
+
+
 @router.post("/admin/model-lab/bundles/{bundle_id}/retire")
 def admin_model_lab_bundle_retire(bundle_id: str, request: Request) -> JSONResponse:
     from ..model_lab_merge import MergeError, transition_bundle
@@ -3414,6 +3430,7 @@ def admin_model_lab_promotion_gate(bundle_id: str, request: Request) -> JSONResp
 class MlChannelPatch(BaseModel):
     enabled: bool | None = None
     min_credits: int | None = None
+    canary_percent: int | None = Field(default=None, ge=0, le=100)
 
 
 class MlChannelPromote(BaseModel):
@@ -3443,6 +3460,29 @@ def admin_model_lab_channel_promote(name: str, body: MlChannelPromote, request: 
         return JSONResponse(channel_view(session, channel))
 
 
+@router.post("/admin/model-lab/release-channels/{name}/rollback")
+def admin_model_lab_channel_rollback(name: str, request: Request) -> JSONResponse:
+    from ..model_lab_release import ReleaseError, channel_view, rollback_channel
+
+    with request.app.state.db.session() as session:
+        try:
+            channel = rollback_channel(session, name)
+        except ReleaseError as exc:
+            raise ApiError(409, "ROLLBACK_BLOCKED", str(exc)) from exc
+        return JSONResponse(channel_view(session, channel))
+
+
+@router.get("/admin/model-lab/release-channels/{name}/resolve")
+def admin_model_lab_channel_resolve(name: str, request: Request,
+                                    owner_id: str = "guest", credits: int = 999999
+                                    ) -> JSONResponse:
+    from ..model_lab_release import resolve_channel_bundle
+
+    with request.app.state.db.session() as session:
+        return JSONResponse(resolve_channel_bundle(session, name,
+                                                   owner_id=owner_id, credits=credits))
+
+
 @router.patch("/admin/model-lab/release-channels/{name}")
 def admin_model_lab_channel_patch(name: str, body: MlChannelPatch, request: Request) -> JSONResponse:
     from ..model_lab_release import ReleaseError, channel_view, update_channel
@@ -3450,7 +3490,8 @@ def admin_model_lab_channel_patch(name: str, body: MlChannelPatch, request: Requ
     with request.app.state.db.session() as session:
         try:
             channel = update_channel(session, name, enabled=body.enabled,
-                                     min_credits=body.min_credits)
+                                     min_credits=body.min_credits,
+                                     canary_percent=body.canary_percent)
         except ReleaseError as exc:
             raise ApiError(422, "CHANNEL_INVALID", str(exc)) from exc
         return JSONResponse(channel_view(session, channel))

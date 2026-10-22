@@ -115,13 +115,46 @@ def promote_channel(session, name: str, bundle_id: str) -> MlReleaseChannel:
     if not gate["ready"]:
         raise ReleaseError("promotion gate: " + "; ".join(gate["reasons"]))
     channel = get_or_create_channel(session, name)
+    channel.previous_bundle_id = channel.bundle_id
     channel.bundle_id = bundle.id
     session.commit()
     return channel
 
 
+def rollback_channel(session, name: str) -> MlReleaseChannel:
+    """One-step rollback to the previously promoted bundle."""
+    channel = get_or_create_channel(session, name)
+    if channel.previous_bundle_id is None:
+        raise ReleaseError(f"channel {name} has no previous bundle to roll back to")
+    channel.bundle_id, channel.previous_bundle_id = channel.previous_bundle_id, channel.bundle_id
+    session.commit()
+    return channel
+
+
+def resolve_channel_bundle(session, name: str, *, owner_id: str, credits: int) -> dict:
+    """Release eligibility + deterministic canary routing for one request."""
+    import hashlib
+
+    channel = get_or_create_channel(session, name)
+    if not channel.enabled or channel.bundle_id is None:
+        return {"bundle_id": None, "reason": "channel_disabled"}
+    if credits < channel.min_credits:
+        return {"bundle_id": None, "reason": "credits_below_minimum"}
+    bundle = session.get(MlModelBundle, channel.bundle_id)
+    if bundle is None or bundle.state != "released":
+        return {"bundle_id": None, "reason": "bundle_not_released"}
+    if not promotion_gate(session, bundle)["ready"]:
+        return {"bundle_id": None, "reason": "gate_not_ready"}
+    if channel.canary_percent < 100:
+        bucket = int(hashlib.sha256(owner_id.encode()).hexdigest()[:8], 16) % 100
+        if bucket >= channel.canary_percent:
+            return {"bundle_id": None, "reason": "outside_canary"}
+    return {"bundle_id": bundle.id, "reason": "routed"}
+
+
 def update_channel(session, name: str, *, enabled: bool | None = None,
-                   min_credits: int | None = None) -> MlReleaseChannel:
+                   min_credits: int | None = None,
+                   canary_percent: int | None = None) -> MlReleaseChannel:
     channel = get_or_create_channel(session, name)
     if enabled is not None:
         channel.enabled = enabled
@@ -129,6 +162,10 @@ def update_channel(session, name: str, *, enabled: bool | None = None,
         if min_credits < 0:
             raise ReleaseError("min_credits must be >= 0")
         channel.min_credits = min_credits
+    if canary_percent is not None:
+        if not 0 <= canary_percent <= 100:
+            raise ReleaseError("canary_percent must be within 0..100")
+        channel.canary_percent = canary_percent
     session.commit()
     return channel
 
@@ -137,5 +174,7 @@ def channel_view(session, channel: MlReleaseChannel) -> dict:
     bundle = session.get(MlModelBundle, channel.bundle_id) if channel.bundle_id else None
     return {"name": channel.name, "enabled": channel.enabled,
             "min_credits": channel.min_credits,
+            "canary_percent": channel.canary_percent,
+            "previous_bundle_id": channel.previous_bundle_id,
             "bundle": ({"id": bundle.id, "name": bundle.name, "version": bundle.version,
                         "state": bundle.state} if bundle else None)}

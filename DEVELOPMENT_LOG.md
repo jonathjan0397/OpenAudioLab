@@ -1167,3 +1167,18 @@ No migration. Validation: 388 backend tests (2 new), 17 vitest, clean build.
   deterministic provenance card (base model, method, adapters, strengths,
   artifact integrity, evaluations, promotion gate).
 - Validation: 419 backend tests pass (3 new in tests/test_model_lab_m6_pipeline.py).
+
+## 2026-10-22 — Pipeline M7: release eligibility, canary, rollback, archive (feat/model-lab-pipeline)
+
+- Release channels gain `canary_percent` (0..100, PATCH-validated) and
+  `previous_bundle_id` history (migration 0047). Promotion records history;
+  POST /release-channels/{name}/rollback swaps back one step (409 when empty).
+- `resolve_channel_bundle` is the single eligibility decision: enabled ->
+  credits >= min_credits -> bundle released -> promotion gate ready ->
+  deterministic owner-hash canary bucket. Every rejection returns a
+  machine-readable reason (channel_disabled, credits_below_minimum,
+  bundle_not_released, gate_not_ready, outside_canary).
+  GET /release-channels/{name}/resolve?owner_id=&credits=.
+- Bundle lifecycle adds `archive` (retired/candidate/failed -> archived);
+  POST /bundles/{id}/archive.
+- Validation: 423 backend tests pass (4 new in tests/test_model_lab_m7_release.py).
