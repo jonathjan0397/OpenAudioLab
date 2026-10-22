@@ -1265,3 +1265,34 @@ budget reserved_usd back to 0.0 after reaping the orphaned attempt.
 - Validation: workers recreated, both `healthy`, code revision aa0b3ed,
   fleet node `oal-baseline-gpu1` registered `shared_ready`, container view of
   the new scratch shows 3.2 TB free.
+
+## 2026-10-22 — Batches 0-2: local training root, tag/lyric parser, gpu1 scan jobs
+
+- Batch 0: created /Cold-Archive/OAL-Model-Training-A1/{scratch,exports,models,catalog,review};
+  purged 209 GB stale voice.train scratch (3 jobs verified `cancelled`, voice_adapters empty;
+  disk 427G->220G used). Worker workdir mounts repointed; discovered OAL_TRAIN_MIN_FREE_MB is
+  a VRAM gate (nvidia-smi memory.free), not disk — set sane 10000 MB floor; real disk gate is
+  Batch 4 scope.
+- Batch 1 (rev a09a7ae): migration 0048 (tags_state, tags_provenance_json, lyrics_text/sha256/
+  origin/provenance_json) + app/library_parse.py: ID3 via ffprobe format_tags, junk heuristics
+  (youtube.com/freemake/Unknown dropped), Album.nfo/artist.nfo genre/mood/style, Music Library
+  path-artist derivation, 'Artist - Title' filename fallback, .lrc/.txt sidecar discovery
+  (raw bytes verbatim + SHA-256; timestamps stripped only for derived training copy), decide_
+  tags_state (parsed/suspect/invalid). Wired into _scan_row. Real-file evidence: junk rip ->
+  suspect (review_required); properly tagged track -> parsed with genre=Country from ID3;
+  385 .lrc sidecars with matching audio, all extracted+provenanced.
+- Batch 2 (rev fe66196->515a775): migration 0049 ml_dir_index (streaming per-dir audio/nfo/lrc
+  catalog incl. files_json). model_lab.scan + model_lab.dir_index worker operations run fully
+  on gpu1 (resumable cursors, lease-heartbeat thread, cancel-aware chunk commits,
+  complete/fail/cancel_attempt lease fencing). import-selected is now async 202 (source +
+  manifest + batch + queued job; hub performs zero file I/O); new routes: scan-selected (dir
+  sources), dirs/refresh, GET batches. Streaming walk + containment guard added after the
+  first unscoped /mnt/truenas index attempt proved the walk design needed it (1200 polluted
+  rows deleted; job failed cleanly on re-claim).
+- Hub retired from the data path: /mnt/truenas NFS mount + fstab entry + API container bind
+  removed on the hub; gpu1's /mnt/truenas export to the hub deleted (localhost test export
+  removed too). OAL_TRUENAS_BROWSE_ROOT is now a validation/containment string
+  (/mnt/truenas/Media Library/Music) — browse falls back to ml_dir_index (verified live:
+  source=dir_index with no hub filesystem access).
+- Validation: 450 backend tests (11 library_parse + 5 scanjobs + updated truenas async tests),
+  17 frontend vitest, build green. Full-library dir_index running as first live proof.
