@@ -78,6 +78,22 @@ class AceStepTrainingAdapter:
         )
         return self._data(response)
 
+    def auto_label_async(self, *, save_path: str, transcribe_lyrics: bool = True,
+                         format_lyrics: bool = True, only_unlabeled: bool = False,
+                         skip_metas: bool = False,
+                         lm_model_path: str | None = None) -> dict[str, Any]:
+        response = self.transport.post_json(
+            "/v1/dataset/auto_label_async",
+            {"save_path": save_path, "transcribe_lyrics": transcribe_lyrics,
+             "format_lyrics": format_lyrics, "only_unlabeled": only_unlabeled,
+             "skip_metas": skip_metas, "lm_model_path": lm_model_path},
+        )
+        return self._data(response)
+
+    def auto_label_status(self, task_id: str) -> dict[str, Any]:
+        raw = self.transport.get_json(f"/v1/dataset/auto_label_status/{task_id}")
+        return raw or {}
+
     def load_lora(self, lora_path: str, adapter_name: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {"lora_path": lora_path}
         if adapter_name:

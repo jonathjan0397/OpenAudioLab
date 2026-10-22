@@ -1296,3 +1296,38 @@ budget reserved_usd back to 0.0 after reaping the orphaned attempt.
   source=dir_index with no hub filesystem access).
 - Validation: 450 backend tests (11 library_parse + 5 scanjobs + updated truenas async tests),
   17 frontend vitest, build green. Full-library dir_index running as first live proof.
+
+## 2026-10-22 — Batches 3-5: verify/lyrics ops, rights+acceptance gate, LM prep + eval (c65cf8e..)
+
+- Batch 3 (9e75910): app/library_external.py (politeness-limited MusicBrainz +
+  lrclib clients; UA per policy; rate limiters from settings; live probes:
+  MB matched "Song Of The South" -> MBID, release-group search yields
+  genre=country/year=1990; lrclib returned synced+plain lyrics verbatim).
+  model_lab.verify / model_lab.lyrics worker ops on gpu1: suggested claims +
+  MBID on recordings; site lyrics stored verbatim + SHA + provenance, honoring
+  submitted > sidecar > site > lm. Routes: per-recording verify/lyrics-fetch +
+  selected-bulk. 6 new tests.
+- Batch 4 (c65cf8e): migration 0050 ml_rights_records + ml_datasets.kind, 0051
+  VoiceRecording lyrics columns. freeze_dataset v2: rights gates (voice requires
+  singer_identity scope), suspect-tags gate, voice missing-lyrics gate
+  (explicit allow flags only), deterministic artist-grouped train/validation/
+  holdout splits (leakage test at 500 artists), manifest entries carry caption +
+  exact training lyrics + SHAs (frozen digest covers them). Trainer acceptance:
+  steps>0, safe_open loadable check, /v1/lora/load + one real 15s inference
+  (sample -> ml/acceptance/<attempt>/sample.mp3); worker enforces all of it
+  (TRAINING_ACCEPTANCE_FAILED) and pre-flights workdir disk from the manifest
+  (INSUFFICIENT_DISK, releases reservation). voice.train writes
+  <stem>.lyrics.txt and stops forcing all_instrumental. UAIS add_recording
+  accepts `lyrics` form field stored verbatim+SHA; frozen version manifests
+  carry it. Terminal scratch cleanup via _scrub. Routes: rights declare/list/
+  bulk/revoke; recordings list exposes tags_state/lyrics metadata only (never
+  text). 7 new tests; full suite 463 -> green.
+- Batch 5: AceStepTrainingAdapter.auto_label_async/status; model_lab.enrich op
+  (gpu1 LM for dataset-prep only, claims with LM revision provenance, lyrics
+  fills only empty slots); model_lab.eval op (bundle sha integrity, baseline+
+  candidate fixed-prompt A/B -> ml/eval/<bundle>/, MlEvaluation kind=ab pending
+  owner verdict feeding the existing promotion gate). Routes enrich-selected +
+  bundles/{id}/eval-samples. 4 new tests; suite 467. Runbook §0/§6 updated.
+- Live status: first full dir_index of the library still streaming on gpu1
+  (9,600+ folders indexed, resumable-safe design); workers refresh to the new
+  bundle when it finishes, before the Wave 0 calibration slice.

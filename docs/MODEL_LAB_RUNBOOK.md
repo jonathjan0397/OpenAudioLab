@@ -2,10 +2,32 @@
 
 Backend-only. Everything below is API-driven; the separate frontend owns lyrics.
 
+## 0. Library pipeline runs on the AI server (hub is control plane only)
+
+The hub never reads library files. `import-selected` and `scan-selected` return
+202 and enqueue `model_lab.scan` jobs that the gpu1 training worker executes
+against its local TrueNAS mount: streaming walk, per-chunk commits, resumable
+cursor, lease heartbeat, cancel-aware. Folder browsing is served from
+`ml_dir_index` (worker `model_lab.dir_index` refresh; `POST
+.../dirs/refresh`). Enrichment (`model_lab.verify` MusicBrainz, `model_lab.lyrics`
+lrclib) also runs on the worker — rate-limited, per-record durable results.
+Tag parsing is deterministic (ID3 + Kodi `.nfo` + path + `Artist - Title`
+fallback + `.lrc`/`.txt` sidecars; verbatim storage + SHA-256). Priority chain:
+submitted > sidecar > site > lm. Freeze enforces rights declarations
+(`ml_rights_records`; voice datasets also require singer_identity), suspect-tag
+and missing-lyrics gates (explicit `allow_suspect` / `allow_instrumental`), and
+assigns artist-grouped train/validation/holdout splits. The trainer must report
+real optimization steps, a loadable export, a LoRA load and one real inference
+(sample stored at `ml/acceptance/<attempt>/`) before an attempt counts as
+trained; disk is pre-flight estimated from the frozen manifest (explicit
+`INSUFFICIENT_DISK`). `model_lab.enrich` (ACE-Step auto-label LM on gpu1) is
+restricted to dataset-prep selections — never whole-library. Fixed-prompt A/B
+evals via `POST .../bundles/{id}/eval-samples` feed the promotion gate.
+
 ## 1. Vertical slice: import → registered adapter
 
-1. `POST /api/v1/admin/model-lab/sources` + `POST .../sources/{id}/import` — scan
-   and register recordings (ffprobe metadata only; no LLM touches audio).
+1. `POST /api/v1/admin/model-lab/sources` + `POST .../sources/{id}/import`, or
+   the async `import-selected` / `scan-selected` worker jobs above.
 2. `POST /api/v1/admin/model-lab/recordings/{id}/review` — approve/reject.
 3. `POST /api/v1/admin/model-lab/datasets` — freeze an approved selection
    (immutable manifest + frozen SHA-256).
@@ -75,6 +97,11 @@ Backend-only. Everything below is API-driven; the separate frontend owns lyrics.
 ## 6. Still unverified (needs funded rental / real GPU)
 
 - Real Vast create/price behaviour for the deploy form.
-- Trainer/merge command numerical outputs on hardware (strength × delta).
+- Trainer/merge numerical outputs: the pilot adapter trained end-to-end on the
+  baseline GPU (5 epochs, loss ladder, registered candidate); the acceptance
+  gate (steps + load + inference sample) and the batch 4-5 ops have not yet run
+  a first live pass — pending the first wave dataset.
+- BYOL embedding calibration; AcoustID key (superseded by MusicBrainz/lrclib
+  path for catalog work).
 - BYOL embedding quality/calibration on the pilot catalog.
 - AcoustID client key (identification provider) unset in production.

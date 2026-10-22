@@ -248,6 +248,10 @@ class TrainingWorker:
                 self._model_lab_verify(claimed_job, attempt_id, lease_token)
             elif operation == "model_lab.lyrics":
                 self._model_lab_lyrics(claimed_job, attempt_id, lease_token)
+            elif operation == "model_lab.enrich":
+                self._model_lab_enrich(claimed_job, attempt_id, lease_token)
+            elif operation == "model_lab.eval":
+                self._model_lab_eval(claimed_job, attempt_id, lease_token)
             else:
                 fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token,
                              "OPERATION_UNSUPPORTED", f"Training worker cannot run {operation!r}.")
@@ -973,6 +977,246 @@ class TrainingWorker:
         complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
                          lease_token, ("scan-counts", json.dumps(result).encode()),
                          synthetic=False, engine_result={"import": result})
+
+    def _model_lab_enrich(self, job_id: str, attempt_id: str, lease_token: str) -> None:
+        """Dataset-prep LM labeling on gpu1 (never a whole-library pass).
+
+        Copies chosen audio locally, scans it, runs the engine's auto_label LM
+        (transcribe/format lyrics + style caption + metas) and posts results as
+        SUGGESTED claims with the pinned LM revision. Lyrics only fill empty
+        slots: the priority chain (submitted > sidecar > site > lm) is never
+        overwritten, and nothing here touches generation lyric invariants.
+        """
+        import json
+        import shutil
+
+        from .model_lab import deterministic_caption
+        from .models import MlMetadataClaim, MlRecording
+
+        with self.db.session() as session:
+            request = dict(get_job_by_id(session, job_id).request_json)
+        ids = list(request.get("recording_ids") or [])[:int(request.get("max_recordings", 200))]
+        if not ids:
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         "ENRICH_EMPTY", "no recording ids in enrich job.")
+            return
+        work = Path(self.settings.train_workdir) / f"ml-enrich-{job_id[:8]}"
+        audio = work / "audio"
+        shutil.rmtree(work, ignore_errors=True)
+        audio.mkdir(parents=True)
+        mapping: dict[str, str] = {}
+        with self.db.session() as session:
+            for rid in ids:
+                rec = session.get(MlRecording, rid)
+                if rec is None:
+                    continue
+                src = Path(rec.path)
+                if not src.is_file():
+                    continue
+                stem = f"{rec.sha256[:6]}-{src.stem}"
+                dest = audio / (stem + src.suffix.lower())
+                shutil.copy2(src, dest)
+                if rec.lyrics_text:
+                    dest.with_name(stem + ".lyrics.txt").write_text(rec.lyrics_text,
+                                                                    encoding="utf-8")
+                mapping[stem] = rid
+        if not mapping:
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         "ENRICH_NOTHING_REACHABLE", "no audio reachable from this worker.")
+            return
+        lm_revision = os.environ.get("ACESTEP_LM_MODEL_PATH") or "lm-unpinned"
+        deadline = time.monotonic() + float(
+            request.get("wall_hours") or self.settings.model_lab_run_wall_hours) * 3600
+        stop = threading.Event()
+        lost = {"lease": False}
+        threading.Thread(target=self._lease_beat, args=(attempt_id, lease_token, stop, lost),
+                         daemon=True).start()
+        counts = {"samples": 0, "claims": 0, "lyrics_filled": 0}
+        try:
+            while True:
+                try:
+                    self.adapter.ensure_model(self.settings.acestep_model)
+                    break
+                except EngineError:
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(5)
+            self.adapter.scan_dataset(str(audio), f"enrich-{job_id[:8]}", False)
+            save_path = str(work / "dataset.json")
+            submit = self.adapter.auto_label_async(
+                save_path=save_path,
+                transcribe_lyrics=bool(request.get("transcribe", True)),
+                format_lyrics=True, only_unlabeled=False, skip_metas=False)
+            task_id = submit.get("task_id") or submit.get("taskId") or ""
+            if not task_id:
+                raise EngineError("ENRICH_NO_TASK", str(submit)[:200])
+            while True:
+                if lost["lease"]:
+                    return
+                if is_cancelling(self.db, job_id):
+                    cancel_attempt(self.db, job_id, attempt_id, lease_token)
+                    return
+                st = self.adapter.auto_label_status(task_id)
+                state = str(st.get("status") or "").lower()
+                if state in ("completed", "done", "success", "finished"):
+                    break
+                if state in ("failed", "error"):
+                    raise EngineError("ENRICH_FAILED",
+                                      str(st.get("error") or st)[:200])
+                if time.monotonic() >= deadline:
+                    raise EngineError("TRAINING_TIMEOUT", "auto-label wall deadline")
+                time.sleep(10)
+            dataset = json.loads(Path(save_path).read_text(encoding="utf-8"))
+            self.storage.put(f"ml/enrich/{job_id}/dataset.json",
+                             json.dumps(dataset).encode("utf-8"))
+            with self.db.session() as session:
+                for sample in dataset.get("samples") or []:
+                    stem = Path(str(sample.get("filename") or "")).stem
+                    rid = mapping.get(stem)
+                    if not rid:
+                        continue
+                    counts["samples"] += 1
+                    rec = session.get(MlRecording, rid)
+                    for field, value in (("caption_style", sample.get("caption")),
+                                         ("genre", sample.get("genre")),
+                                         ("bpm", sample.get("bpm")),
+                                         ("keyscale", sample.get("keyscale")),
+                                         ("language", sample.get("language"))):
+                        if value:
+                            session.add(MlMetadataClaim(
+                                recording_id=rid, field=field, value=str(value),
+                                provenance="acestep-lm", provider=lm_revision))
+                            counts["claims"] += 1
+                    lyrics = str(sample.get("formatted_lyrics") or sample.get("lyrics") or "").strip()
+                    if lyrics and lyrics != "[Instrumental]" and not (rec and rec.lyrics_text):
+                        rec.lyrics_text = str(sample.get("formatted_lyrics")
+                                              or sample.get("lyrics") or "")
+                        rec.lyrics_sha256 = hashlib.sha256(
+                            rec.lyrics_text.encode("utf-8")).hexdigest()
+                        rec.lyrics_origin = "lm"
+                        rec.lyrics_provenance_json = {"provider": "acestep-lm",
+                                                      "lm_revision": lm_revision,
+                                                      "transcribed": True,
+                                                      "at": utcnow().isoformat()}
+                        counts["lyrics_filled"] += 1
+                session.commit()
+        except EngineError as exc:
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         exc.code if hasattr(exc, "code") else "ENRICH_FAILED",
+                         str(exc)[:280])
+            return
+        except OSError as exc:
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         "ENRICH_IO", str(exc)[:280])
+            return
+        finally:
+            stop.set()
+            shutil.rmtree(work, ignore_errors=True)
+        complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
+                         lease_token, ("enrich-summary", json.dumps(counts).encode()),
+                         synthetic=False,
+                         engine_result={"enrich": {**counts, "lm_revision": lm_revision}})
+
+    def _model_lab_eval(self, job_id: str, attempt_id: str, lease_token: str) -> None:
+        """Fixed-prompt A/B samples for a candidate bundle (owner listening gate).
+
+        Baseline-vs-candidate at the same seeds; audio lands in object storage
+        under ml/eval/<bundle>/ and one MlEvaluation(kind=ab) row awaits the
+        verdict. Promotion stays gated on a win/pass verdict.
+        """
+        import hashlib as _hl
+        import json
+        import shutil
+
+        from .models import MlEvaluation, MlModelBundle, new_uuid
+
+        with self.db.session() as session:
+            request = dict(get_job_by_id(session, job_id).request_json)
+            bundle = session.get(MlModelBundle, request.get("bundle_id"))
+            if bundle is None or not bundle.artifact_key:
+                fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                             "BUNDLE_NOT_FOUND", "eval target bundle missing.")
+                return
+            bundle_id, artifact_key, want_sha = bundle.id, bundle.artifact_key, bundle.sha256
+        prompts = request.get("prompts") or [
+            {"name": "neutral_summer", "caption": "bright summer afternoon, warm strings"},
+            {"name": "neutral_midnight", "caption": "slow midnight ballad, sparse piano"},
+            {"name": "neutral_neon", "caption": "neon city pulse, driving synth"},
+        ]
+        seed = int(request.get("seed", 42))
+        duration = int(request.get("duration_seconds", 30))
+        work = Path(self.settings.train_workdir) / f"ml-eval-{job_id[:8]}"
+        (work / "lora").mkdir(parents=True, exist_ok=True)
+        body = self.storage.get(artifact_key).body
+        got_sha = _hl.sha256(bytes(body)).hexdigest()
+        if want_sha and got_sha != want_sha:
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         "ARTIFACT_INTEGRITY", f"sha mismatch for {bundle_id}")
+            return
+        lora_path = work / "lora" / "model.safetensors"
+        lora_path.write_bytes(bytes(body))
+        samples: list[dict] = []
+        stop = threading.Event()
+        lost = {"lease": False}
+        threading.Thread(target=self._lease_beat, args=(attempt_id, lease_token, stop, lost),
+                         daemon=True).start()
+        try:
+            self.adapter.ensure_model(self.settings.acestep_model)
+            for mode in ("baseline", "candidate"):
+                if mode == "candidate":
+                    self.adapter.load_lora(str(lora_path), f"ml-{bundle_id[:8]}")
+                else:
+                    self.adapter.unload_lora()
+                for p in prompts:
+                    payload = self.gen_adapter.build_payload(
+                        music_description=str(p.get("caption") or ""), lyrics=None,
+                        instrumental=True, seed=seed, duration_seconds=duration,
+                        thinking=False)
+                    sub = self.gen_adapter.submit(payload)
+                    deadline = time.monotonic() + 600
+                    state, items = "pending", None
+                    while state == "pending" and time.monotonic() < deadline:
+                        if lost["lease"]:
+                            return
+                        time.sleep(5)
+                        state, items = self.gen_adapter.poll(sub.task_id)
+                    if state != "succeeded" or not items:
+                        raise EngineError("EVAL_INFERENCE_FAILED",
+                                          f"{mode}/{p.get('name')}: {state} "
+                                          f"{self.gen_adapter.last_error}")
+                    url = next((i.get("file") or i.get("audio_url") for i in items
+                                if i.get("file") or i.get("audio_url")), None)
+                    if not url:
+                        raise EngineError("EVAL_NO_AUDIO", f"{mode}/{p.get('name')}")
+                    audio = self.gen_adapter.download(url)
+                    key = f"ml/eval/{bundle_id}/{mode}-{p.get('name')}.mp3"
+                    self.storage.put(key, audio)
+                    samples.append({"mode": mode, "prompt": p.get("name"),
+                                    "caption": p.get("caption"), "artifact_key": key,
+                                    "bytes": len(audio),
+                                    "sha256": _hl.sha256(audio).hexdigest()})
+            with self.db.session() as session:
+                session.add(MlEvaluation(
+                    id=new_uuid(), bundle_id=bundle_id, kind="ab",
+                    scores_json={"seed": seed, "duration_seconds": duration,
+                                 "base_model": self.settings.acestep_model,
+                                 "samples": samples},
+                    evaluator=None, verdict=None))
+                session.commit()
+        except EngineError as exc:
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         getattr(exc, "code", "EVAL_FAILED"), str(exc)[:280])
+            return
+        finally:
+            stop.set()
+            try:
+                self.adapter.unload_lora()
+            except Exception:
+                pass
+            shutil.rmtree(work, ignore_errors=True)
+        complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
+                         lease_token, ("eval-summary", json.dumps(samples).encode()),
+                         synthetic=False, engine_result={"eval_samples": len(samples)})
 
     def _model_lab_dir_index(self, job_id: str, attempt_id: str, lease_token: str) -> None:
         import json

@@ -2976,6 +2976,71 @@ def admin_model_lab_lyrics_selected(body: MlPassSelected, request: Request) -> J
     return _enqueue_ml_pass(request, "model_lab.lyrics", body.recording_ids, force=body.force)
 
 
+class MlEnrichBody(BaseModel):
+    recording_ids: list[str] = Field(min_length=1, max_length=200)
+    transcribe: bool = True
+    wall_hours: float | None = Field(default=None, gt=0, le=48)
+
+
+class MlEvalBody(BaseModel):
+    prompts: list[dict] = Field(default_factory=list, max_length=16)
+    seed: int = 42
+    duration_seconds: int = Field(default=30, ge=10, le=120)
+
+
+@router.post("/admin/model-lab/enrich-selected")
+def admin_model_lab_enrich_selected(body: MlEnrichBody, request: Request) -> JSONResponse:
+    """Queue the local LM dataset-prep pass on gpu1 (admin-gated, capped)."""
+    import hashlib as _hl
+    import json as _json
+
+    from ..models import Job, new_uuid as _uuid
+    from ..orchestration import enqueue
+
+    settings = request.app.state.settings
+    request_json = {"recording_ids": body.recording_ids, "transcribe": body.transcribe,
+                    "wall_hours": body.wall_hours}
+    with request.app.state.db.session() as session:
+        job = Job(id=_uuid(), owner_id="model-lab", operation="model_lab.enrich",
+                  model_id=settings.train_queue_model_id, model_revision="model-lab",
+                  status="queued", request_json=request_json,
+                  request_hash=_hl.sha256(_json.dumps(request_json, sort_keys=True).encode()).hexdigest(),
+                  idempotency_key=f"ml-enrich-{_uuid()[:8]}")
+        session.add(job)
+        enqueue(session, job, settings)
+        session.commit()
+        return JSONResponse({"job_id": job.id, "count": len(body.recording_ids),
+                             "state": "queued"}, status_code=202)
+
+
+@router.post("/admin/model-lab/bundles/{bundle_id}/eval-samples")
+def admin_model_lab_bundle_eval(bundle_id: str, body: MlEvalBody,
+                                request: Request) -> JSONResponse:
+    """Queue fixed-prompt baseline-vs-candidate samples for owner review."""
+    import hashlib as _hl
+    import json as _json
+
+    from ..models import Job, MlModelBundle, new_uuid as _uuid
+    from ..orchestration import enqueue
+
+    settings = request.app.state.settings
+    with request.app.state.db.session() as session:
+        if session.get(MlModelBundle, bundle_id) is None:
+            raise ApiError(404, "NOT_FOUND", "bundle not found")
+        request_json = {"bundle_id": bundle_id, "prompts": body.prompts, "seed": body.seed,
+                        "duration_seconds": body.duration_seconds}
+        job = Job(id=_uuid(), owner_id="model-lab", operation="model_lab.eval",
+                  model_id=settings.train_queue_model_id, model_revision="model-lab",
+                  status="queued", request_json=request_json,
+                  request_hash=_hl.sha256(_json.dumps(request_json, sort_keys=True).encode()).hexdigest(),
+                  idempotency_key=f"ml-eval-{bundle_id}-{_uuid()[:8]}")
+        session.add(job)
+        enqueue(session, job, settings)
+        session.commit()
+        return JSONResponse({"job_id": job.id, "bundle_id": bundle_id,
+                             "state": "queued"}, status_code=202)
+
+
 def _enqueue_ml_pass(request: Request, operation: str, recording_ids: list[str],
                      *, force: bool) -> JSONResponse:
     import hashlib as _hl
