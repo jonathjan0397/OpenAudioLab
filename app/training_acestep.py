@@ -109,8 +109,10 @@ class AceStepTrainingAdapter:
         return self._data(response)
 
     def auto_label_status(self, task_id: str) -> dict[str, Any]:
-        raw = self.transport.get_json(f"/v1/dataset/auto_label_status/{task_id}")
-        return raw or {}
+        raw = self.transport.get_json(f"/v1/dataset/auto_label_status/{task_id}") or {}
+        if isinstance(raw.get("data"), dict):
+            return raw["data"]
+        return raw
 
     def load_lora(self, lora_path: str, adapter_name: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {"lora_path": lora_path}

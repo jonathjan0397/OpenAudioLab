@@ -213,3 +213,12 @@ def test_eval_rejects_tampered_artifact(client, tmp_path) -> None:
     with client.app.state.db.session() as session:
         assert session.query(MlEvaluation).filter(
             MlEvaluation.bundle_id == bundle_id).count() == 0
+
+
+def test_auto_label_status_unwraps_data_envelope() -> None:
+    from app.training_acestep import AceStepTrainingAdapter
+
+    class _T:
+        def get_json(self, path):
+            return {"data": {"task_id": "t", "status": "completed"}}
+    assert AceStepTrainingAdapter(_T()).auto_label_status("t")["status"] == "completed"
