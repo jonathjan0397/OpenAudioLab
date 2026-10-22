@@ -133,7 +133,7 @@ export default function CreateWidget({
   });
   const [modelSelection, setModelSelection] = useState("ace-step-1.5-turbo");
   const [quote, setQuote] = useState<GenerationQuote | null>(null);
-  const visibleCatalog = (catalog.data || []).filter((m) => m.profiles[0]?.availability !== "disabled");
+  const visibleCatalog = (catalog.data || []).filter((m) => !["disabled", "unconfigured"].includes(m.profiles[0]?.availability ?? ""));
   useEffect(() => {
     if (!catalog.data) return;
     if (!visibleCatalog.some((m) => m.model_selection === modelSelection)) {
