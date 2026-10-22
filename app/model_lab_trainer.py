@@ -139,16 +139,24 @@ def main() -> int:
     if tensors_count <= 0:
         return _fail("ARTIFACT_INVALID: zero tensors")
 
+    config_path = artifact.parent / "adapter_config.json"
+    adapter_config = None
+    if config_path.is_file():
+        try:
+            adapter_config = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            adapter_config = None
     acceptance = {"steps": steps, "final_status": {k: status.get(k) for k in
                                                    ("current_epoch", "loss", "train_loss")
                                                    if status.get(k) is not None},
-                  "loadable": True, "tensors": tensors_count}
+                  "loadable": True, "tensors": tensors_count,
+                  "adapter_config": adapter_config}
     sample = work / "acceptance_sample.mp3"
     try:
         from .engine_acestep import AceStepAdapter
 
         gen = AceStepAdapter(transport, model=settings.acestep_model)
-        adapter.load_lora(str(artifact))
+        adapter.load_lora(str(artifact.parent))  # PEFT dir with adapter_config.json
         acceptance["lora_load"] = True
         first_caption = next((e.get("caption") for e in entries if e.get("caption")),
                              "instrumental acceptance test")

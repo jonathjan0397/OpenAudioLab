@@ -831,6 +831,10 @@ class TrainingWorker:
             key = f"ml/adapters/{attempt_id}/model.safetensors"
             self.storage.put(key, Path(export_path).read_bytes())
             result["artifact_key"] = key
+            cfg = (result.get("acceptance") or {}).get("adapter_config")
+            if cfg:
+                self.storage.put(f"ml/adapters/{attempt_id}/adapter_config.json",
+                                 json.dumps(cfg).encode("utf-8"))
         sample_path = (result.get("acceptance") or {}).get("sample_path")
         if sample_path and Path(sample_path).is_file():
             self.storage.put(f"ml/acceptance/{attempt_id}/sample.mp3",
@@ -1154,8 +1158,15 @@ class TrainingWorker:
             fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
                          "ARTIFACT_INTEGRITY", f"sha mismatch for {bundle_id}")
             return
-        lora_path = work / "lora" / "model.safetensors"
-        lora_path.write_bytes(bytes(body))
+        lora_dir = work / "lora"
+        lora_dir.mkdir(parents=True, exist_ok=True)
+        (lora_dir / "model.safetensors").write_bytes(bytes(body))
+        cfg_key = artifact_key.rsplit("/", 1)[0] + "/adapter_config.json"
+        try:
+            (lora_dir / "adapter_config.json").write_bytes(self.storage.get(cfg_key).body)
+        except Exception:
+            pass  # engine rejects without config; candidate pass will fail loudly
+        lora_path = lora_dir / "model.safetensors"
         samples: list[dict] = []
         stop = threading.Event()
         lost = {"lease": False}
@@ -1165,7 +1176,7 @@ class TrainingWorker:
             self.adapter.ensure_model(self.settings.acestep_model)
             for mode in ("baseline", "candidate"):
                 if mode == "candidate":
-                    self.adapter.load_lora(str(lora_path), f"ml-{bundle_id[:8]}")
+                    self.adapter.load_lora(str(lora_dir), f"ml-{bundle_id[:8]}")
                 else:
                     self.adapter.unload_lora()
                 for p in prompts:
