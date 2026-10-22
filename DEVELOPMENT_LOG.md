@@ -1390,3 +1390,29 @@ Checkpoint for owner approval:
   sample) when approved.
 - Open: is 159.48.242.68 one of ours? API 50555 remains public-by-design;
   netfilter persistence + optional TLS are owner decisions.
+
+## 2026-10-22 — First real VOICE LoRA trained on gpu1 (all Batch 4-5 gates proven)
+
+Pipeline: Wave-0 Alabama/Pass It On Down (6 tracks, ID3 parsed) -> approve +
+per-recording rights (recording/composition/singer_identity, evidence string)
+-> voice freeze blocked until lyrics existed on every track (gate caught 4
+missing) -> lrclib gave 2, `model_lab.enrich` (engine auto_label, 5Hz LM,
+decoder-offloaded) transcribed the other 4 as origin=lm with LM-revision
+provenance + suggested style claims (one LM caption claim clearly wrong —
+suggested-only design held) -> freeze kind=voice (splits, captions, exact
+lyric SHAs) -> train attempt ed05823a -> job SUCCEEDED:
+- PreprocessedTensorDataset: 6 samples; steps=12, epoch ladder saved
+- Export loadable via safe_open: 384 tensors; PEFT adapter_config persisted
+  next to the weights (base acestep-v15-turbo pinned)
+- /v1/lora/load (directory, not file — fixed) + one REAL inference: 15 s
+  acceptance sample stored at ml/acceptance/<attempt>/sample.mp3 (2,880,078 B)
+  with sha recorded; engine conditioning logged lyrics_text
+- Bundle candidate `alabama-poid-voice-v1-adapter` sha c88f14db…, budget
+  settled (used 0.0268 h, reserved 0), node released
+- Fixed: _scrub used the job-attempt id instead of the ML attempt id for the
+  ml-<8> workdir (leftover dirs cleaned; fix committed b73f701+)
+- Fixed along the way: auto_label_status data-envelope unwrap; ensure_llm init
+  flag; claims.value -> Text migration 0052; LM revision env pinned on gpu1.
+
+Budget note: single 6-track voice run cost 0.0148 h compute — house-v1 scale
+(200 tracks/15 epochs) will be scheduled with an explicit wall_hours recipe.
