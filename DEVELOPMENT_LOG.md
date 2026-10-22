@@ -1248,3 +1248,20 @@ manifest caption, 4 maintenance reaper cases). Live result: attempt 3751c216
 `done`, bundle `media-library-pilot-v2-adapter` registered as `candidate`
 (sha256 recorded, artifact under ml/adapters/), node back to `shared_ready`,
 budget reserved_usd back to 0.0 after reaping the orphaned attempt.
+
+## 2026-10-22 — Batch 0: local training root + stale scratch purge
+
+- New AI-server-local training tree `/Cold-Archive/OAL-Model-Training-A1/
+  {scratch,exports,models,catalog,review}` (user directive: whole-library
+  pipeline is a pure gpu1 operation; the hub is control plane only).
+- Purged 209 GB of stale scratch after verifying terminal state in prod (jobs
+  47262283/0c62e358/f4dc49c7 all `cancelled` legacy artist.train; voice_adapters
+  empty). Cold-Archive: 427 GB used -> 220 GB (3.2 TB free).
+- `run_house_workers.sh`: both workers' train workdir mounts repointed to
+  `OAL-Model-Training-A1/scratch`; discovered `OAL_TRAIN_MIN_FREE_MB` is a
+  *VRAM* gate (nvidia-smi memory.free), not disk — set a sane 10 GB floor
+  (previously 0 = ungated). A real disk-space gate (per-attempt estimate vs
+  df of the workdir) is scheduled for Batch 4.
+- Validation: workers recreated, both `healthy`, code revision aa0b3ed,
+  fleet node `oal-baseline-gpu1` registered `shared_ready`, container view of
+  the new scratch shows 3.2 TB free.

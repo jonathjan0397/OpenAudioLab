@@ -20,7 +20,7 @@ docker run -d --name oal-worker-hub --gpus all --network host --restart unless-s
   -e OAL_DEMUCS_DEVICE=cuda -e OAL_DEMUCS_PYTHON=/usr/local/bin/python \
   -e OAL_ENGINE_IDLE_STOP_SECONDS=600 -e OAL_REDIS_URL="$REDIS" -e OAL_SECRET_KEY="$SECRET" \
   -e OAL_STORAGE_BACKEND=local -e OAL_STORAGE_DIR=/data/oal \
-  -e OAL_TRAIN_WORKDIR=/opt/acestep/training-data -e OAL_TRAIN_MIN_FREE_MB=0 \
+  -e OAL_TRAIN_WORKDIR=/opt/acestep/training-data -e OAL_TRAIN_MIN_FREE_MB=10000 \
   -e OAL_TRAIN_HTTP_TIMEOUT_SECONDS=7200 -e OAL_ENGINE_AUTOSTART=1 \
   -e OAL_MODEL_LAB_TRAIN_COMMAND="python3 -m app.model_lab_trainer" \
   -e OAL_PREMIUM_PROFILES_ENABLED=sft-quality-v1,xl-sft-quality-v1,xl-turbo-fast-v1 \
@@ -33,7 +33,7 @@ docker run -d --name oal-worker-hub --gpus all --network host --restart unless-s
   -e OAL_WORKER_ROLE=engine_worker,audio_worker -e OAL_WORKER_TIER=baseline \
   -v /mnt/oal-storage:/data/oal -v oal-acestep-cache:/root/.cache \
   -v /mnt/truenas:/mnt/truenas:ro \
-  -v /Cold-Archive/oal-train-gpu0:/opt/acestep/training-data \
+  -v /Cold-Archive/OAL-Model-Training-A1/scratch:/opt/acestep/training-data \
   -v /Cold-Archive/oal-models/acestep-v15-sft:/opt/acestep/checkpoints/acestep-v15-sft \
   -v /Cold-Archive/oal-models/acestep-v15-xl-sft:/opt/acestep/checkpoints/acestep-v15-xl-sft \
   -v /Cold-Archive/oal-models/acestep-v15-xl-turbo:/opt/acestep/checkpoints/acestep-v15-xl-turbo \
@@ -47,14 +47,14 @@ docker run -d --name oal-worker-gpu1 --gpus all --restart unless-stopped \
   -e OAL_DEMUCS_DEVICE=cuda -e OAL_DEMUCS_PYTHON=/usr/local/bin/python \
   -e OAL_ENGINE_IDLE_STOP_SECONDS=600 -e OAL_REDIS_URL="$REDIS" -e OAL_SECRET_KEY="$SECRET" \
   -e OAL_STORAGE_BACKEND=local -e OAL_STORAGE_DIR=/data/oal \
-  -e OAL_TRAIN_WORKDIR=/opt/acestep/training-data-gpu1 -e OAL_TRAIN_MIN_FREE_MB=0 \
+  -e OAL_TRAIN_WORKDIR=/opt/acestep/training-data-gpu1 -e OAL_TRAIN_MIN_FREE_MB=10000 \
   -e OAL_TRAIN_HTTP_TIMEOUT_SECONDS=7200 -e OAL_ENGINE_AUTOSTART=0 \
   -e OAL_MODEL_LAB_TRAIN_COMMAND="python3 -m app.model_lab_trainer" \
   -e OAL_WORKER_ID=oal-training-gpu1 -e OAL_NODE_KEY=oal-baseline-gpu1 \
   -e OAL_WORKER_ROLE=training_worker -e OAL_WORKER_TIER=baseline \
   -v /mnt/oal-storage:/data/oal -v oal-acestep-cache-gpu1:/root/.cache \
   -v /mnt/truenas:/mnt/truenas:ro \
-  -v /Cold-Archive/oal-train-gpu1:/opt/acestep/training-data-gpu1 \
+  -v /Cold-Archive/OAL-Model-Training-A1/scratch:/opt/acestep/training-data-gpu1 \
    "$IMAGE"
 
 # Drafting lyrics LLM (Qwen3-4B): its OWN CPU-only container on this host, kept OFF
