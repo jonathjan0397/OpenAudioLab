@@ -1212,3 +1212,39 @@ No migration. Validation: 388 backend tests (2 new), 17 vitest, clean build.
   `OAL_MODEL_LAB_TRAIN_COMMAND` and mounts `/mnt/truenas` read-only.
 - Validation: 427 backend tests (4 new in tests/test_model_lab_truenas.py),
   17 frontend tests, build clean.
+
+## 2026-10-22 — First real vertical-slice training run (live, on GPU)
+
+Ran the full slice end to end against the real ACE-Step engine on ai-server01:
+admin-selected TrueNAS audio -> review -> freeze -> budgeted attempt -> GPU
+train -> export -> registered candidate bundle. Fixed the defects the live run
+exposed:
+
+- Worker GPU pin: the baseline training worker was pinned to physical GPU 1,
+  which the Strata LLM engine occupies (22–24 GB). `run_house_workers.sh` now
+  pins the training worker to free GPU 0 (`CUDA_VISIBLE_DEVICES=0`).
+- Fleet-node fresh-start reset: a recreated worker inherited a stale `active`
+  node state on a dead attempt, so new attempts could not claim the node
+  (`NODE_NOT_RESERVED`). `register_node(..., reset=True)` +
+  `TrainingWorker.register(reset=True)` on start clears any stale exclusive
+  lease (a fresh process cannot hold one).
+- Trainer error surfacing: `settle_attempt` crashed on `code + ":"` when the
+  trainer exited non-zero with no outcome code (`code=None`); now reports
+  `rc=` and logs the trainer stderr tail.
+- ACE-Step per-sample labels: the engine requires `<stem>.caption.txt` next to
+  each audio file (the loader strips the audio extension first). Frozen datasets
+  now embed a deterministic per-recording caption (artist/title/genre, else the
+  filename stem — no LLM, invariant 1) via `deterministic_caption()`, and the
+  trainer writes the caption file. First attempt used `<name>.mp3.caption.txt`
+  (wrong); corrected to `<stem>.caption.txt`.
+- Budget orphan reaper: a worker killed mid-run left an attempt `running` and
+  its reservation held forever (budget leaked 0.25). `app/maintenance.py`
+  `reap_orphaned_attempts` (runs each 600 s maintenance tick, independent of
+  workers) fails `running`/unsettled attempts with no fresh active node and
+  settles them, releasing the reservation.
+
+Validation: 434 backend tests (8 new: fleet-node reset, deterministic caption,
+manifest caption, 4 maintenance reaper cases). Live result: attempt 3751c216
+`done`, bundle `media-library-pilot-v2-adapter` registered as `candidate`
+(sha256 recorded, artifact under ml/adapters/), node back to `shared_ready`,
+budget reserved_usd back to 0.0 after reaping the orphaned attempt.
