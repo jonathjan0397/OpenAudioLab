@@ -1416,3 +1416,28 @@ lyric SHAs) -> train attempt ed05823a -> job SUCCEEDED:
 
 Budget note: single 6-track voice run cost 0.0148 h compute — house-v1 scale
 (200 tracks/15 epochs) will be scheduled with an explicit wall_hours recipe.
+
+## 2026-10-22 — Wave 1 checkpoint (5,010 files scanned, enrichment complete)
+
+- Scan: 589 artist folders (5,010 files) via 592 resumable worker jobs; all
+  succeeded after one requeue (see below). Catalog now 5,268 recordings:
+  5,194 parsed / 69 suspect / 5 unparsed(legacy pilot rows).
+- Bug caught by scale, fixed + deployed:
+  - ml_recordings.format varchar(20) overflowed on ffprobe multi-container
+    names ("mov,mp4,m4a,…") — migration 0053 widens to 120 + probe caps it;
+    the 6 failed scan jobs were requeued and completed.
+  - Junk ID3 genres ("MP3 1" from Windows Media Player rips, 254 rows) now
+    rejected at parse time and filtered at caption-build time (stored raw rows
+    stay untouched; no migration needed).
+  - ffprobe timeouts tightened to 25s after the hung-probe lesson.
+- Verify pass (MusicBrainz): 40 suspects checked — all unmatched (SFX/remix
+  effect packs correctly stay quarantined); 3 provider_outage (503) will
+  retry on the next pass; 0 claims (no garbage entered the catalog).
+- Lyrics pass (lrclib, ~3.5 h polite sweep): 3,446 recordings gained verbatim
+  site lyrics (+11 sidecar +4 lm) -> 65.7% of the catalog is voice-trainable
+  today; 1,807 remain lyricless (instrumental/score/SFX or unmatched; LM
+  transcription available per-dataset at prep time).
+- Budget: 0.0268 h used, $0 spent. Disk: 3.2 TB free. Queue single-tenant
+  (incident host still iptables-blocked, creds rotated).
+
+AWAITING OWNER APPROVAL: Wave 2 (next ~5k artists, alphabetical continuation).
