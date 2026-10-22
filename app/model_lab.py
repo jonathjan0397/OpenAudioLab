@@ -73,7 +73,7 @@ def probe_file(path: Path, ffprobe_bin: str = "ffprobe") -> dict:
     dur = fmt.get("duration")
     return {
         "duration_seconds": float(dur) if dur else None,
-        "format": fmt.get("format_name"),
+        "format": (fmt.get("format_name") or "")[:120] or None,
         "sample_rate": stream.get("sample_rate"),
         "channels": stream.get("channels"),
     }

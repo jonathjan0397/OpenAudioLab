@@ -921,7 +921,7 @@ class MlRecording(Base):
     duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     sample_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
     channels: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    format: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    format: Mapped[str | None] = mapped_column(String(120), nullable=True)
     probe_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # clipping/silence/quality
     vocal_status: Mapped[str] = mapped_column(String(12), default="unknown")  # vocal|instrumental|unknown
     review_required: Mapped[bool] = mapped_column(Boolean, default=False)
