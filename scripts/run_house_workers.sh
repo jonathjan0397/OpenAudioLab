@@ -44,6 +44,7 @@ docker run -d --name oal-worker-hub --gpus all --network host --restart unless-s
 docker run -d --name oal-worker-gpu1 --gpus all --restart unless-stopped \
   -e CUDA_VISIBLE_DEVICES=0 \
   -e ACESTEP_API_HOST=0.0.0.0 -e ACESTEP_API_PORT=8001 -e ACESTEP_DEVICE=cuda:0 -e ACESTEP_INIT_LLM=true \
+  -e ACESTEP_LM_BACKEND=pt -e ACESTEP_LM_MODEL_PATH=acestep-5Hz-lm-1.7B \
   -e OAL_ACESTEP_BASE_URL=http://127.0.0.1:8001 -e OAL_APP_DIR=/srv/openaudiolab/code \
   -e OAL_BACKEND_URL=http://10.203.0.1:50555 -e OAL_DATABASE_URL="$DB" \
   -e OAL_DEMUCS_DEVICE=cuda -e OAL_DEMUCS_PYTHON=/usr/local/bin/python \
