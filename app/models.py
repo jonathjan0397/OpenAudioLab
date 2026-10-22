@@ -440,6 +440,23 @@ class SiteSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class GpuCostLedger(Base):
+    """Durable per-instance cost entries: opened on deploy, closed on stop/destroy."""
+
+    __tablename__ = "gpu_cost_ledger"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    vast_instance_id: Mapped[str] = mapped_column(String(60), index=True)
+    purpose: Mapped[str] = mapped_column(String(40), default="auto")
+    dph: Mapped[float | None] = mapped_column(Float, nullable=True)
+    state: Mapped[str] = mapped_column(String(10), default="open")  # open|closed
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String(20), default="deploy")  # deploy|reconcile
+
+
 class FleetNode(Base):
     """Durable GPU-node identity surviving instance churn (exclusive-training gate)."""
 

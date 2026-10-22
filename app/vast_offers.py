@@ -88,6 +88,7 @@ def normalize(raw: dict) -> dict:
         "download_mbps": num("inet_down", "download_speed") or None,
         "upload_mbps": num("inet_up", "upload_speed") or None,
         "disk_gb": num("disk_space", "hdd_total_gb"),
+        "ram_gb": round(num("cpu_ram") / 1024, 1) if num("cpu_ram") else None,
         "dph": num("dph_total", "dph"),
         "compute_cap": cc,
         "verified": bool(raw.get("verified")) if raw.get("verified") is not None else None,
@@ -108,6 +109,9 @@ def criteria_defaults() -> dict:
         "min_upload_mbps": None,
         "model_vram_floor_gb": 0,
         "checkpoint_gb": 0.0,
+        "gpu_model": None,
+        "min_disk_gb": None,
+        "min_ram_gb": None,
     }
 
 
@@ -133,6 +137,15 @@ def ineligible_reason(offer: dict, crit: dict) -> str | None:
         return "CUDA_UNSUPPORTED"
     if offer["compute_cap"] is not None and offer["compute_cap"] < crit["min_compute_cap"]:
         return "INCOMPATIBLE_GPU"
+    if crit.get("gpu_model") and (not offer["gpu"]
+                                  or crit["gpu_model"].lower() not in offer["gpu"].lower()):
+        return "GPU_MODEL_EXCLUDED"
+    if crit.get("min_disk_gb") is not None and (offer["disk_gb"] is None
+                                                or offer["disk_gb"] < crit["min_disk_gb"]):
+        return "DISK_BELOW_MINIMUM"
+    if crit.get("min_ram_gb") is not None and (offer["ram_gb"] is None
+                                               or offer["ram_gb"] < crit["min_ram_gb"]):
+        return "RAM_BELOW_MINIMUM"
     if crit["countries"] and offer["country"] not in crit["countries"]:
         return "OUTSIDE_REGION"
     if crit["verified_only"] and offer["verified"] is False:

@@ -1104,3 +1104,22 @@ No migration. Validation: 388 backend tests (2 new), 17 vitest, clean build.
 - Dockerfile.worker gains the BYOL singer-identity layer (pinned weights baked,
   OAL_BYOL_MODEL_PATH="" keeps it config-gated off until calibration).
 - Validation: 405 backend tests pass (7 new in tests/test_fleet_nodes.py).
+
+## 2026-10-22 — Pipeline M3: offer search, presets, cost ledger (feat/model-lab-pipeline)
+
+- Offer search gains `gpu_model` (substring), `min_disk` and `min_ram` filters
+  (server-side bundle query + client-side gate with machine-readable
+  GPU_MODEL_EXCLUDED / DISK_BELOW_MINIMUM / RAM_BELOW_MINIMUM exclusions);
+  normalize now exposes `ram_gb` (cpu_ram MB -> GB).
+- Named offer-search presets persist in site_settings (`gpu_offer_presets`,
+  unique-name + params validation, 1900-char blob guard):
+  GET/PUT /admin/gpu-fleet/presets.
+- Deployment form: POST /admin/gpu-fleet/deploy records a durable
+  MANUAL_ADMIN GpuDeployment (state REQUESTED until a worker registers) plus a
+  pending VastInstance and an open ledger entry; no provider create is claimed
+  without a funded rental.
+- Durable cost ledger (migration 0046, app/gpu_ledger.py): entries open on
+  deploy, close on stop/destroy with exact hours x dph settlement; restart
+  closes and reopens (source=reconcile); close is idempotent.
+  GET /admin/gpu-fleet/ledger exposes entries + closed totals by purpose.
+- Validation: 411 backend tests pass (6 new in tests/test_gpu_ledger.py).
