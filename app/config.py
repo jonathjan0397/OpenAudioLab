@@ -163,6 +163,7 @@ class Settings(BaseSettings):
     model_lab_pilot_max_hours: float = 6.0
     model_lab_pilot_max_spend_usd: float = 3.0
     model_lab_train_command: str = ""  # GPU trainer command; empty = no trainer wired
+    model_lab_merge_command: str = ""  # GPU merge command; empty = merge unavailable
     # Calibration default, not a scientifically established voice-accuracy claim.
     voice_similarity_threshold: float = 0.5
     voice_max_recording_seconds: int = 600

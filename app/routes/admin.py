@@ -3010,3 +3010,99 @@ def admin_model_lab_attempts(request: Request) -> JSONResponse:
         rows = session.execute(
             select(MlTrainingAttempt).order_by(MlTrainingAttempt.created_at)).scalars().all()
         return JSONResponse({"attempts": [attempt_view(a) for a in rows]})
+
+
+# ------------------------------------------------------ Model Lab merges (M5)
+
+class MlRecipeCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    base_model: str = Field(min_length=1, max_length=120)
+    adapter_ids: list[str]
+    method: str = "slerp"
+    params: dict = Field(default_factory=dict)
+
+
+@router.post("/admin/model-lab/merge-recipes")
+def admin_model_lab_recipe_create(body: MlRecipeCreate, request: Request) -> JSONResponse:
+    from ..model_lab_merge import MergeError, create_recipe
+
+    with request.app.state.db.session() as session:
+        try:
+            r = create_recipe(session, body.name, body.base_model, body.adapter_ids,
+                              body.method, body.params)
+        except MergeError as exc:
+            raise ApiError(422, "RECIPE_INVALID", str(exc)) from exc
+        return JSONResponse({"id": r.id, "name": r.name, "method": r.method,
+                             "base_model": r.base_model,
+                             "adapter_ids": r.adapter_ids_json}, status_code=201)
+
+
+@router.get("/admin/model-lab/merge-recipes")
+def admin_model_lab_recipes(request: Request) -> JSONResponse:
+    from ..models import MlMergeRecipe
+
+    with request.app.state.db.session() as session:
+        rows = session.execute(select(MlMergeRecipe).order_by(MlMergeRecipe.created_at)).scalars().all()
+        return JSONResponse({"recipes": [
+            {"id": r.id, "name": r.name, "base_model": r.base_model, "method": r.method,
+             "adapter_ids": r.adapter_ids_json} for r in rows]})
+
+
+@router.post("/admin/model-lab/merge-recipes/{recipe_id}/run")
+def admin_model_lab_recipe_run(recipe_id: str, request: Request) -> JSONResponse:
+    from ..model_lab_merge import MergeError, run_merge
+    from ..models import MlMergeRecipe
+
+    with request.app.state.db.session() as session:
+        recipe = session.get(MlMergeRecipe, recipe_id)
+        if recipe is None:
+            raise ApiError(404, "NOT_FOUND", "merge recipe not found")
+        try:
+            bundle = run_merge(session, recipe, request.app.state.settings)
+        except MergeError as exc:
+            code = "MERGE_UNAVAILABLE" if str(exc).startswith("MERGE_UNAVAILABLE") else "MERGE_FAILED"
+            raise ApiError(409 if code == "MERGE_UNAVAILABLE" else 502, code, str(exc)) from exc
+        return JSONResponse({"bundle": bundle.id, "version": bundle.version,
+                             "state": bundle.state}, status_code=201)
+
+
+@router.get("/admin/model-lab/bundles")
+def admin_model_lab_bundles(request: Request) -> JSONResponse:
+    from ..model_lab_merge import bundle_view
+    from ..models import MlModelBundle
+
+    with request.app.state.db.session() as session:
+        rows = session.execute(select(MlModelBundle).order_by(MlModelBundle.created_at)).scalars().all()
+        return JSONResponse({"bundles": [bundle_view(b) for b in rows]})
+
+
+@router.post("/admin/model-lab/bundles/{bundle_id}/release")
+def admin_model_lab_bundle_release(bundle_id: str, request: Request) -> JSONResponse:
+    from ..model_lab_merge import MergeError, transition_bundle
+    from ..models import MlModelBundle
+
+    with request.app.state.db.session() as session:
+        bundle = session.get(MlModelBundle, bundle_id)
+        if bundle is None:
+            raise ApiError(404, "NOT_FOUND", "bundle not found")
+        try:
+            transition_bundle(session, bundle, "release")
+        except MergeError as exc:
+            raise ApiError(409, "BUNDLE_STATE", str(exc)) from exc
+        return JSONResponse({"id": bundle.id, "state": bundle.state})
+
+
+@router.post("/admin/model-lab/bundles/{bundle_id}/retire")
+def admin_model_lab_bundle_retire(bundle_id: str, request: Request) -> JSONResponse:
+    from ..model_lab_merge import MergeError, transition_bundle
+    from ..models import MlModelBundle
+
+    with request.app.state.db.session() as session:
+        bundle = session.get(MlModelBundle, bundle_id)
+        if bundle is None:
+            raise ApiError(404, "NOT_FOUND", "bundle not found")
+        try:
+            transition_bundle(session, bundle, "retire")
+        except MergeError as exc:
+            raise ApiError(409, "BUNDLE_STATE", str(exc)) from exc
+        return JSONResponse({"id": bundle.id, "state": bundle.state})
