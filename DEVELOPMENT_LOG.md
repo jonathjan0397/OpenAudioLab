@@ -1059,3 +1059,27 @@ a per-profile website display name in the Model Pricing editor (stored in the
 model_pricing SiteSetting JSON, 1-120 chars); /model-selections emits it per
 profile and as the release-level card name, falling back to the catalog label.
 No migration. Validation: 388 backend tests (2 new), 17 vitest, clean build.
+
+## 2026-10-22 — Pipeline M1: execution repairs (feat/model-lab-pipeline)
+
+- Fixed `model_lab.train` worker NameErrors (module-level `subprocess`, orchestration
+  `complete_attempt` import); the success path previously always crashed.
+- Long runs now use `_supervised_run`: continuous lease heartbeat every 10 s,
+  cooperative cancellation (SIGTERM), hard wall deadline (SIGKILL), lease-loss fencing.
+- Attempts stay `queued` until the worker claims them; `running` is set post-claim.
+- Budget reservations (migration 0044): `ml_budgets.reserved_usd` +
+  `ml_training_attempts.reserved_usd/settled`. Headroom = max − (spent + reserved +
+  estimate); settlement is idempotent and releases the reservation on every terminal
+  path (including TRAINER_UNAVAILABLE). A successful trainer no-op without
+  artifact_key+sha256 fails as TRAINING_NO_ARTIFACT.
+- Merge builds moved to the worker: `POST /merge-recipes/{id}/run` returns 202 with a
+  `building` bundle + `model_lab.merge` job; recipes accept zero/one/many adapters
+  (zero = anchor-only control). New bundle states `building`/`failed`.
+- Promotion gate now requires a satisfactory verdict (win/pass), disqualifies `fail`,
+  and requires artifact integrity (sha256 or artifact_key); `promote_channel` enforces
+  the gate transactionally.
+- Vast lifecycle switched to the documented contract: PUT /instances/{id}/
+  {"state": running|shutdown} and DELETE for destroy (was undocumented POST action/).
+- `swappiness_gate`: sw==0 no longer bypasses capacity/budget hard gates.
+- Validation: 398 backend tests pass (8 new in tests/test_model_lab_m1_repairs.py);
+  m5/m6/m16/gpu-fleet tests updated for the async-merge and lifecycle contracts.

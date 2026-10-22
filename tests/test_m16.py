@@ -49,13 +49,14 @@ def test_admin_vast_action_stop_and_destroy(client, monkeypatch) -> None:
     )
     stopped = client.post("/api/v1/admin/vast/instances/22222/action", json={"action": "stop"})
     assert stopped.status_code == 200
-    assert calls[0][2] == {"action_type": "stop"}
+    assert calls[0][0] == "PUT" and calls[0][2] == {"state": "shutdown"}
     with client.app.state.db.session() as session:
         rec = session.query(VastInstance).filter_by(vast_instance_id="22222").one()
         assert rec.state == "stopped"
 
     destroyed = client.post("/api/v1/admin/vast/instances/22222/action", json={"action": "destroy"})
     assert destroyed.status_code == 200
+    assert calls[-1][0] == "DELETE" and calls[-1][1] == "/instances/22222/"
     with client.app.state.db.session() as session:
         assert session.query(VastInstance).filter_by(vast_instance_id="22222").one_or_none() is None
 

@@ -1066,6 +1066,7 @@ class MlBudget(Base):
     max_spend_usd: Mapped[float] = mapped_column(Float, default=3.0)
     used_hours: Mapped[float] = mapped_column(Float, default=0.0)
     spent_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    reserved_usd: Mapped[float] = mapped_column(Float, default=0.0)  # atomic pre-dispatch commitments
     state: Mapped[str] = mapped_column(String(12), default="open")  # open|exhausted|closed
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -1085,6 +1086,8 @@ class MlTrainingAttempt(Base):
     recipe_json: Mapped[dict] = mapped_column(JSON, default=dict)
     hours: Mapped[float | None] = mapped_column(Float, nullable=True)
     spend_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reserved_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    settled: Mapped[bool] = mapped_column(Boolean, default=False)
     error: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

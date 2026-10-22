@@ -40,7 +40,8 @@ def _approved_recording(client, review="approved"):
 def test_budget_defaults_and_validation(client) -> None:
     b = client.get("/api/v1/admin/model-lab/budget").json()
     assert b == {"name": "pilot", "max_hours": 6.0, "max_spend_usd": 3.0,
-                 "used_hours": 0.0, "spent_usd": 0.0, "state": "open"}
+                 "used_hours": 0.0, "spent_usd": 0.0, "reserved_usd": 0.0,
+                 "state": "open"}
     bad = client.put("/api/v1/admin/model-lab/budget", json={"max_hours": -1})
     assert bad.status_code == 422
     r = client.put("/api/v1/admin/model-lab/budget", json={"max_hours": 2.0})

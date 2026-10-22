@@ -953,7 +953,7 @@ def gpu_fleet_worker_stop(worker_id: str, request: Request, force: bool = False)
     inst, busy = _worker_instance_and_busy(request, worker_id)
     if busy and not force:
         raise ApiError(409, "WORKER_BUSY", "Worker has a running attempt; use ?force=true to stop anyway.")
-    _vast_request(request, "POST", f"/instances/{inst.vast_instance_id}/action/", {"action_type": "stop"})
+    _vast_lifecycle(request, inst.vast_instance_id, "stop")
     with request.app.state.db.session() as session:
         rec = session.get(VastInstance, inst.id)
         if rec is not None:
@@ -971,8 +971,8 @@ def gpu_fleet_worker_restart(worker_id: str, request: Request, force: bool = Fal
     inst, busy = _worker_instance_and_busy(request, worker_id)
     if busy and not force:
         raise ApiError(409, "WORKER_BUSY", "Worker has a running attempt; use ?force=true to restart anyway.")
-    _vast_request(request, "POST", f"/instances/{inst.vast_instance_id}/action/", {"action_type": "stop"})
-    _vast_request(request, "POST", f"/instances/{inst.vast_instance_id}/action/", {"action_type": "start"})
+    _vast_lifecycle(request, inst.vast_instance_id, "stop")
+    _vast_lifecycle(request, inst.vast_instance_id, "start")
     with request.app.state.db.session() as session:
         rec = session.get(VastInstance, inst.id)
         if rec is not None:
@@ -989,7 +989,7 @@ def gpu_fleet_worker_destroy(worker_id: str, request: Request, force: bool = Fal
     inst, busy = _worker_instance_and_busy(request, worker_id)
     if busy and not force:
         raise ApiError(409, "WORKER_BUSY", "Never silently destroy a worker with an in-progress task.")
-    _vast_request(request, "POST", f"/instances/{inst.vast_instance_id}/action/", {"action_type": "destroy"})
+    _vast_lifecycle(request, inst.vast_instance_id, "destroy")
     with request.app.state.db.session() as session:
         rec = session.get(VastInstance, inst.id)
         if rec is not None:
@@ -1676,6 +1676,16 @@ class VastActionRequest(BaseModel):
     action: str = Field(pattern=r"^(start|stop|destroy)$")
 
 
+def _vast_lifecycle(request: Request, instance_id: str, action: str) -> dict:
+    """Documented v0 lifecycle: PUT /instances/{id}/ with state; DELETE destroys."""
+    if action == "destroy":
+        return _vast_request(request, "DELETE", f"/instances/{instance_id}/")
+    state = {"start": "running", "stop": "shutdown"}.get(action)
+    if state is None:
+        raise ApiError(422, "VAST_ACTION_UNKNOWN", f"unknown lifecycle action: {action}")
+    return _vast_request(request, "PUT", f"/instances/{instance_id}/", {"state": state})
+
+
 def _vast_request(request: Request, method: str, path: str, json_body: dict | None = None):
     import httpx
 
@@ -1736,10 +1746,7 @@ def admin_vast_instance_action(
 ) -> JSONResponse:
     from ..models import VastInstance
 
-    _vast_request(
-        request, "POST", f"/instances/{vast_instance_id}/action/",
-        {"action_type": payload.action},
-    )
+    _vast_lifecycle(request, vast_instance_id, payload.action)
     with request.app.state.db.session() as session:
         rec = session.execute(
             select(VastInstance).where(VastInstance.vast_instance_id == vast_instance_id)
@@ -3003,7 +3010,9 @@ def admin_model_lab_dataset_train(dataset_id: str, request: Request) -> JSONResp
             raise ApiError(404, "NOT_FOUND", "dataset not found")
         budget = get_budget(session, request.app.state.settings)
         try:
-            attempt = open_attempt(session, ds, budget)
+            attempt = open_attempt(session, ds, budget,
+                                   est_hours=request.app.state.settings.model_lab_est_hours,
+                                   est_spend_usd=request.app.state.settings.model_lab_est_spend_usd)
             job = attach_job(session, attempt, "model-lab", request.app.state.settings)
             enqueue(session, job, request.app.state.settings)
             session.commit()
@@ -3062,20 +3071,36 @@ def admin_model_lab_recipes(request: Request) -> JSONResponse:
 
 @router.post("/admin/model-lab/merge-recipes/{recipe_id}/run")
 def admin_model_lab_recipe_run(recipe_id: str, request: Request) -> JSONResponse:
-    from ..model_lab_merge import MergeError, run_merge
-    from ..models import MlMergeRecipe
+    from ..model_lab_merge import MergeError, start_merge_build
+    from ..models import MlMergeRecipe, new_uuid as _uuid
+    from ..orchestration import enqueue
 
     with request.app.state.db.session() as session:
         recipe = session.get(MlMergeRecipe, recipe_id)
         if recipe is None:
             raise ApiError(404, "NOT_FOUND", "merge recipe not found")
         try:
-            bundle = run_merge(session, recipe, request.app.state.settings)
+            bundle = start_merge_build(session, recipe, request.app.state.settings)
         except MergeError as exc:
-            code = "MERGE_UNAVAILABLE" if str(exc).startswith("MERGE_UNAVAILABLE") else "MERGE_FAILED"
-            raise ApiError(409 if code == "MERGE_UNAVAILABLE" else 502, code, str(exc)) from exc
+            raise ApiError(409, "MERGE_UNAVAILABLE", str(exc)) from exc
+        import hashlib as _hl
+        import json as _json
+
+        request_json = {"bundle_id": bundle.id, "recipe_id": recipe.id,
+                        "base_model": recipe.base_model,
+                        "adapter_ids": list(recipe.adapter_ids_json),
+                        "method": recipe.method}
+        job = __import__("app.models", fromlist=["Job"]).Job(
+            id=_uuid(), owner_id="model-lab", operation="model_lab.merge",
+            model_id=request.app.state.settings.train_queue_model_id,
+            model_revision="model-lab", status="queued", request_json=request_json,
+            request_hash=_hl.sha256(_json.dumps(request_json, sort_keys=True).encode()).hexdigest(),
+            idempotency_key=f"ml-merge-{bundle.id}")
+        session.add(job)
+        enqueue(session, job, request.app.state.settings)
+        session.commit()
         return JSONResponse({"bundle": bundle.id, "version": bundle.version,
-                             "state": bundle.state}, status_code=201)
+                             "state": bundle.state, "job_id": job.id}, status_code=202)
 
 
 @router.get("/admin/model-lab/bundles")

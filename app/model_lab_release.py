@@ -34,15 +34,24 @@ def record_evaluation(session, bundle_id: str, kind: str, scores: dict,
     return ev
 
 
+SATISFACTORY_VERDICTS = ("win", "pass")
+
+
 def promotion_gate(session, bundle: MlModelBundle) -> dict:
-    """Machine-readable readiness: released state + at least one verdict."""
+    """Machine-readable readiness: released state + satisfactory verdict +
+    artifact integrity. A `fail` verdict disqualifies regardless of others."""
     reasons: list[str] = []
     if bundle.state != "released":
         reasons.append(f"bundle is {bundle.state}, not released")
     evals = session.execute(
         select(MlEvaluation).where(MlEvaluation.bundle_id == bundle.id)).scalars().all()
-    if not any(e.verdict for e in evals):
-        reasons.append("no evaluation verdict recorded")
+    verdicts = [e.verdict for e in evals if e.verdict]
+    if "fail" in verdicts:
+        reasons.append("a failing evaluation verdict blocks promotion")
+    elif not any(v in SATISFACTORY_VERDICTS for v in verdicts):
+        reasons.append("no satisfactory evaluation verdict (win/pass) recorded")
+    if not (bundle.sha256 or bundle.artifact_key):
+        reasons.append("bundle has no artifact integrity (sha256 or artifact_key)")
     return {"ready": not reasons, "reasons": reasons, "evaluations": len(evals)}
 
 
@@ -64,6 +73,9 @@ def promote_channel(session, name: str, bundle_id: str) -> MlReleaseChannel:
     if bundle.state != "released":
         raise ReleaseError(f"bundle {bundle.name} {bundle.version} is {bundle.state}; "
                            "only released bundles can be promoted")
+    gate = promotion_gate(session, bundle)
+    if not gate["ready"]:
+        raise ReleaseError("promotion gate: " + "; ".join(gate["reasons"]))
     channel = get_or_create_channel(session, name)
     channel.bundle_id = bundle.id
     session.commit()
