@@ -1123,3 +1123,17 @@ No migration. Validation: 388 backend tests (2 new), 17 vitest, clean build.
   closes and reopens (source=reconcile); close is idempotent.
   GET /admin/gpu-fleet/ledger exposes entries + closed totals by purpose.
 - Validation: 411 backend tests pass (6 new in tests/test_gpu_ledger.py).
+
+## 2026-10-22 — Pipeline M4: vertical slice (feat/model-lab-pipeline)
+
+- Training success now runs the full slice tail on the worker: export (trainer
+  `export_path` copied to `ml/adapters/<attempt>/model.safetensors` in storage),
+  engine reload (config-gated `OAL_MODEL_LAB_RELOAD_ENABLED`; recorded as
+  ok|skipped|failed in the result), and registration
+  (`register_trained_bundle` -> immutable `kind=adapter` candidate bundle with
+  dataset/frozen-sha provenance).
+- tests/test_model_lab_m4_slice.py drives the whole chain through the API and
+  the real worker handler: import -> review -> freeze -> budget reservation ->
+  dispatch -> claim -> train -> export -> register -> node released to
+  shared_ready -> budget settled exactly once.
+- Validation: 412 backend tests pass.

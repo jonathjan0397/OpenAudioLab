@@ -691,8 +691,8 @@ class TrainingWorker:
         return {}
 
     def _model_lab_train(self, job_id: str, attempt_id: str, lease_token: str) -> None:
-        from .model_lab_train import settle_attempt
-        from .models import MlBudget, MlTrainingAttempt
+        from .model_lab_train import register_trained_bundle, settle_attempt
+        from .models import MlBudget, MlDataset, MlTrainingAttempt
 
         command = (self.settings.model_lab_train_command or "").strip()
         if not command:
@@ -762,6 +762,25 @@ class TrainingWorker:
             fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
                          code or "TRAINING_FAILED", (stderr or code or "trainer failed")[-280:])
             return
+        # Slice tail: export -> reload -> register (vertical slice M4).
+        export_path = result.get("export_path")
+        if export_path and Path(export_path).is_file():
+            key = f"ml/adapters/{attempt_id}/model.safetensors"
+            self.storage.put(key, Path(export_path).read_bytes())
+            result["artifact_key"] = key
+        result["reload"] = "skipped"
+        if self.settings.model_lab_reload_enabled and export_path:
+            try:
+                self._load_fresh(export_path)
+                result["reload"] = "ok"
+            except EngineError as exc:
+                result["reload"] = f"failed: {exc}"
+        with self.db.session() as session:
+            attempt = session.get(MlTrainingAttempt, request.get("attempt_id"))
+            dataset = session.get(MlDataset, attempt.dataset_id) if attempt else None
+            if attempt is not None and dataset is not None:
+                bundle = register_trained_bundle(session, attempt, dataset, result)
+                result["bundle_id"] = bundle.id
         complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
                          lease_token, ("train-result", json.dumps(result).encode()),
                          synthetic=False,

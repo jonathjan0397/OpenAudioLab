@@ -171,6 +171,7 @@ class Settings(BaseSettings):
     node_key: str = ""  # durable fleet-node identity (default: hostname)
     node_stale_seconds: int = 180  # supervisor heartbeat staleness
     byol_model_path: str = ""  # singer-identity encoder weights; empty = BYOL off
+    model_lab_reload_enabled: bool = False  # load trained adapters into the engine
     # Calibration default, not a scientifically established voice-accuracy claim.
     voice_similarity_threshold: float = 0.5
     voice_max_recording_seconds: int = 600

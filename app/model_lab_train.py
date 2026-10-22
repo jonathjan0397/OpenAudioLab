@@ -175,6 +175,26 @@ def settle_attempt(session, attempt: MlTrainingAttempt, *, state: str,
 complete_attempt = settle_attempt
 
 
+def register_trained_bundle(session, attempt: MlTrainingAttempt, dataset: MlDataset,
+                            result: dict, *, base_model: str = "ace-step-1.5"):
+    """Register a trained adapter as an immutable candidate bundle (slice tail)."""
+    from .models import MlModelBundle
+
+    bundle = MlModelBundle(id=new_uuid(),
+                           name=result.get("name") or f"{dataset.name}-adapter",
+                           version="v1", kind="adapter", base_model=base_model,
+                           state="candidate",
+                           artifact_key=result.get("artifact_key"),
+                           sha256=result.get("sha256"),
+                           bundle_json={"attempt_id": attempt.id, "dataset_id": dataset.id,
+                                        "frozen_sha256": dataset.frozen_sha256,
+                                        "reload": result.get("reload"),
+                                        "trainer_result": result})
+    session.add(bundle)
+    session.commit()
+    return bundle
+
+
 def attempt_view(attempt: MlTrainingAttempt) -> dict:
     return {"id": attempt.id, "dataset_id": attempt.dataset_id, "job_id": attempt.job_id,
             "state": attempt.state, "instance_id": attempt.instance_id,
