@@ -1363,3 +1363,30 @@ Response (this host + hub):
 Pending owner questions: whether 159.48.242.68 is a machine we own (was it an
 old rental?); API 50555 TLS/allowed-IP decision; persistent firewall rules
 (netfilter-persistent not enabled on the hub).
+
+## 2026-10-22 — Wave 0 calibration slice complete (gates for Wave 1 approval)
+
+Full local pipeline exercised on ~48 real files, zero hub file access:
+- Scans (gpu1 worker, resumable): 23 junk YouTube rips via async
+  `import-selected` (202 -> scan job), Alabama/Pass It On Down (6) and
+  The Verve/A Storm In Heaven (19) via `scan-selected`.
+- Parser: 38 `parsed` (all core fields from ID3; provenance recorded per
+  field), 10 `suspect` (junk rips — correctly quarantined by the freeze gate),
+  9 `.lrc` sidecars ingested verbatim + SHA-256.
+- Enrichment passes (rate-limited, per-record durable): lrclib matched 10 more
+  recordings (`site` origin, SHA-256 recomputed and verified from the API
+  surface: Alabama "Until It Happens To You" 1202 chars, The Verve "Star Sail"
+  475); MusicBrainz returned 7 unmatched + 2 provider_outage on the junk slice
+  (expected for video rips — gate holds them out of datasets).
+- Folder catalog: 19,234 dirs indexed (dir_index job succeeded on gpu1).
+- Incident response (see prior entry): external queue consumer locked out,
+  ports bound to WG/loopback, secrets rotated, scripts de-secreed.
+
+Checkpoint for owner approval:
+- Wave 1+ (uniform ~5k, artist-ordered) enqueues only on your go, per gate plan.
+- First real voice dataset candidate ready: Alabama/Pass It On Down (6 tracks,
+  parsed tags) + site/sidecar lyrics coverage; freeze(kind=voice) will prove
+  the Batch 4 acceptance gate live (steps + load + lora-load + inference
+  sample) when approved.
+- Open: is 159.48.242.68 one of ours? API 50555 remains public-by-design;
+  netfilter persistence + optional TLS are owner decisions.
