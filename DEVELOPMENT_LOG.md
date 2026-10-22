@@ -1137,3 +1137,18 @@ No migration. Validation: 388 backend tests (2 new), 17 vitest, clean build.
   dispatch -> claim -> train -> export -> register -> node released to
   shared_ready -> budget settled exactly once.
 - Validation: 412 backend tests pass.
+
+## 2026-10-22 — Pipeline M5: async identify, captions, BYOL (feat/model-lab-pipeline)
+
+- Identification is now async: POST /recordings/{id}/identify enqueues a
+  `model_lab.identify` job (202); the worker operation runs the provider
+  lookup and records the status as an artifact. No synchronous provider call
+  blocks the API process.
+- Caption compiler (`compile_caption`): deterministic, LLM-free caption text
+  from the recording's own fields + approved locked claims + approved tag
+  terms (sorted by namespace/label). GET /recordings/{id}/caption.
+- BYOL singer-identity challenger wired: `resolve_identity_model` fails closed
+  unless BOTH OAL_BYOL_MODEL_PATH and OAL_BYOL_SCAN_COMMAND are configured
+  (no silent mfcc fallback for a challenger run); `embed_byol` runs the pinned
+  encoder command with OAL_CROP_START/OAL_CROP_WINDOW and parses its vector.
+- Validation: 416 backend tests pass (4 new in tests/test_model_lab_m5_pipeline.py).

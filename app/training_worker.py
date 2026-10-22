@@ -238,6 +238,8 @@ class TrainingWorker:
                 self._model_lab_train(claimed_job, attempt_id, lease_token)
             elif operation == "model_lab.merge":
                 self._model_lab_merge(claimed_job, attempt_id, lease_token)
+            elif operation == "model_lab.identify":
+                self._model_lab_identify(claimed_job, attempt_id, lease_token)
             else:
                 fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token,
                              "OPERATION_UNSUPPORTED", f"Training worker cannot run {operation!r}.")
@@ -834,6 +836,31 @@ class TrainingWorker:
         complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
                          lease_token, ("merge-result", json.dumps(result).encode()),
                          synthetic=False, engine_result=result)
+
+    # -- model_lab.identify ----------------------------------------------------------
+
+    def _model_lab_identify(self, job_id: str, attempt_id: str, lease_token: str) -> None:
+        from .model_lab import identify_recording
+        from .models import MlRecording
+
+        with self.db.session() as session:
+            job = get_job_by_id(session, job_id)
+            request = dict(job.request_json)
+            rec = session.get(MlRecording, request.get("recording_id"))
+            if rec is None:
+                fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                             "RECORDING_NOT_FOUND", "Identify target recording missing.")
+                return
+            try:
+                status = identify_recording(session, rec, self.settings,
+                                            enrich=bool(request.get("enrich", True)))
+            except Exception as exc:
+                fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                             "IDENTIFY_FAILED", str(exc)[-280:])
+                return
+        complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
+                         lease_token, ("identify-status", status.encode()),
+                         synthetic=False, engine_result={"identify_status": status})
 
     # -- voice.validate ------------------------------------------------------------------
 

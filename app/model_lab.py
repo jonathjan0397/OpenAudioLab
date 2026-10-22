@@ -323,6 +323,43 @@ def review_recording(session, rec: MlRecording, decision: str, reviewer: str,
 
 # ----------------------------------------------------------------- coverage
 
+def compile_caption(session, rec: MlRecording) -> dict:
+    """Deterministic caption from the recording's own fields + approved tags.
+
+    No LLM: the compiler only orders and joins evidence that is already on the
+    record (invariant 1). Locked/approved claims win over suggestions.
+    """
+    from .models import MlTagAssignment, MlTagTerm
+
+    fields: dict[str, str] = {}
+    for key in ("artist", "title", "genre_raw", "year", "decade"):
+        value = getattr(rec, key, None)
+        if value not in (None, ""):
+            fields[key] = str(value)
+    claims = session.execute(
+        select(MlMetadataClaim).where(
+            MlMetadataClaim.recording_id == rec.id,
+            MlMetadataClaim.status.in_(("approved", "locked")),
+            MlMetadataClaim.field.notin_(("artist", "title", "genre_raw", "year", "decade")),
+        ).order_by(MlMetadataClaim.field)).scalars().all()
+    for claim in claims:
+        fields.setdefault(claim.field, claim.value)
+    if rec.vocal_status and rec.vocal_status != "unknown":
+        fields["vocals"] = rec.vocal_status
+    rows = session.execute(
+        select(MlTagAssignment, MlTagTerm)
+        .join(MlTagTerm, MlTagTerm.id == MlTagAssignment.term_id)
+        .where(MlTagAssignment.recording_id == rec.id,
+               MlTagAssignment.level == "recording",
+               MlTagAssignment.status == "approved")
+        .order_by(MlTagTerm.namespace, MlTagTerm.label)).all()
+    tags = [{"lane": t.namespace, "term": t.label} for a, t in rows]
+    parts = [f"{k}: {v}" for k, v in sorted(fields.items())]
+    parts += [f"tag[{t['lane']}]: {t['term']}" for t in tags]
+    return {"recording_id": rec.id, "text": "; ".join(parts),
+            "fields": fields, "tags": tags}
+
+
 def coverage(session) -> dict:
     recs = session.execute(select(MlRecording)).scalars().all()
     total_seconds = sum(r.duration_seconds or 0.0 for r in recs)

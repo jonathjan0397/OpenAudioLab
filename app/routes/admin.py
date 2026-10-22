@@ -2920,15 +2920,41 @@ def admin_model_lab_recording(recording_id: str, request: Request) -> JSONRespon
 
 @router.post("/admin/model-lab/recordings/{recording_id}/identify")
 def admin_model_lab_identify(recording_id: str, request: Request, enrich: bool = True) -> JSONResponse:
-    from ..model_lab import identify_recording
+    """Async identification: enqueue a model_lab.identify job (202)."""
+    import hashlib as _hl
+    import json as _json
+
+    from ..models import Job, MlRecording, new_uuid as _uuid
+    from ..orchestration import enqueue
+
+    settings = request.app.state.settings
+    with request.app.state.db.session() as session:
+        rec = session.get(MlRecording, recording_id)
+        if rec is None:
+            raise ApiError(404, "NOT_FOUND", "recording not found")
+        request_json = {"recording_id": rec.id, "enrich": enrich}
+        job = Job(id=_uuid(), owner_id="model-lab", operation="model_lab.identify",
+                  model_id=settings.train_queue_model_id, model_revision="model-lab",
+                  status="queued", request_json=request_json,
+                  request_hash=_hl.sha256(_json.dumps(request_json, sort_keys=True).encode()).hexdigest(),
+                  idempotency_key=f"ml-identify-{rec.id}-{_uuid()[:8]}")
+        session.add(job)
+        enqueue(session, job, settings)
+        session.commit()
+        return JSONResponse({"id": rec.id, "job_id": job.id,
+                             "identify_status": "queued"}, status_code=202)
+
+
+@router.get("/admin/model-lab/recordings/{recording_id}/caption")
+def admin_model_lab_caption(recording_id: str, request: Request) -> JSONResponse:
+    from ..model_lab import compile_caption
     from ..models import MlRecording
 
     with request.app.state.db.session() as session:
         rec = session.get(MlRecording, recording_id)
         if rec is None:
             raise ApiError(404, "NOT_FOUND", "recording not found")
-        status = identify_recording(session, rec, request.app.state.settings, enrich=enrich)
-        return JSONResponse({"id": rec.id, "identify_status": status})
+        return JSONResponse(compile_caption(session, rec))
 
 
 class MlReview(BaseModel):
