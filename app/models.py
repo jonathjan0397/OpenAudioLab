@@ -436,7 +436,7 @@ class SiteSetting(Base):
     __tablename__ = "site_settings"
 
     key: Mapped[str] = mapped_column(String(80), primary_key=True)
-    value: Mapped[str] = mapped_column(String(500), default="")
+    value: Mapped[str] = mapped_column(String(2000), default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 

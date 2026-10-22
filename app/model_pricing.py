@@ -76,7 +76,7 @@ def load(session) -> dict:
 def save(session, payload: dict) -> dict:
     merged = _clean(payload)
     blob = json.dumps(merged, separators=(",", ":"))
-    if len(blob) > 480:
+    if len(blob) > 1900:
         raise ModelPricingError("too many profile overrides")
     row = session.get(SiteSetting, SETTINGS_KEY)
     if row is None:

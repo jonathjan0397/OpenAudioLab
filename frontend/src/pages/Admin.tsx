@@ -839,8 +839,10 @@ export default function AdminPage() {
     }),
     onSuccess: () => {
       setMpDraft(null);
+      setError("");
       qc.invalidateQueries({ queryKey: ["admin-model-pricing"] });
     },
+    onError: (e: Error) => setError(e.message),
   });
   const guests = useQuery({
     queryKey: ["admin-guests"],
@@ -1951,6 +1953,7 @@ export default function AdminPage() {
               <div className="card-header">
                 <h2>Model Pricing</h2>
                 <span className="spacer" />
+                {saveModelPricing.isError && <span className="pill err">{(saveModelPricing.error as Error).message}</span>}
                 <button className="btn btn-primary" disabled={!mpDirty || saveModelPricing.isPending} onClick={() => saveModelPricing.mutate()}>
                   {saveModelPricing.isPending ? "Saving…" : "Save"}
                 </button>

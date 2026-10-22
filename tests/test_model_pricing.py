@@ -136,3 +136,23 @@ def test_full_view_roundtrip_disable(client) -> None:
     assert r.status_code == 200, r.text
     saved = next(p for p in r.json()["profiles"] if p["availability"] == "disabled")
     assert saved is not None
+
+
+def test_full_view_roundtrip_with_names_exceeds_old_guard(client) -> None:
+    """The editor sends every profile with a display name; that blob used to
+    exceed the 480-char guard and 422 every save (disabled models reappeared)."""
+    _login_admin(client, "mp11@example.com")
+    view = client.get("/api/v1/admin/model-pricing").json()
+    profiles = {p["profile_id"]: {"availability": "disabled" if i == 0 else p["availability"],
+                                  "multiplier": p["multiplier"],
+                                  "display_name": (p["display_name"] + " Studio Edition")[:120]}
+                for i, p in enumerate(view["profiles"])}
+    payload = {"base_credit_cost": view["base_credit_cost"], "profiles": profiles}
+    import json as _json
+    assert len(_json.dumps(payload)) > 480  # would have tripped the old guard
+    r = client.put("/api/v1/admin/model-pricing", json=payload)
+    assert r.status_code == 200, r.text
+    again = client.get("/api/v1/admin/model-pricing").json()
+    first = next(p for p in again["profiles"] if p["profile_id"] == list(profiles)[0])
+    assert first["availability"] == "disabled"  # persisted across reload
+    assert first["display_name"].endswith("Studio Edition")
