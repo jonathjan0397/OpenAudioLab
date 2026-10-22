@@ -65,21 +65,33 @@ def test_browse_guards(client, tn_root) -> None:
     client.app.state.settings.truenas_browse_root = tn_root_client
 
 
-def test_import_selected_probes_and_registers(client, tn_root) -> None:
+def test_import_selected_queues_worker_scan(client, tn_root) -> None:
     wav = tn_root / "AI Music" / "artist" / "track one.wav"
     r = client.post("/api/v1/admin/model-lab/import-selected",
                     json={"source_name": f"pilot-{next(_SEQ)}", "paths": [str(wav)]})
-    assert r.status_code == 201
-    assert r.json()["counts"]["new"] == 1
-    sid = r.json()["source"]["id"]
+    assert r.status_code == 202
+    body = r.json()
+    job_id, sid = body["job_ids"][0], body["sources"][0]["id"]
+
+    from types import SimpleNamespace
+
     from app.models import MlRecording
+    from app.orchestration import claim_attempt
+    from app.training_worker import TrainingWorker
     from sqlalchemy import select
+
+    claim = claim_attempt(client.app.state.db, job_id, "w-test")
+    assert claim is not None
+    _, att, lease = claim
+    w = SimpleNamespace(db=client.app.state.db, storage=client.app.state.storage,
+                        settings=client.app.state.settings)
+    w._lease_beat = lambda *a: TrainingWorker._lease_beat(w, *a)
+    TrainingWorker._model_lab_scan(w, job_id, att, lease)
 
     with client.app.state.db.session() as session:
         recs = session.execute(select(MlRecording)
                                .where(MlRecording.source_id == sid)).scalars().all()
     assert len(recs) == 1
-    assert recs[0].path.endswith("track one.wav")
     assert recs[0].duration_seconds and recs[0].duration_seconds > 0.5
 
 
@@ -87,7 +99,7 @@ def test_import_selected_validations(client, tn_root) -> None:
     dup_name = f"pilot-dup-{next(_SEQ)}"
     body = {"source_name": dup_name, "paths": [str(tn_root / "notes.txt")]}
     r = client.post("/api/v1/admin/model-lab/import-selected", json=body)
-    assert r.status_code == 201 and r.json()["counts"]["excluded"] == 1
+    assert r.status_code == 202 and len(r.json()["sources"]) == 1
     dup = client.post("/api/v1/admin/model-lab/import-selected", json=body)
     assert dup.status_code == 422
     outside = client.post("/api/v1/admin/model-lab/import-selected",

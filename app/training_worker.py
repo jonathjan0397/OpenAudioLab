@@ -240,6 +240,10 @@ class TrainingWorker:
                 self._model_lab_merge(claimed_job, attempt_id, lease_token)
             elif operation == "model_lab.identify":
                 self._model_lab_identify(claimed_job, attempt_id, lease_token)
+            elif operation == "model_lab.scan":
+                self._model_lab_scan(claimed_job, attempt_id, lease_token)
+            elif operation == "model_lab.dir_index":
+                self._model_lab_dir_index(claimed_job, attempt_id, lease_token)
             else:
                 fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token,
                              "OPERATION_UNSUPPORTED", f"Training worker cannot run {operation!r}.")
@@ -866,6 +870,90 @@ class TrainingWorker:
         complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
                          lease_token, ("identify-status", status.encode()),
                          synthetic=False, engine_result={"identify_status": status})
+
+    # -- model_lab bulk library operations (gpu1-local, resumable) -------------------
+
+    def _lease_beat(self, attempt_id: str, lease_token: str, stop: threading.Event,
+                    lost: dict) -> None:
+        while not stop.wait(10):
+            if not heartbeat(self.db, attempt_id, lease_token):
+                lost["lease"] = True
+                return
+
+    def _model_lab_scan(self, job_id: str, attempt_id: str, lease_token: str) -> None:
+        import json
+
+        from .model_lab import ModelLabError, scan_source_resumable
+
+        with self.db.session() as session:
+            request = dict(get_job_by_id(session, job_id).request_json)
+        source_id, batch_id = request.get("source_id"), request.get("batch_id")
+        if not source_id or not batch_id:
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         "SCAN_TARGET_MISSING", "scan job lacks source/batch id.")
+            return
+        stop = threading.Event()
+        lost = {"lease": False}
+        hb = threading.Thread(target=self._lease_beat, args=(attempt_id, lease_token, stop, lost),
+                              daemon=True)
+        hb.start()
+        try:
+            result = scan_source_resumable(
+                self.db, source_id, batch_id,
+                chunk_files=int(request.get("chunk_files") or 500),
+                abort=lambda: lost["lease"] or is_cancelling(self.db, job_id),
+                on_progress=lambda n, total: log.info("model-lab scan progress: %s files", total))
+        except ModelLabError as exc:
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         "SCAN_FAILED", str(exc)[-280:])
+            return
+        finally:
+            stop.set()
+        if lost["lease"]:
+            return  # fenced: a stale result may not publish
+        if result.get("state") == "cancelled":
+            cancel_attempt(self.db, job_id, attempt_id, lease_token)
+            return
+        complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
+                         lease_token, ("scan-counts", json.dumps(result).encode()),
+                         synthetic=False, engine_result={"import": result})
+
+    def _model_lab_dir_index(self, job_id: str, attempt_id: str, lease_token: str) -> None:
+        import json
+
+        from .model_lab import ModelLabError, rebuild_dir_index
+
+        with self.db.session() as session:
+            request = dict(get_job_by_id(session, job_id).request_json)
+        root = request.get("root") or self.settings.truenas_browse_root
+        if not root:
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         "BROWSE_NOT_CONFIGURED", "no library root for dir-index.")
+            return
+        stop = threading.Event()
+        lost = {"lease": False}
+        hb = threading.Thread(target=self._lease_beat, args=(attempt_id, lease_token, stop, lost),
+                              daemon=True)
+        hb.start()
+        try:
+            result = rebuild_dir_index(
+                self.db, self.settings, root=root,
+                abort=lambda: lost["lease"] or is_cancelling(self.db, job_id),
+                on_progress=lambda done, total: log.info("dir-index progress: %s/%s", done, total))
+        except ModelLabError as exc:
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         "DIR_INDEX_FAILED", str(exc)[-280:])
+            return
+        finally:
+            stop.set()
+        if lost["lease"]:
+            return
+        if result.get("cancelled"):
+            cancel_attempt(self.db, job_id, attempt_id, lease_token)
+            return
+        complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
+                         lease_token, ("dir-index", json.dumps(result).encode()),
+                         synthetic=False, engine_result={"dir_index": result})
 
     # -- voice.validate ------------------------------------------------------------------
 

@@ -58,15 +58,14 @@ export default function ModelLabPage() {
     enabled: tab === "Catalog" && browseOpen,
   });
   const importSel = useMutation({
-    mutationFn: () => api.post<{ source: { id: string; name: string }; counts: Record<string, number> }>(
+    mutationFn: () => api.post<{ sources: { id: string; name: string }[]; job_ids: string[] }>(
       "/api/v1/admin/model-lab/import-selected",
       { source_name: srcName, paths: Object.keys(picked).filter((k) => picked[k]) }),
     onSuccess: (r) => {
       setPicked({});
-      setMsg(`Imported ${srcName}: ${r.counts.new ?? 0} new, ${r.counts.duplicate ?? 0} duplicate, ${r.counts.excluded ?? 0} excluded.`);
+      setMsg(`Queued worker scan "${srcName}": ${r.job_ids.length} job(s) on the GPU box; `
+        + "recordings appear as batches progress.");
       qc.invalidateQueries({ queryKey: ["ml-sources"] });
-      qc.invalidateQueries({ queryKey: ["ml-recordings"] });
-      qc.invalidateQueries({ queryKey: ["ml-overview"] });
     },
     onError: (e: Error) => setMsg(`Import failed: ${e.message}`),
   });

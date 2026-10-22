@@ -3056,30 +3056,110 @@ def _browse_error(exc: Exception) -> ApiError:
 
 @router.get("/admin/model-lab/browse")
 def admin_model_lab_browse(request: Request, path: str | None = None) -> JSONResponse:
-    from ..model_lab import ModelLabError, browse_directory
+    from ..model_lab import ModelLabError, browse_directory, browse_from_index
 
     try:
         return JSONResponse(browse_directory(request.app.state.settings, path))
     except ModelLabError as exc:
+        message = str(exc)
+        if "BROWSE_NOT_CONFIGURED" in message or "BROWSE_NOT_A_DIRECTORY" in message:
+            with request.app.state.db.session() as session:
+                try:
+                    return JSONResponse(browse_from_index(
+                        session, request.app.state.settings, path))
+                except ModelLabError as exc2:
+                    raise ApiError(503, "BROWSE_NOT_INDEXED", str(exc2)) from exc2
         raise _browse_error(exc) from exc
 
 
 @router.post("/admin/model-lab/import-selected")
 def admin_model_lab_import_selected(body: MlImportSelected, request: Request) -> JSONResponse:
-    from ..model_lab import ModelLabError, import_selected
-    from ..model_lab_train import budget_view, get_budget
+    from ..model_lab import ModelLabError, create_scan_job, enqueue_scan_job
 
+    settings = request.app.state.settings
     try:
         with request.app.state.db.session() as session:
-            source, result = import_selected(
-                session, request.app.state.settings,
-                source_name=body.source_name, paths=body.paths)
-            return JSONResponse({"source": {"id": source.id, "name": source.name,
-                                            "kind": source.kind, "path": source.path},
-                                 "counts": result.get("counts", result)},
-                                status_code=201)
+            specs = create_scan_job(session, settings,
+                                    source_name=body.source_name, paths=body.paths)
+            jobs = [enqueue_scan_job(session, settings, source, batch)
+                    for source, batch in specs]
+            return JSONResponse({
+                "sources": [{"id": s.id, "name": s.name, "kind": s.kind} for s, _ in specs],
+                "batches": [{"id": b.id, "source_id": b.source_id, "state": b.state}
+                            for _, b in specs],
+                "job_ids": [j.id for j in jobs]}, status_code=202)
     except ModelLabError as exc:
         raise _browse_error(exc) from exc
+
+
+class MlScanRoots(BaseModel):
+    source_name: str = Field(min_length=1, max_length=200)
+    roots: list[str] = Field(min_length=1)
+
+
+@router.post("/admin/model-lab/scan-selected")
+def admin_model_lab_scan_selected(body: MlScanRoots, request: Request) -> JSONResponse:
+    """Queue gpu1 worker scans of whole directories (kind=dir sources)."""
+    from ..model_lab import ModelLabError, create_scan_job, enqueue_scan_job
+
+    settings = request.app.state.settings
+    try:
+        with request.app.state.db.session() as session:
+            specs = create_scan_job(session, settings,
+                                    source_name=body.source_name, roots=body.roots)
+            jobs = [enqueue_scan_job(session, settings, source, batch)
+                    for source, batch in specs]
+            return JSONResponse({
+                "sources": [{"id": s.id, "name": s.name, "path": s.path} for s, _ in specs],
+                "job_ids": [j.id for j in jobs]}, status_code=202)
+    except ModelLabError as exc:
+        raise _browse_error(exc) from exc
+
+
+@router.get("/admin/model-lab/batches")
+def admin_model_lab_batches(request: Request, state: str | None = None) -> JSONResponse:
+    """Import/scan batch progress (worker-run + legacy sync scans)."""
+    from ..models import MlImportBatch
+
+    with request.app.state.db.session() as session:
+        q = select(MlImportBatch).order_by(MlImportBatch.started_at.desc()).limit(50)
+        if state:
+            q = q.where(MlImportBatch.state == state)
+        rows = session.execute(q).scalars().all()
+        return JSONResponse({"batches": [
+            {"id": b.id, "source_id": b.source_id, "state": b.state, "scanned": b.scanned,
+             "counts": b.counts_json,
+             "cursor": {k: v for k, v in (b.cursor_json or {}).items() if k != "after"},
+             "error": b.error, "started_at": b.started_at.isoformat() if b.started_at else None,
+             "finished_at": b.finished_at.isoformat() if b.finished_at else None}
+            for b in rows]})
+
+
+@router.post("/admin/model-lab/dirs/refresh")
+def admin_model_lab_dirs_refresh(request: Request, body: dict | None = None) -> JSONResponse:
+    """Enqueue a gpu1 folder-index job (readdir only, no audio reads)."""
+    import hashlib as _hl
+    import json as _json
+
+    from ..models import Job, new_uuid as _uuid
+    from ..orchestration import enqueue
+
+    settings = request.app.state.settings
+    root = (body or {}).get("root") or settings.truenas_browse_root
+    if not root:
+        raise ApiError(503, "BROWSE_NOT_CONFIGURED", "OAL_TRUENAS_BROWSE_ROOT is not set")
+    request_json = {"root": root}
+    with request.app.state.db.session() as session:
+        job = Job(id=_uuid(), owner_id="model-lab", operation="model_lab.dir_index",
+                  model_id=settings.train_queue_model_id, model_revision="model-lab",
+                  status="queued", request_json=request_json,
+                  request_hash=_hl.sha256(_json.dumps(request_json, sort_keys=True).encode()).hexdigest(),
+                  idempotency_key=f"ml-dirindex-{_uuid()[:8]}")
+        session.add(job)
+        enqueue(session, job, settings)
+        session.commit()
+        return JSONResponse({"job_id": job.id, "root": root, "state": "queued"},
+                            status_code=202)
 
 
 @router.get("/admin/model-lab/coverage")

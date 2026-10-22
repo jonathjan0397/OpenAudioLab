@@ -9,6 +9,7 @@ nothing here rewrites lyrics or audio.
 from __future__ import annotations
 
 import hashlib
+import os
 import json
 import subprocess
 import time
@@ -92,6 +93,74 @@ def _manifest_rows(source: MlSource) -> list[dict]:
     return [{"path": str(p)} for p in sorted(root.rglob("*")) if p.is_file()]
 
 
+def _scan_row(session, source: MlSource, batch: MlImportBatch, row: dict,
+              seen: set[str], counts: dict, *, preview: bool) -> None:
+    """One manifest/directory row -> recording classification (shared core)."""
+    path = Path(row["path"])
+    batch.scanned += 1
+    if path.suffix.lower() not in AUDIO_EXTS:
+        counts["excluded"] += 1
+        return
+    if not path.exists():
+        counts["excluded"] += 1
+        return
+    sha = sha256_file(path)
+    size = path.stat().st_size
+    by_path = session.execute(
+        select(MlRecording).where(MlRecording.source_id == source.id,
+                                  MlRecording.path == str(path))).scalars().first()
+    by_sha = session.execute(
+        select(MlRecording).where(MlRecording.source_id == source.id,
+                                  MlRecording.sha256 == sha)).scalars().first()
+    if by_path is not None and by_path.sha256 == sha and size == by_path.bytes:
+        counts["cached"] += 1
+        return  # unchanged: no rewrite
+    if by_path is not None:
+        counts["changed"] += 1
+        classification = "changed"
+        existing = by_path
+    elif by_sha is not None:
+        counts["duplicate"] += 1
+        return  # same content already catalogued at another path
+    else:
+        counts["new"] += 1
+        classification = "new"
+        existing = None
+        seen.add(sha)
+    probe = probe_file(path)
+    review_required = bool(probe.get("duration_seconds") and probe["duration_seconds"] < 5)
+    if preview:
+        return
+    if existing is not None:
+        existing.classification = classification
+        existing.sha256 = sha
+        existing.bytes = size
+        existing.probe_json = probe or existing.probe_json
+        existing.review_required = review_required
+        record = existing
+    else:
+        record = MlRecording(
+            source_id=source.id, path=str(path), sha256=sha, bytes=size,
+            duration_seconds=probe.get("duration_seconds"),
+            sample_rate=probe.get("sample_rate"), channels=probe.get("channels"),
+            format=probe.get("format"), probe_json=probe,
+            review_required=review_required,
+            families_json=row.get("families") or [],
+            title=row.get("title"), artist=row.get("artist"),
+            genre_raw=row.get("genre"), year=row.get("year"), decade=row.get("decade"),
+            classification=classification)
+        session.add(record)
+    from .library_parse import enrich_recording
+    enrich_recording(record, path)
+    session.flush()
+    for field in ("title", "artist", "genre", "year", "decade"):
+        value = row.get(field)
+        if value and not _has_locked_claim(session, record.id, field):
+            session.add(MlMetadataClaim(
+                recording_id=record.id, field=field, value=str(value),
+                provenance="supplier", provider=source.name))
+
+
 def scan_source(session, source: MlSource, *, preview: bool = True,
                 seen_shas: set[str] | None = None) -> dict:
     """Incremental scan: new/cached/changed/duplicate/excluded/review counts."""
@@ -101,74 +170,8 @@ def scan_source(session, source: MlSource, *, preview: bool = True,
     seen = seen_shas if seen_shas is not None else set(
         session.execute(select(MlRecording.sha256).where(MlRecording.source_id == source.id))
         .scalars().all())
-    rows = _manifest_rows(source)
-    for row in rows:
-        path = Path(row["path"])
-        batch.scanned += 1
-        if path.suffix.lower() not in AUDIO_EXTS:
-            counts["excluded"] += 1
-            continue
-        if not path.exists():
-            counts["excluded"] += 1
-            continue
-        sha = sha256_file(path)
-        size = path.stat().st_size
-        by_path = session.execute(
-            select(MlRecording).where(MlRecording.source_id == source.id,
-                                      MlRecording.path == str(path))).scalars().first()
-        by_sha = session.execute(
-            select(MlRecording).where(MlRecording.source_id == source.id,
-                                      MlRecording.sha256 == sha)).scalars().first()
-        if by_path is not None and by_path.sha256 == sha and size == by_path.bytes:
-            counts["cached"] += 1
-            continue  # unchanged: no rewrite
-        if by_path is not None:
-            counts["changed"] += 1
-            classification = "changed"
-            existing = by_path
-        elif by_sha is not None:
-            counts["duplicate"] += 1
-            continue  # same content already catalogued at another path
-        else:
-            counts["new"] += 1
-            classification = "new"
-            existing = None
-            seen.add(sha)
-        probe = probe_file(path)
-        review_required = bool(probe.get("duration_seconds") and probe["duration_seconds"] < 5)
-        if preview:
-            continue
-        if existing is not None:
-            existing.classification = classification
-            existing.sha256 = sha
-            existing.bytes = size
-            existing.probe_json = probe or existing.probe_json
-            existing.review_required = review_required
-            record = existing
-        else:
-            record = MlRecording(
-                source_id=source.id, path=str(path), sha256=sha, bytes=size,
-                duration_seconds=probe.get("duration_seconds"),
-                sample_rate=probe.get("sample_rate"), channels=probe.get("channels"),
-                format=probe.get("format"), probe_json=probe,
-                review_required=review_required,
-                families_json=row.get("families") or [],
-                title=row.get("title"), artist=row.get("artist"),
-                genre_raw=row.get("genre"), year=row.get("year"), decade=row.get("decade"),
-                classification=classification)
-            session.add(record)
-        from .library_parse import enrich_recording
-        enrich_recording(record, path)
-        for field in ("title", "artist", "genre", "year", "decade"):
-            value = row.get(field)
-            if value and not preview:
-                rec = session.execute(
-                    select(MlRecording).where(MlRecording.source_id == source.id,
-                                              MlRecording.sha256 == sha)).scalars().first()
-                if rec is not None and not _has_locked_claim(session, rec.id, field):
-                    session.add(MlMetadataClaim(
-                        recording_id=rec.id, field=field, value=str(value),
-                        provenance="supplier", provider=source.name))
+    for row in _manifest_rows(source):
+        _scan_row(session, source, batch, row, seen, counts, preview=preview)
     batch.counts_json = counts
     batch.cursor_json = {"scanned": batch.scanned, "at": utcnow().isoformat()}
     batch.state = "completed"
@@ -180,6 +183,145 @@ def scan_source(session, source: MlSource, *, preview: bool = True,
         return {"batch_id": batch_id, "scanned": batch.scanned, "counts": counts, "preview": True}
     session.commit()
     return {"batch_id": batch.id, "scanned": batch.scanned, "counts": counts, "preview": False}
+
+
+def _scan_target_rows(session, source: MlSource, *, after: str | None) -> list[dict]:
+    """Sorted manifest/dir rows, sliced after the cursor path (resume)."""
+    import bisect
+
+    if source.kind == "dir" and source.path:
+        root = Path(source.path)
+        paths = sorted(str(p) for p in _walk_audio(root))
+        rows = [{"path": p} for p in paths]
+    else:
+        rows = sorted(_manifest_rows(source), key=lambda r: str(r.get("path")))
+    if after:
+        idx = bisect.bisect_right([str(r["path"]) for r in rows], after)
+        rows = rows[idx:]
+    return rows
+
+
+def _walk_audio(root: Path):
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith((".", "$")))
+        for name in filenames:
+            if Path(name).suffix.lower() in AUDIO_EXTS:
+                yield Path(dirpath) / name
+
+
+def scan_source_resumable(db, source_id: str, batch_id: str, *, chunk_files: int = 500,
+                          abort=None, on_progress=None) -> dict:
+    """Worker-side import: per-chunk commit + cursor + heartbeat hooks.
+
+    Idempotent: unchanged files classify as `cached`, so a redelivered job
+    re-hashes only what the cursor has not passed yet.
+    """
+    stopped = False
+    while True:
+        if abort is not None and abort():
+            stopped = True
+            break
+        with db.session() as session:
+            source = session.get(MlSource, source_id)
+            batch = session.get(MlImportBatch, batch_id)
+            if source is None or batch is None:
+                raise ModelLabError(f"scan target missing: {source_id}/{batch_id}")
+            after = (batch.cursor_json or {}).get("after")
+            rows = _scan_target_rows(session, source, after=after)
+            if not rows:
+                batch.state = "completed"
+                batch.finished_at = utcnow()
+                session.commit()
+                break
+            counts = {**{"new": 0, "cached": 0, "changed": 0, "duplicate": 0,
+                         "excluded": 0, "review": 0}, **(batch.counts_json or {})}
+            seen: set[str] = set()
+            for row in rows[:chunk_files]:
+                _scan_row(session, source, batch, row, seen, counts, preview=False)
+            batch.counts_json = counts
+            batch.cursor_json = {"after": str(rows[min(chunk_files, len(rows)) - 1]["path"]),
+                                 "scanned": batch.scanned, "at": utcnow().isoformat()}
+            session.commit()
+        if on_progress is not None:
+            on_progress(min(chunk_files, len(rows)), batch.scanned)
+    with db.session() as session:
+        batch = session.get(MlImportBatch, batch_id)
+        return {"counts": dict(batch.counts_json or {}), "scanned": batch.scanned,
+                "state": "cancelled" if stopped else batch.state}
+
+
+def rebuild_dir_index(db, settings, *, root: str | None = None, chunk_dirs: int = 400,
+                      abort=None, on_progress=None) -> dict:
+    """Index every directory under the library root (readdir only).
+
+    Serves the browse UI from the DB so the hub never touches TrueNAS files.
+    """
+    from .models import MlDirIndex
+
+    raw_root = Path(root or settings.truenas_browse_root or "")
+    if not raw_root.is_dir():
+        raise ModelLabError("BROWSE_NOT_CONFIGURED: library root unavailable on this host")
+    dirs = [raw_root]
+    for dirpath, dirnames, _ in os.walk(raw_root):
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith((".", "$")))
+        dirs.extend(Path(dirpath) / d for d in dirnames)
+    dirs.sort()
+    indexed = 0
+    with db.session() as session:
+        for i in range(0, len(dirs), chunk_dirs):
+            if abort is not None and abort():
+                break
+            for d in dirs[i:i + chunk_dirs]:
+                try:
+                    entries = list(os.scandir(d))
+                except OSError:
+                    continue
+                files = [{"name": e.name, "bytes": (e.stat().st_size if e.is_file(follow_symlinks=False) else None),
+                          "is_dir": e.is_dir(follow_symlinks=False)}
+                         for e in entries]
+                audio = [f for f in files if not f["is_dir"]
+                         and Path(f["name"]).suffix.lower() in AUDIO_SUFFIXES]
+                names = {f["name"].lower() for f in files}
+                row = session.get(MlDirIndex, str(d)) or MlDirIndex(
+                    path=str(d), parent=str(d.parent), name=d.name)
+                row.parent = str(d.parent)
+                row.name = d.name
+                row.n_audio = len(audio)
+                row.n_dirs = sum(1 for f in files if f["is_dir"])
+                row.has_nfo = ("album.nfo" in names or "artist.nfo" in names)
+                row.has_lrc = any(n.endswith(".lrc") for n in names)
+                row.files_json = [{k: f[k] for k in ("name", "bytes")} for f in audio]
+                session.merge(row)
+                indexed += 1
+            session.commit()
+            if on_progress is not None:
+                on_progress(indexed, len(dirs))
+    return {"indexed": indexed, "total_dirs": len(dirs)}
+
+
+def browse_from_index(session, settings, path: str | None) -> dict:
+    """DB-catalog browse (children dirs + audio files of one directory)."""
+    from .models import MlDirIndex
+
+    raw_root = (settings.truenas_browse_root or "").strip()
+    root = Path(raw_root) if raw_root else None
+    target = str(Path(path).resolve()) if path else str(root)
+    if root is not None and str(target) != str(root) and not str(target).startswith(str(root) + os.sep):
+        raise ModelLabError("BROWSE_OUT_OF_ROOT: path escapes the browse root")
+    row = session.get(MlDirIndex, target)
+    if row is None:
+        raise ModelLabError("BROWSE_NOT_INDEXED: folder is not in the worker catalog; "
+                            "run a dir-index refresh first")
+    kids = session.execute(select(MlDirIndex).where(MlDirIndex.parent == target)
+                           .order_by(MlDirIndex.name)).scalars().all()
+    entries = [{"name": k.name, "path": k.path, "is_dir": True, "bytes": None,
+                "mtime": k.updated_at.isoformat() if k.updated_at else None,
+                "n_audio": k.n_audio} for k in kids]
+    entries += [{"name": f["name"], "path": str(Path(target) / f["name"]), "is_dir": False,
+                 "bytes": f.get("bytes"), "mtime": None} for f in row.files_json]
+    return {"path": target, "root": str(root) if root else target,
+            "parent": None if target == str(root) else str(Path(target).parent),
+            "entries": entries, "source": "dir_index"}
 
 
 def _has_locked_claim(session, recording_id: str, field: str) -> bool:
@@ -422,42 +564,102 @@ def browse_directory(settings, path: str | None) -> dict:
 
 
 def import_selected(session, settings, *, source_name: str, paths: list[str]):
-    """Admin-selected TrueNAS files -> manifest source + immediate scan."""
+    """Admin-selected TrueNAS files -> manifest source + immediate scan.
+
+    Kept for small/local (already-mounted) scans; the admin routes now use
+    create_scan_job so the hub never reads library files itself.
+    """
+    (source, _), = create_scan_job(session, settings, source_name=source_name, paths=paths,
+                                    make_batch=False)
+    result = scan_source(session, source, preview=False)
+    return source, result
+
+
+def create_scan_job(session, settings, *, source_name: str, paths: list[str] | None = None,
+                    roots: list[str] | None = None, make_batch: bool = True):
+    """Register a manifest or directory source + queued import batch (no file I/O).
+
+    All path checks are pure string containment — the hub has no library mount;
+    the gpu1 worker validates and reads files during the scan job.
+    """
     import re
 
     raw_root = (settings.truenas_browse_root or "").strip()
-    root = Path(raw_root)
-    if not raw_root or not root.is_dir():
+    if not raw_root:
         raise ModelLabError("BROWSE_NOT_CONFIGURED: OAL_TRUENAS_BROWSE_ROOT is not set")
+    root = os.path.normpath(raw_root)
     if not source_name or not source_name.strip():
         raise ModelLabError("source_name is required")
-    if session.execute(select(MlSource).where(MlSource.name == source_name)
-                       ).scalar_one_or_none() is not None:
-        raise ModelLabError(f"source already exists: {source_name}")
-    files = []
-    for raw in paths:
-        p = Path(raw).resolve()
-        if str(p) != str(root) and not str(p).startswith(str(root) + "/"):
+
+    def guarded(raw: str) -> str:
+        p = os.path.normpath(str(raw))
+        if p != root and not p.startswith(root + os.sep):
             raise ModelLabError(f"BROWSE_OUT_OF_ROOT: {raw}")
-        if not p.is_file():
-            raise ModelLabError(f"not a readable file: {raw}")
-        files.append(p)
-    if not files:
-        raise ModelLabError("no files selected")
-    slug = re.sub(r"[^a-z0-9]+", "-", source_name.lower()).strip("-") or "source"
-    manifest_dir = Path(settings.storage_dir) / "ml-manifests"
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    manifest = manifest_dir / f"{slug}-{utcnow().strftime('%Y%m%d%H%M%S')}.jsonl"
-    manifest.write_text("".join(json.dumps({"path": str(p)}) + "\n" for p in files),
-                        encoding="utf-8")
-    source = MlSource(id=new_uuid(), name=source_name, kind="manifest",
-                      path=str(manifest), status="approved",
-                      agreement_json={"pilot-selection": {"state": "approved",
-                                                          "evidence": "admin-truenas-selection"}})
-    session.add(source)
+        return p
+
+    kind = "manifest" if paths else "dir"
+    targets = [guarded(x) for x in (paths if paths else roots or [])]
+    if not targets:
+        raise ModelLabError("no files or directories selected")
+
+    specs: list[tuple[MlSource, MlImportBatch]] = []
+    if kind == "manifest":
+        if session.execute(select(MlSource).where(MlSource.name == source_name)
+                           ).scalar_one_or_none() is not None:
+            raise ModelLabError(f"source already exists: {source_name}")
+        slug = re.sub(r"[^a-z0-9]+", "-", source_name.lower()).strip("-") or "source"
+        manifest_dir = Path(settings.storage_dir) / "ml-manifests"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        manifest = manifest_dir / f"{slug}-{utcnow().strftime('%Y%m%d%H%M%S')}.jsonl"
+        manifest.write_text("".join(json.dumps({"path": p}) + "\n" for p in targets),
+                            encoding="utf-8")
+        specs.append((MlSource(id=new_uuid(), name=source_name, kind="manifest",
+                               path=str(manifest), status="approved",
+                               agreement_json={"selection": {"state": "approved",
+                                                             "evidence": "admin-selection"}}),
+                      MlImportBatch(state="queued") if make_batch else None))
+    else:
+        for i, target in enumerate(targets):
+            name = source_name if len(targets) == 1 else f"{source_name}-{i + 1}"
+            if session.execute(select(MlSource).where(MlSource.name == name)
+                               ).scalar_one_or_none() is not None:
+                raise ModelLabError(f"source already exists: {name}")
+            specs.append((MlSource(id=new_uuid(), name=name, kind="dir", path=target,
+                                   status="approved",
+                                   agreement_json={"selection": {"state": "approved",
+                                                                 "evidence": "admin-selection"}}),
+                          MlImportBatch(state="queued") if make_batch else None))
+    with session.no_autoflush:
+        for source, batch in specs:
+            if batch is not None:
+                batch.source_id = source.id
+            session.add(source)
+            if batch is not None:
+                session.add(batch)
     session.commit()
-    result = scan_source(session, source, preview=False)
-    return source, result
+    return specs
+
+
+def enqueue_scan_job(session, settings, source: MlSource, batch: MlImportBatch,
+                    *, operation: str = "model_lab.scan"):
+    """Job + outbox row for a queued import batch (same pattern as identify)."""
+    import hashlib as _hl
+    import json as _json
+
+    from .models import Job
+    from .orchestration import enqueue
+
+    request_json = {"source_id": source.id, "batch_id": batch.id, "chunk_files": 500}
+    job = Job(id=new_uuid(), owner_id="model-lab", operation=operation,
+              model_id=settings.train_queue_model_id, model_revision="model-lab",
+              status="queued", request_json=request_json,
+              request_hash=_hl.sha256(_json.dumps(request_json, sort_keys=True).encode()).hexdigest(),
+              idempotency_key=f"ml-scan-{batch.id}")
+    session.add(job)
+    batch.cursor_json = {"job_id": job.id}
+    enqueue(session, job, settings)
+    session.commit()
+    return job
 
 
 def coverage(session) -> dict:

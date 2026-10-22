@@ -959,6 +959,23 @@ class MlImportBatch(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class MlDirIndex(Base):
+    """Worker-built folder index of the library root (replaces hub filesystem browse)."""
+
+    __tablename__ = "ml_dir_index"
+
+    path: Mapped[str] = mapped_column(String(700), primary_key=True)
+    parent: Mapped[str] = mapped_column(String(700), index=True)
+    name: Mapped[str] = mapped_column(String(300))
+    n_audio: Mapped[int] = mapped_column(Integer, default=0)
+    n_dirs: Mapped[int] = mapped_column(Integer, default=0)
+    has_nfo: Mapped[bool] = mapped_column(Boolean, default=False)
+    has_lrc: Mapped[bool] = mapped_column(Boolean, default=False)
+    files_json: Mapped[list] = mapped_column(JSON, default=list)  # [{name,bytes}] audio entries
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
+                                                 onupdate=utcnow)
+
+
 class MlMetadataClaim(Base):
     """Field-level metadata claim with provenance; locked manual corrections."""
 
