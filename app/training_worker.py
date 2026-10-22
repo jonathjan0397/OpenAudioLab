@@ -823,7 +823,8 @@ class TrainingWorker:
                       attempt_id, rc, outcome, (stderr or "")[-2000:])
             fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
                          code or "TRAINING_FAILED", (stderr or code or "trainer failed")[-280:])
-            _scrub(Path(self.settings.train_workdir) / f"ml-{attempt_id[:8]}")
+            _scrub(Path(self.settings.train_workdir)
+                   / f"ml-{str(request.get('attempt_id', ''))[:8]}")
             return
         # Slice tail: export -> reload -> register (vertical slice M4).
         export_path = result.get("export_path")
@@ -856,7 +857,8 @@ class TrainingWorker:
                          lease_token, ("train-result", json.dumps(result).encode()),
                          synthetic=False,
                          engine_result={"trainer": command.split()[0], "result": result})
-        _scrub(Path(self.settings.train_workdir) / f"ml-{attempt_id[:8]}")
+        _scrub(Path(self.settings.train_workdir)
+               / f"ml-{str(request.get('attempt_id', ''))[:8]}")
 
 
     def _release_node(self) -> None:
