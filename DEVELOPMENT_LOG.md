@@ -993,3 +993,47 @@ Validation evidence: baseline captured pre-build (avg wait 124.5 s / max 3097 s,
 572 jobs/7 d); 320 backend tests (20 new gpu-fleet incl. §19 subsets), 17
 vitest, clean tsc+vite build. No paid Vast instances created during tests
 (mocked provider). Live fault tests + Top-10 against real Vast pending redeploy.
+
+## 2026-10-22 — Model Lab M1–M7 (feat/model-lab)
+
+Implementation decisions:
+- M1 legacy repairs: fpcalc `fingerprint` key + `fingerprint=` AcoustID param
+  (legacy `signature` fallback kept); credited-artist array joined by
+  joinphrase; identification status enum separates failure from no-match;
+  selector is multilabel, title-aware, sha256-deduped with recorded
+  cap-relaxation; `loras.visibility` (migration 0039) + `artist:`/`title:`
+  namespace filter keep identity tags out of public suggestions; Vast CUDA
+  compared as version tuple (12.10 > 12.8); unknown reliability scores neutral
+  (0.5), never free; house ceilings aligned to $0.25/h; merge outputs
+  immutable (`_v2` suffix); train weights pinned via build args.
+- M2 catalog (migration 0040): ml_sources (field-level agreement scopes),
+  ml_recordings (checksum+probe+review+identify), incremental importer
+  (new/cached/changed/duplicate/excluded/review; changed = same path new
+  sha), ml_metadata_claims (provenance + locked manual corrections),
+  namespaced ml_tag_terms seeded from the curated vocabulary, 24 ml_lanes,
+  shared ml_provider_cache. Identification runs in the API process (fpcalc is
+  signal work, not model inference) with durable status + retry; every
+  provider result is a claim pending review — never auto-approved.
+  MusicBrainz limiter 1 req/s. Dataset eligibility requires approved review
+  AND approved source. Selection policy 60/30/10 editable, must sum to 100.
+- M3 voice (migration 0041): energy-gated crops -> mfcc-stats-v1 embeddings
+  (pure Python) -> greedy centroid singer groups; singletons held; BYOL
+  challenger config-gated and fail-closed; group review approve/reject/merge.
+- M4 training (migration 0042): deterministic frozen dataset manifests
+  (order-independent sha) gated on review; pilot budget 6h/$3 editable with
+  explicit BUDGET_EXHAUSTED refusal; model_lab.train jobs ride the training
+  queue; worker trainer command fails closed (TRAINER_UNAVAILABLE); spend/
+  hours booked back on completion.
+- M5 merges: recipe validation (>=2 ready adapters, slerp/dare), command-
+  gated execution (MERGE_UNAVAILABLE), immutable candidate versions (v1, v2…),
+  explicit release/retire.
+- M6 releases: evaluation kinds ab/objective/listener with verdict
+  vocabulary; promotion gate is machine-readable (released + verdict);
+  channel promotion refuses unreleased bundles (PROMOTION_BLOCKED).
+- M7 console: Admin → Model Lab page (Overview/Catalog/Recordings/Voice/
+  Training/Merges/Bundles/Channels) over the /admin/model-lab API.
+
+Validation evidence: 385 backend tests (39 new model-lab M1–M6), 17 vitest,
+clean tsc+vite build. No GPU/Vast spend: trainer and merge commands are
+config-gated and were exercised with fakes. Real-hardware identification
+(AcoustID client key) and trainer runs remain pending deployment facts.

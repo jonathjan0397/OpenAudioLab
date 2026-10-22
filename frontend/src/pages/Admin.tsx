@@ -6,6 +6,7 @@ import { AreaChart, BarChart, Sparkline } from "../components/charts";
 import { Avatar, Delta, Progress, StatusPill, fmtTime } from "../components/ui";
 import { usePlayer } from "../components/PlayerContext";
 import GpuFleetPage from "./admin/GpuFleet";
+import ModelLabPage from "./admin/ModelLab";
 
 interface AdminUser {
   id: string;
@@ -276,6 +277,7 @@ const SIDEBAR = [
   { to: "/admin/services", label: "Model Services", icon: "▣" },
   { to: "/admin/workers", label: "GPU Workers", icon: "▦" },
   { to: "/admin/fleet", label: "GPU Fleet", icon: "⛁" },
+  { to: "/admin/model-lab", label: "Model Lab", icon: "⚗" },
   { to: "/admin/vast", label: "Vast Cloud", icon: "☁" },
   { to: "/admin/training", label: "Artist Training", icon: "◈" },
   { to: "/admin/loras", label: "Style Models", icon: "♪" },
@@ -1563,6 +1565,7 @@ export default function AdminPage() {
         )}
 
         {section === "fleet" && <GpuFleetPage />}
+        {section === "model-lab" && <ModelLabPage />}
 
         {section === "vast" && (
           <div className="card">
