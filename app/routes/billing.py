@@ -16,7 +16,7 @@ from ..routes.auth import current_user
 router = APIRouter(tags=["billing"])
 
 PLANS: dict[str, dict] = {
-    "free": {"id": "free", "name": "Free account", "price_usd": 0, "monthly_credits": 0, "visible": False},
+    "free": {"id": "free", "name": "Free account", "price_usd": 0, "monthly_credits": 0, "visible": True},
     "beginner": {"id": "beginner", "name": "Beginner", "price_usd": 5, "monthly_credits": 1000, "visible": True},
     "pro": {"id": "pro", "name": "Pro", "price_usd": 8, "monthly_credits": 2500, "visible": True},
     "premier": {"id": "premier", "name": "Premier", "price_usd": 24, "monthly_credits": 10000, "visible": True},

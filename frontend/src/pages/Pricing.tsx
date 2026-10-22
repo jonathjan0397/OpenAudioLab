@@ -40,6 +40,7 @@ interface PricingResp {
 }
 
 const PERKS: Record<string, string[]> = {
+  free: ["Turbo model access", "Premium SFT & XL models locked", "No monthly credits", "Top up any time with credit packs"],
   beginner: ["1,000 credits / month", "Guest allowance upgrade", "MP3 + WAV exports", "Private outputs"],
   pro: ["2,500 credits / month", "MP3 + WAV exports", "Artist profiles", "Mood presets & LLM lyrics"],
   premier: ["10,000 credits / month", "6-stem separation", "Priority queue", "Custom artist training"],
@@ -136,7 +137,7 @@ export default function PricingPage() {
           return (
             <div key={p.id} className="card stat-card" style={p.popular ? { borderColor: "var(--accent)", position: "relative" } : undefined}>
               {p.popular && (
-                <span className="pill info" style={{ position: "absolute", top: -10, right: 12 }}>Most Popular</span>
+                <span className="pill info" style={{ position: "absolute", top: 10, right: 12, zIndex: 1 }}>Most Popular</span>
               )}
               <div>
                 <div className="label">{p.name}</div>
