@@ -252,7 +252,7 @@ def scan_source_resumable(db, source_id: str, batch_id: str, *, chunk_files: int
 
 def rebuild_dir_index(db, settings, *, root: str | None = None, chunk_dirs: int = 400,
                       abort=None, on_progress=None) -> dict:
-    """Index every directory under the library root (readdir only).
+    """Index every directory under the library root (streaming readdir walk).
 
     Serves the browse UI from the DB so the hub never touches TrueNAS files.
     """
@@ -261,42 +261,50 @@ def rebuild_dir_index(db, settings, *, root: str | None = None, chunk_dirs: int 
     raw_root = Path(root or settings.truenas_browse_root or "")
     if not raw_root.is_dir():
         raise ModelLabError("BROWSE_NOT_CONFIGURED: library root unavailable on this host")
-    dirs = [raw_root]
-    for dirpath, dirnames, _ in os.walk(raw_root):
-        dirnames[:] = sorted(d for d in dirnames if not d.startswith((".", "$")))
-        dirs.extend(Path(dirpath) / d for d in dirnames)
-    dirs.sort()
+    browse_root = (settings.truenas_browse_root or "").strip()
+    if browse_root:
+        norm_root = os.path.normpath(str(raw_root))
+        norm_base = os.path.normpath(browse_root)
+        if norm_root != norm_base and not norm_root.startswith(norm_base + os.sep):
+            raise ModelLabError(f"BROWSE_OUT_OF_ROOT: {root} is outside the configured root")
     indexed = 0
+    walker = os.walk(raw_root, topdown=True)
+    pending: list[Path] = [raw_root]
     with db.session() as session:
-        for i in range(0, len(dirs), chunk_dirs):
+        while pending:
             if abort is not None and abort():
-                break
-            for d in dirs[i:i + chunk_dirs]:
-                try:
-                    entries = list(os.scandir(d))
-                except OSError:
-                    continue
-                files = [{"name": e.name, "bytes": (e.stat().st_size if e.is_file(follow_symlinks=False) else None),
-                          "is_dir": e.is_dir(follow_symlinks=False)}
-                         for e in entries]
-                audio = [f for f in files if not f["is_dir"]
-                         and Path(f["name"]).suffix.lower() in AUDIO_SUFFIXES]
-                names = {f["name"].lower() for f in files}
-                row = session.get(MlDirIndex, str(d)) or MlDirIndex(
-                    path=str(d), parent=str(d.parent), name=d.name)
-                row.parent = str(d.parent)
-                row.name = d.name
-                row.n_audio = len(audio)
-                row.n_dirs = sum(1 for f in files if f["is_dir"])
-                row.has_nfo = ("album.nfo" in names or "artist.nfo" in names)
-                row.has_lrc = any(n.endswith(".lrc") for n in names)
-                row.files_json = [{k: f[k] for k in ("name", "bytes")} for f in audio]
-                session.merge(row)
-                indexed += 1
-            session.commit()
-            if on_progress is not None:
-                on_progress(indexed, len(dirs))
-    return {"indexed": indexed, "total_dirs": len(dirs)}
+                return {"indexed": indexed, "cancelled": True}
+            d = pending.pop(0)
+            try:
+                entries = list(os.scandir(d))
+            except OSError:
+                continue
+            subdirs = sorted(Path(e.path) for e in entries if e.is_dir(follow_symlinks=False)
+                             and not e.name.startswith((".", "$")))
+            pending.extend(subdirs)
+            files = [{"name": e.name, "bytes": (e.stat(follow_symlinks=False).st_size
+                                                if e.is_file(follow_symlinks=False) else None),
+                      "is_dir": e.is_dir(follow_symlinks=False)} for e in entries]
+            audio = [f for f in files if not f["is_dir"]
+                     and Path(f["name"]).suffix.lower() in AUDIO_SUFFIXES]
+            names = {f["name"].lower() for f in files}
+            row = session.get(MlDirIndex, str(d)) or MlDirIndex(
+                path=str(d), parent=str(d.parent), name=d.name)
+            row.parent = str(d.parent)
+            row.name = d.name
+            row.n_audio = len(audio)
+            row.n_dirs = len(subdirs)
+            row.has_nfo = ("album.nfo" in names or "artist.nfo" in names)
+            row.has_lrc = any(n.endswith(".lrc") for n in names)
+            row.files_json = [{k: f[k] for k in ("name", "bytes")} for f in audio]
+            session.merge(row)
+            indexed += 1
+            if indexed % chunk_dirs == 0:
+                session.commit()
+                if on_progress is not None:
+                    on_progress(indexed, -1)
+        session.commit()
+    return {"indexed": indexed, "total_dirs": indexed}
 
 
 def browse_from_index(session, settings, path: str | None) -> dict:

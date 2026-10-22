@@ -20,7 +20,7 @@ docker run -d --name oal-worker-hub --gpus all --network host --restart unless-s
   -e OAL_DEMUCS_DEVICE=cuda -e OAL_DEMUCS_PYTHON=/usr/local/bin/python \
   -e OAL_ENGINE_IDLE_STOP_SECONDS=600 -e OAL_REDIS_URL="$REDIS" -e OAL_SECRET_KEY="$SECRET" \
   -e OAL_STORAGE_BACKEND=local -e OAL_STORAGE_DIR=/data/oal \
-  -e OAL_TRUENAS_BROWSE_ROOT=/mnt/truenas \
+  -e "OAL_TRUENAS_BROWSE_ROOT=/mnt/truenas/Media Library/Music" \
   -e OAL_TRAIN_WORKDIR=/opt/acestep/training-data -e OAL_TRAIN_MIN_FREE_MB=10000 \
   -e OAL_TRAIN_HTTP_TIMEOUT_SECONDS=7200 -e OAL_ENGINE_AUTOSTART=1 \
   -e OAL_MODEL_LAB_TRAIN_COMMAND="python3 -m app.model_lab_trainer" \
@@ -48,7 +48,7 @@ docker run -d --name oal-worker-gpu1 --gpus all --restart unless-stopped \
   -e OAL_DEMUCS_DEVICE=cuda -e OAL_DEMUCS_PYTHON=/usr/local/bin/python \
   -e OAL_ENGINE_IDLE_STOP_SECONDS=600 -e OAL_REDIS_URL="$REDIS" -e OAL_SECRET_KEY="$SECRET" \
   -e OAL_STORAGE_BACKEND=local -e OAL_STORAGE_DIR=/data/oal \
-  -e OAL_TRUENAS_BROWSE_ROOT=/mnt/truenas \
+  -e "OAL_TRUENAS_BROWSE_ROOT=/mnt/truenas/Media Library/Music" \
   -e OAL_TRAIN_WORKDIR=/opt/acestep/training-data-gpu1 -e OAL_TRAIN_MIN_FREE_MB=10000 \
   -e OAL_TRAIN_HTTP_TIMEOUT_SECONDS=7200 -e OAL_ENGINE_AUTOSTART=0 \
   -e OAL_MODEL_LAB_TRAIN_COMMAND="python3 -m app.model_lab_trainer" \
