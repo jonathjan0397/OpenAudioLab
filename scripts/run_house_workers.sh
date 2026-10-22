@@ -26,7 +26,7 @@ docker run -d --name oal-worker-hub --gpus all --network host --restart unless-s
   -e OAL_PREMIUM_PROFILES_ENABLED=sft-quality-v1,xl-sft-quality-v1,xl-turbo-fast-v1 \
   -e OAL_XL_CHECKPOINT_ID=acestep-v15-xl-sft \
   -e OAL_XL_TURBO_CHECKPOINT_ID=acestep-v15-xl-turbo \
-  -e OAL_WORKER_ID=oal-baseline-gpu0 \
+  -e OAL_WORKER_ID=oal-baseline-gpu0 -e OAL_NODE_KEY=oal-baseline-gpu0 \
   -e OAL_LLM_AUTOSTART=0 \
   -e OAL_LLM_CTX=4096 \
   -e OAL_LLM_GPU_LAYERS=99 \
@@ -50,7 +50,7 @@ docker run -d --name oal-worker-gpu1 --gpus all --restart unless-stopped \
   -e OAL_TRAIN_WORKDIR=/opt/acestep/training-data-gpu1 -e OAL_TRAIN_MIN_FREE_MB=0 \
   -e OAL_TRAIN_HTTP_TIMEOUT_SECONDS=7200 -e OAL_ENGINE_AUTOSTART=0 \
   -e OAL_MODEL_LAB_TRAIN_COMMAND="python3 -m app.model_lab_trainer" \
-  -e OAL_WORKER_ID=oal-training-gpu1 \
+  -e OAL_WORKER_ID=oal-training-gpu1 -e OAL_NODE_KEY=oal-baseline-gpu1 \
   -e OAL_WORKER_ROLE=training_worker -e OAL_WORKER_TIER=baseline \
   -v /mnt/oal-storage:/data/oal -v oal-acestep-cache-gpu1:/root/.cache \
   -v /mnt/truenas:/mnt/truenas:ro \

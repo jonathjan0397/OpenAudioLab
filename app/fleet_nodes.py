@@ -29,7 +29,8 @@ def register_node(session: Session, node_key: str, *, instance_id: str | None = 
                   worker_id: str | None = None) -> FleetNode:
     node = session.get(FleetNode, node_key)
     if node is None:
-        node = FleetNode(id=node_key, instance_id=instance_id, worker_id=worker_id)
+        node = FleetNode(id=node_key, instance_id=instance_id, worker_id=worker_id,
+                         heartbeat_at=utcnow())
         session.add(node)
     else:
         if instance_id is not None:
