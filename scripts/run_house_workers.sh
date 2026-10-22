@@ -1,9 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 IMAGE=stratastack/oal-worker:house-v1-070-int8
-DB='postgresql+psycopg2://oal:1ee972a2582e5158726c93f6aca5c11d@10.203.0.1:55432/oal'
-REDIS='redis://:08761ce6004648093ab09c979bddef11c4c46b57de10936c@10.203.0.1:6379/0'
-SECRET=3aebf3fd8022c3b9de69d57ba5aa17d22b318d84757fcf710b146282ea24fa48
+: "${OAL_WORKERS_ENV:=/home/administrator/.config/oal/workers.env}"
+[ -f "$OAL_WORKERS_ENV" ] || { echo "missing credentials file: $OAL_WORKERS_ENV" >&2; exit 1; }
+. "$OAL_WORKERS_ENV"
+export DB REDIS SECRET
 
 docker rm -f oal-worker-hub oal-worker-gpu1 2>/dev/null || true
 

@@ -1331,3 +1331,35 @@ budget reserved_usd back to 0.0 after reaping the orphaned attempt.
 - Live status: first full dir_index of the library still streaming on gpu1
   (9,600+ folders indexed, resumable-safe design); workers refresh to the new
   bundle when it finishes, before the Wave 0 calibration slice.
+
+## 2026-10-22 — SECURITY INCIDENT + hardening (hub services were internet-bound)
+
+Discovery during Batch 2/worker refresh: fleet node `8a4ec1a60218` (worker
+`training-8a4ec1a60218-290`) kept heartbeating while no local process owned it.
+Redis CLIENT LIST showed an external host 159.48.242.68 BRPOP-ing
+`oal:queue:training`. Root cause: the hub's compose published Redis (6379),
+Postgres (55432) and the API (50555) on 0.0.0.0 — Redis/Postgres reachable from
+the public internet. The external box claimed exactly one job (the first
+unscoped dirs/refresh) and failed it (`BROWSE_NOT_CONFIGURED`); one
+fleet-node row (now quarantined) plus job-attempt bookkeeping. No evidence of
+data reads beyond queue consumption; treat all three credentials as exposed.
+
+Response (this host + hub):
+- `iptables -I DOCKER-USER -s 159.48.242.68 -j DROP` on the hub (verified: it
+  disconnected; no other non-local Redis clients remain).
+- Redis + Postgres port binds restricted to 10.203.0.1 (wireguard) + 127.0.0.1.
+  API stays published on 50555 (authenticated product surface, by design).
+- Credentials rotated: postgres ALTER USER + new OAL_POSTGRES_PASSWORD,
+  OAL_REDIS_PASSWORD, OAL_SECRET_KEY, OAL_DATABASE_URL (compose env updated;
+  everything recomposed; ALTER done before recreates). Workers reconnected on
+  rotated secrets and consume queues (verified shared_ready + brpop loop).
+- run_house_workers.sh no longer embeds secrets: sourced from
+  /home/administrator/.config/oal/workers.env (untracked, 0750/0640, root-grp).
+  NOTE: the OLD secrets remain in git history of the private repo; rotated so
+  they are dead. If the repo ever publicates, history scrub is required.
+- Verification: public 6379/55432 connects now fail (timeout/refused) from this
+  box; wg path still works; 468 backend tests, 17 frontend tests.
+
+Pending owner questions: whether 159.48.242.68 is a machine we own (was it an
+old rental?); API 50555 TLS/allowed-IP decision; persistent firewall rules
+(netfilter-persistent not enabled on the hub).
