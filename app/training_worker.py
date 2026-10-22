@@ -372,6 +372,7 @@ class TrainingWorker:
             artist = session.get(ArtistProfile, adapter.artist_profile_id)
             manifest = list((version.manifest_json or {}).get("recordings", [])) if version else []
             asset_ids = [m["asset_id"] for m in manifest]
+            lyrics_map = {m["asset_id"]: (m.get("lyrics") or "") for m in manifest}
             assets = {aid: session.get(Asset, aid) for aid in asset_ids}
             captions = {m["asset_id"]: m.get("caption") for m in manifest}
             artist_name = artist.name if artist else "artist"
@@ -394,10 +395,16 @@ class TrainingWorker:
             (dataset_dir / f"track{index}.wav").write_bytes(self._asset_bytes(asset))
             caption = captions.get(asset_id) or f"{artist_name.lower()} vocal recording"
             (dataset_dir / f"track{index}.json").write_text(json.dumps({"caption": caption}), encoding="utf-8")
+            lyric_text = str(lyrics_map.get(asset_id) or "").strip()
+            if lyric_text:
+                # ACE-Step picks up <stem>.lyrics.txt and marks the sample vocal.
+                (dataset_dir / f"track{index}.lyrics.txt").write_text(lyric_text,
+                                                                      encoding="utf-8")
 
         set_job_stage(self.db, job_id, "preparing dataset")
         self._ensure_engine_ready()
-        self.adapter.scan_dataset(str(dataset_dir), f"oal-{job_id[:8]}", True)
+        any_lyrics = any(str(lyrics_map.get(a) or "").strip() for a in asset_ids)
+        self.adapter.scan_dataset(str(dataset_dir), f"oal-{job_id[:8]}", not any_lyrics)
         self.adapter.preprocess(str(workdir / "tensors"))
         heartbeat(self.db, attempt_id, lease_token)
         self.adapter.start_training(
@@ -748,9 +755,42 @@ class TrainingWorker:
         env = dict(os.environ)
         env["OAL_ML_ATTEMPT_ID"] = request.get("attempt_id", "")
         env["OAL_ML_DATASET_SHA"] = request.get("frozen_sha256", "")
+
+        # Recipe overrides + disk pre-flight: estimate tensors/checkpoints from the
+        # frozen manifest; explicit fail, never a silent degradation.
+        import shutil
+
+        with self.db.session() as session:
+            attempt = session.get(MlTrainingAttempt, request.get("attempt_id"))
+            recipe = dict(attempt.recipe_json or {}) if attempt else {}
+            ds = session.get(MlDataset, attempt.dataset_id) if attempt else None
+            entries = (ds.manifest_json or {}).get("entries", []) if ds else []
+        est_bytes = sum(int(e.get("bytes") or 8_000_000) for e in entries) * 3 + 8 * 2 ** 30
+        try:
+            free = shutil.disk_usage(Path(self.settings.train_workdir)).free
+        except OSError:
+            free = None
+        if free is not None and free < est_bytes:
+            with self.db.session() as session:
+                attempt = session.get(MlTrainingAttempt, request.get("attempt_id"))
+                if attempt is not None:
+                    settle_attempt(session, attempt, state="failed",
+                                   error=f"INSUFFICIENT_DISK: need ~{est_bytes // 2 ** 20} MB, "
+                                         f"have {free // 2 ** 20} MB",
+                                   budget=session.get(MlBudget, attempt.budget_id))
+            self._release_node()
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         "INSUFFICIENT_DISK",
+                         f"train needs ~{est_bytes // 2 ** 20} MB; {free // 2 ** 20} MB free "
+                         f"in {self.settings.train_workdir}")
+            return
+        wall_hours = float(recipe.get("wall_hours") or self.settings.model_lab_run_wall_hours)
+        if recipe.get("epochs") is not None:
+            env["OAL_ML_EPOCHS"] = str(int(recipe["epochs"]))
+        if recipe.get("seed") is not None:
+            env["OAL_ML_SEED"] = str(int(recipe["seed"]))
         rc, stdout, stderr, outcome = self._supervised_run(
-            command, env, job_id, attempt_id, lease_token,
-            self.settings.model_lab_run_wall_hours)
+            command, env, job_id, attempt_id, lease_token, wall_hours)
         result = self._last_json(stdout)
         code = {"ok": None, "cancelled": "TRAINING_CANCELLED",
                 "timeout": "TRAINING_TIMEOUT",
@@ -758,6 +798,11 @@ class TrainingWorker:
         ok = outcome == "ok" and rc == 0
         if ok and not (result.get("artifact_key") and result.get("sha256")):
             ok, code = False, "TRAINING_NO_ARTIFACT"  # a successful no-op fails
+        if ok:
+            acc = result.get("acceptance") or {}
+            if (int(result.get("steps") or 0) <= 0 or not acc.get("loadable")
+                    or not acc.get("lora_load") or int(acc.get("inference_bytes") or 0) < 1000):
+                ok, code = False, "TRAINING_ACCEPTANCE_FAILED"
         with self.db.session() as session:
             attempt = session.get(MlTrainingAttempt, request.get("attempt_id"))
             if attempt is not None:
@@ -774,6 +819,7 @@ class TrainingWorker:
                       attempt_id, rc, outcome, (stderr or "")[-2000:])
             fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
                          code or "TRAINING_FAILED", (stderr or code or "trainer failed")[-280:])
+            _scrub(Path(self.settings.train_workdir) / f"ml-{attempt_id[:8]}")
             return
         # Slice tail: export -> reload -> register (vertical slice M4).
         export_path = result.get("export_path")
@@ -781,6 +827,10 @@ class TrainingWorker:
             key = f"ml/adapters/{attempt_id}/model.safetensors"
             self.storage.put(key, Path(export_path).read_bytes())
             result["artifact_key"] = key
+        sample_path = (result.get("acceptance") or {}).get("sample_path")
+        if sample_path and Path(sample_path).is_file():
+            self.storage.put(f"ml/acceptance/{attempt_id}/sample.mp3",
+                             Path(sample_path).read_bytes())
         result["reload"] = "skipped"
         if self.settings.model_lab_reload_enabled and export_path:
             try:
@@ -798,6 +848,8 @@ class TrainingWorker:
                          lease_token, ("train-result", json.dumps(result).encode()),
                          synthetic=False,
                          engine_result={"trainer": command.split()[0], "result": result})
+        _scrub(Path(self.settings.train_workdir) / f"ml-{attempt_id[:8]}")
+
 
     def _release_node(self) -> None:
         """active -> cleanup -> shared_ready (no-op when not under contract)."""
@@ -1235,6 +1287,19 @@ class TrainingWorker:
 
     def stop(self) -> None:
         self._stop = True
+
+
+def _scrub(path: Path) -> None:
+    """Terminal-state scratch hygiene (house-lora and registered artifacts are
+    never under this tree)."""
+    import shutil
+
+    try:
+        if path.is_dir():
+            shutil.rmtree(path)
+            log.info("cleaned model-lab scratch %s", path)
+    except OSError as exc:
+        log.warning("scratch cleanup failed for %s: %s", path, exc)
 
 
 def build_training_worker() -> TrainingWorker:

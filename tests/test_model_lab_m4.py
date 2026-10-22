@@ -22,8 +22,8 @@ def _admin_session(client):
         session.commit()
 
 
-def _approved_recording(client, review="approved"):
-    from app.models import MlRecording, MlSource, new_uuid
+def _approved_recording(client, review="approved", scopes=("recording",)):
+    from app.models import MlRecording, MlRightsRecord, MlSource, new_uuid
 
     with client.app.state.db.session() as session:
         src = MlSource(id=new_uuid(), name=f"t-src-{next(_SEQ)}", status="approved")
@@ -33,6 +33,10 @@ def _approved_recording(client, review="approved"):
                           sha256=f"t-sha-{next(_SEQ)}", duration_seconds=180.0,
                           review_status=review)
         session.add(rec)
+        session.commit()
+        for scope in scopes:
+            session.add(MlRightsRecord(id=new_uuid(), recording_id=rec.id, holder="owner",
+                                       scope=scope, evidence="test declaration"))
         session.commit()
         return rec.id
 

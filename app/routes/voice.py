@@ -97,6 +97,7 @@ def _recording_json(r: VoiceRecording) -> dict:
         "sample_rate": r.sample_rate,
         "channels": r.channels,
         "qc": r.qc_json,
+        "lyrics_chars": len(r.lyrics_text or ""), "lyrics_sha256": r.lyrics_sha256,
         "consent": r.consent_json,
         "vocal_asset_id": r.vocal_asset_id,
         "state": r.state,
@@ -225,7 +226,8 @@ async def add_recording(profile_id: str, request: Request,
                         owner_id: str = Depends(owner_from_request),
                         file: UploadFile = File(...),
                         consent: str = Form(default="", max_length=500),
-                        caption: str = Form(default="", max_length=300)) -> JSONResponse:
+                        caption: str = Form(default="", max_length=300),
+                        lyrics: str = Form(default="")) -> JSONResponse:
     settings = request.app.state.settings
     filename = file.filename or "recording"
     if not filename.lower().endswith(SUPPORTED_UPLOAD_EXT):
@@ -288,6 +290,10 @@ async def add_recording(profile_id: str, request: Request,
         )
         if caption.strip():
             recording.qc_json = {**qc, "caption": caption.strip()}
+        if lyrics:
+            # Submitted lyrics are immutable: stored exactly as sent (invariant 1).
+            recording.lyrics_text = lyrics
+            recording.lyrics_sha256 = hashlib.sha256(lyrics.encode("utf-8")).hexdigest()
         session.add(recording)
         session.commit()
         out = _recording_json(recording)
@@ -331,7 +337,9 @@ def finalize_voice_dataset(profile_id: str, request: Request,
             raise ApiError(422, "DATASET_EMPTY", "Finalize requires at least one usable recording.")
         manifest = [{"recording_id": r.id, "asset_id": r.asset_id, "sha256": r.sha256,
                      "duration_seconds": r.duration_seconds,
-                     "caption": (r.qc_json or {}).get("caption")} for r in usable]
+                     "caption": (r.qc_json or {}).get("caption"),
+                     "lyrics": r.lyrics_text, "lyrics_sha256": r.lyrics_sha256}
+                    for r in usable]
         frozen = hashlib.sha256(
             "\n".join(f"{m['sha256']}|{m['recording_id']}" for m in sorted(manifest, key=lambda m: m["recording_id"])).encode()
         ).hexdigest()

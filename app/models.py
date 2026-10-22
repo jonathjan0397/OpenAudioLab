@@ -301,6 +301,8 @@ class VoiceRecording(Base):
     channels: Mapped[int | None] = mapped_column(Integer, nullable=True)
     qc_json: Mapped[dict] = mapped_column(JSON, default=dict)
     consent_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    lyrics_text: Mapped[str | None] = mapped_column(Text, nullable=True)  # submitted verbatim
+    lyrics_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     vocal_asset_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     separation_json: Mapped[dict] = mapped_column(JSON, default=dict)
     state: Mapped[str] = mapped_column(String(20), default="active")  # active|removed
@@ -943,6 +945,23 @@ class MlRecording(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class MlRightsRecord(Base):
+    """Per-recording owner declaration: evidence record, not proof of ownership."""
+
+    __tablename__ = "ml_rights_records"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    recording_id: Mapped[str] = mapped_column(String(36), index=True)
+    holder: Mapped[str] = mapped_column(String(200))
+    scope: Mapped[str] = mapped_column(String(24))  # recording|composition|singer_identity
+    purpose: Mapped[str] = mapped_column(String(40), default="house-training")
+    state: Mapped[str] = mapped_column(String(12), default="declared")  # declared|revoked
+    evidence: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    declared_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class MlImportBatch(Base):
     """Incremental importer progress: cursor, counts, state."""
 
@@ -1104,6 +1123,7 @@ class MlDataset(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     name: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(12), default="style")  # style|voice
     frozen_sha256: Mapped[str] = mapped_column(String(64))
     manifest_json: Mapped[dict] = mapped_column(JSON, default=dict)
     report_json: Mapped[dict] = mapped_column(JSON, default=dict)

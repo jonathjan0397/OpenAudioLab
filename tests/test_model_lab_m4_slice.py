@@ -8,6 +8,11 @@ import pytest
 
 _SEQ = iter(range(1, 10000))
 
+ACC = ('"steps": 48, "acceptance": {"lora_load": true, "loadable": true, '
+        '"tensors": 8, "inference_bytes": 4200, '
+        '"sample_path": "/nonexistent/acc.mp3"}')
+
+
 
 @pytest.fixture(autouse=True)
 def _admin_session(client):
@@ -77,6 +82,9 @@ def test_freeze_embeds_caption_in_manifest(client) -> None:
                           duration_seconds=200.0, review_status="approved",
                           dataset_eligible=True)
         session.add(rec)
+        from app.models import MlRightsRecord
+        session.add(MlRightsRecord(id=new_uuid(), recording_id=rec.id, holder="owner",
+                                   scope="recording", evidence="cap declaration"))
         session.commit()
         rid = rec.id
     ds = client.post("/api/v1/admin/model-lab/datasets",
@@ -107,6 +115,10 @@ def test_vertical_slice_end_to_end(client, monkeypatch, tmp_path) -> None:
                           sha256=f"slice-{next(_SEQ)}", duration_seconds=200.0,
                           review_status="unreviewed")
         session.add(rec)
+        session.commit()
+        from app.models import MlRightsRecord
+        session.add(MlRightsRecord(id=new_uuid(), recording_id=rec.id, holder="owner",
+                                   scope="recording", evidence="slice declaration"))
         session.commit()
         rid = rec.id
     review = client.post(f"/api/v1/admin/model-lab/recordings/{rid}/review",
@@ -141,7 +153,7 @@ def test_vertical_slice_end_to_end(client, monkeypatch, tmp_path) -> None:
     export.write_bytes(b"weights")
     client.app.state.settings.model_lab_train_command = "echo train"
     _FakeProc.stdout_line = ('{"artifact_key": "pending", "sha256": "ca' + "fe" * 31 +
-                             '", "hours": 1.5, "spend_usd": 0.2, "export_path": '
+                             f'", "hours": 1.5, "spend_usd": 0.2, {ACC}, "export_path": '
                              f'"{export}", "name": "slice-adapter"}}')
     monkeypatch.setattr(tw.subprocess, "Popen", _FakeProc)
     monkeypatch.setattr(tw.time, "sleep", lambda s: None)

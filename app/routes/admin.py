@@ -2766,6 +2766,10 @@ def _ml_recording_payload(rec) -> dict:
         "genre_raw": rec.genre_raw, "year": rec.year, "decade": rec.decade,
         "classification": rec.classification, "identify_status": rec.identify_status,
         "review_status": rec.review_status, "dataset_eligible": rec.dataset_eligible,
+        "tags_state": rec.tags_state, "tags_provenance": rec.tags_provenance_json,
+        "lyrics_origin": rec.lyrics_origin, "lyrics_chars": len(rec.lyrics_text or ""),
+        "lyrics_sha256": rec.lyrics_sha256,
+        "lyrics_provenance": rec.lyrics_provenance_json,
     }
 
 
@@ -2910,6 +2914,7 @@ def admin_model_lab_recording(recording_id: str, request: Request) -> JSONRespon
         tags = session.execute(select(MlTagAssignment).where(
             MlTagAssignment.recording_id == rec.id)).scalars().all()
         payload = _ml_recording_payload(rec)
+        payload["lyrics_text"] = rec.lyrics_text  # admin review surface only, never logs
         payload["claims"] = [{"id": c.id, "field": c.field, "value": c.value,
                               "provenance": c.provenance, "provider": c.provider,
                               "score": c.score, "status": c.status} for c in claims]
@@ -2992,6 +2997,93 @@ def _enqueue_ml_pass(request: Request, operation: str, recording_ids: list[str],
         session.commit()
         return JSONResponse({"job_id": job.id, "operation": operation,
                              "count": len(recording_ids), "state": "queued"}, status_code=202)
+
+
+class MlRightsDeclare(BaseModel):
+    holder: str = Field(min_length=1, max_length=200)
+    scope: str = Field(pattern="^(recording|composition|singer_identity)$")
+    purpose: str = Field(default="house-training", max_length=40)
+    evidence: str | None = Field(default=None, max_length=300)
+
+
+class MlRightsBulk(MlRightsDeclare):
+    scopes: list[str] = Field(default_factory=list)
+    recording_ids: list[str] = Field(min_length=1, max_length=2000)
+
+
+def _rights_payload(r) -> dict:
+    return {"id": r.id, "recording_id": r.recording_id, "holder": r.holder, "scope": r.scope,
+            "purpose": r.purpose, "state": r.state, "evidence": r.evidence,
+            "declared_by": r.declared_by,
+            "created_at": r.created_at.isoformat() if r.created_at else None}
+
+
+@router.post("/admin/model-lab/recordings/{recording_id}/rights")
+def admin_model_lab_rights_declare(recording_id: str, body: MlRightsDeclare,
+                                   request: Request) -> JSONResponse:
+    from ..models import MlRecording, MlRightsRecord, new_uuid as _uuid
+
+    with request.app.state.db.session() as session:
+        if session.get(MlRecording, recording_id) is None:
+            raise ApiError(404, "NOT_FOUND", "recording not found")
+        rec = MlRightsRecord(id=_uuid(), recording_id=recording_id, holder=body.holder,
+                             scope=body.scope, purpose=body.purpose, evidence=body.evidence,
+                             declared_by=getattr(request.state, "username", "admin"))
+        session.add(rec)
+        session.commit()
+        return JSONResponse(_rights_payload(rec), status_code=201)
+
+
+@router.get("/admin/model-lab/recordings/{recording_id}/rights")
+def admin_model_lab_rights_list(recording_id: str, request: Request) -> JSONResponse:
+    from ..models import MlRightsRecord
+
+    with request.app.state.db.session() as session:
+        rows = session.execute(
+            select(MlRightsRecord).where(MlRightsRecord.recording_id == recording_id)
+            .order_by(MlRightsRecord.created_at)).scalars().all()
+        return JSONResponse({"records": [_rights_payload(r) for r in rows]})
+
+
+@router.post("/admin/model-lab/rights/declare-selected")
+def admin_model_lab_rights_bulk(body: MlRightsBulk, request: Request) -> JSONResponse:
+    """Bulk declaration: same holder/scope set for many recordings."""
+    from ..models import MlRecording, MlRightsRecord, new_uuid as _uuid
+
+    scopes = body.scopes or [body.scope]
+    invalid = [s for s in scopes if s not in ("recording", "composition", "singer_identity")]
+    if invalid:
+        raise ApiError(422, "VALIDATION", f"unknown scopes: {invalid}")
+    with request.app.state.db.session() as session:
+        recs = session.execute(
+            select(MlRecording).where(MlRecording.id.in_(body.recording_ids))).scalars().all()
+        if len(recs) != len(set(body.recording_ids)):
+            raise ApiError(422, "VALIDATION", "unknown recordings in selection")
+        declared = 0
+        for rec in recs:
+            for scope in scopes:
+                session.add(MlRightsRecord(id=_uuid(), recording_id=rec.id, holder=body.holder,
+                                           scope=scope, purpose=body.purpose,
+                                           evidence=body.evidence,
+                                           declared_by=getattr(request.state, "username", "admin")))
+                declared += 1
+        session.commit()
+        return JSONResponse({"recordings": len(recs), "records_created": declared},
+                            status_code=201)
+
+
+@router.post("/admin/model-lab/rights/{record_id}/revoke")
+def admin_model_lab_rights_revoke(record_id: str, request: Request) -> JSONResponse:
+    from ..models import MlRightsRecord, utcnow as _now
+
+    with request.app.state.db.session() as session:
+        rec = session.get(MlRightsRecord, record_id)
+        if rec is None:
+            raise ApiError(404, "NOT_FOUND", "rights record not found")
+        rec.state = "revoked"
+        rec.revoked_at = _now()
+        session.commit()
+        return JSONResponse(_rights_payload(rec))
 
 
 @router.get("/admin/model-lab/recordings/{recording_id}/caption")
@@ -3344,6 +3436,9 @@ def admin_model_lab_budget_put(payload: dict, request: Request) -> JSONResponse:
 class MlDatasetCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     recording_ids: list[str]
+    kind: str = Field(default="style", pattern="^(style|voice)$")
+    allow_instrumental: bool = False
+    allow_suspect: bool = False
 
 
 @router.post("/admin/model-lab/datasets")
@@ -3352,12 +3447,16 @@ def admin_model_lab_dataset_create(body: MlDatasetCreate, request: Request) -> J
 
     with request.app.state.db.session() as session:
         try:
-            ds = freeze_dataset(session, body.name, body.recording_ids)
+            ds = freeze_dataset(session, body.name, body.recording_ids, kind=body.kind,
+                                allow_instrumental=body.allow_instrumental,
+                                allow_suspect=body.allow_suspect)
         except ValueError as exc:
             raise ApiError(422, "DATASET_INVALID", str(exc)) from exc
-        return JSONResponse({"id": ds.id, "name": ds.name, "frozen_sha256": ds.frozen_sha256,
+        return JSONResponse({"id": ds.id, "name": ds.name, "kind": ds.kind,
+                             "frozen_sha256": ds.frozen_sha256,
                              "recording_count": ds.recording_count,
-                             "total_seconds": ds.total_seconds}, status_code=201)
+                             "total_seconds": ds.total_seconds,
+                             "report": ds.report_json}, status_code=201)
 
 
 @router.get("/admin/model-lab/datasets")
@@ -3373,18 +3472,23 @@ def admin_model_lab_datasets(request: Request) -> JSONResponse:
 
 
 @router.post("/admin/model-lab/datasets/{dataset_id}/train")
-def admin_model_lab_dataset_train(dataset_id: str, request: Request) -> JSONResponse:
+def admin_model_lab_dataset_train(dataset_id: str, request: Request,
+                                  body: dict | None = None) -> JSONResponse:
     from ..model_lab_train import BudgetError, attach_job, get_budget, open_attempt
     from ..models import MlDataset, new_uuid as _uuid, utcnow as _now
     from ..orchestration import enqueue
 
+    body = body or {}
+    recipe = {"wall_hours": body.get("wall_hours"), "epochs": body.get("epochs"),
+              "seed": body.get("seed"), "base_model": body.get("base_model")}
+    recipe = {k: v for k, v in recipe.items() if v is not None}
     with request.app.state.db.session() as session:
         ds = session.get(MlDataset, dataset_id)
         if ds is None:
             raise ApiError(404, "NOT_FOUND", "dataset not found")
         budget = get_budget(session, request.app.state.settings)
         try:
-            attempt = open_attempt(session, ds, budget,
+            attempt = open_attempt(session, ds, budget, recipe=recipe,
                                    est_hours=request.app.state.settings.model_lab_est_hours,
                                    est_spend_usd=request.app.state.settings.model_lab_est_spend_usd)
             job = attach_job(session, attempt, "model-lab", request.app.state.settings)

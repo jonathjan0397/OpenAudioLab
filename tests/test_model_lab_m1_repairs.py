@@ -108,6 +108,9 @@ class _FakeProc:
         return 0
 
 
+ACC = ('"steps": 48, "acceptance": {"lora_load": true, "loadable": true, '
+        '"tensors": 8, "inference_bytes": 4200, '
+        '"sample_path": "/nonexistent/acc.mp3"}')
 _FakeProc.stdout_line = ""
 
 
@@ -142,7 +145,7 @@ def test_trainer_success_settles_budget_once(client, monkeypatch) -> None:
     _, attempt_id, lease = claimed
     client.app.state.settings.model_lab_train_command = "echo train"
     _FakeProc.stdout_line = ('{"artifact_key": "ml/a.pt", "sha256": "aa", '
-                             '"hours": 1.0, "spend_usd": 0.1}')
+                             f'"hours": 1.0, "spend_usd": 0.1, {ACC}}}')
     monkeypatch.setattr(tw.subprocess, "Popen", _FakeProc)
     monkeypatch.setattr(tw.time, "sleep", lambda s: None)
     tw.TrainingWorker._model_lab_train(_worker(client), ids["job"], attempt_id, lease)
