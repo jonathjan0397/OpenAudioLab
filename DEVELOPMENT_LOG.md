@@ -1182,3 +1182,14 @@ No migration. Validation: 388 backend tests (2 new), 17 vitest, clean build.
 - Bundle lifecycle adds `archive` (retired/candidate/failed -> archived);
   POST /bundles/{id}/archive.
 - Validation: 423 backend tests pass (4 new in tests/test_model_lab_m7_release.py).
+
+## 2026-10-22 — Pipeline M8: runbook + report (feat/model-lab-pipeline)
+
+- docs/MODEL_LAB_RUNBOOK.md: operator procedures for the vertical slice,
+  exclusive-training node states, offers/deploy/ledger, BYOL gating, merge
+  routing and release channels, plus the explicit unverified list.
+- docs/PIPELINE_REPORT.md: M1-M8 capability matrix with honest statuses
+  (implemented / fixture-tested / integration-tested / real-GPU-verified /
+  production-enabled); nothing real-GPU is claimed that this run did not run.
+- Frontend: GpuFleet gains a "Nodes" tab (fleet-node states + reset, cost
+  ledger totals/entries). Build + 17 vitest tests pass.
