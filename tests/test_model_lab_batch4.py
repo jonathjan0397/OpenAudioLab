@@ -188,3 +188,17 @@ def test_disk_preflight_fails_explicitly(client, monkeypatch) -> None:
         att = session.get(MlTrainingAttempt, attempt_id)
         assert att.state == "failed" and "INSUFFICIENT_DISK" in (att.error or "")
         assert session.get(MlBudget, att.budget_id).reserved_usd == 0.0
+
+
+def test_lyrics_submit_is_verbatim(client) -> None:
+    rid = _rec(client, lyrics="old site text", origin="site")
+    exact = "  line one  \nline two\n\nlast\r\n"
+    r = client.post(f"/api/v1/admin/model-lab/recordings/{rid}/lyrics",
+                    json={"lyrics": exact})
+    assert r.status_code == 200
+    import hashlib
+    assert r.json()["lyrics_sha256"] == hashlib.sha256(exact.encode()).hexdigest()
+    from app.models import MlRecording
+    with client.app.state.db.session() as session:
+        rec = session.get(MlRecording, rid)
+        assert rec.lyrics_text == exact and rec.lyrics_origin == "submitted"

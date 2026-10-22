@@ -3064,6 +3064,36 @@ def _enqueue_ml_pass(request: Request, operation: str, recording_ids: list[str],
                              "count": len(recording_ids), "state": "queued"}, status_code=202)
 
 
+class MlLyricsSubmit(BaseModel):
+    lyrics: str = Field(min_length=1, max_length=200_000)
+
+
+@router.post("/admin/model-lab/recordings/{recording_id}/lyrics")
+def admin_model_lab_lyrics_submit(recording_id: str, body: MlLyricsSubmit,
+                                  request: Request) -> JSONResponse:
+    """Owner-submitted final lyrics: stored EXACTLY as sent, SHA-256 recorded.
+
+    Submitted text wins over every discovered source (invariant 1).
+    """
+    import hashlib as _hl
+
+    from ..models import MlRecording, utcnow as _now
+
+    with request.app.state.db.session() as session:
+        rec = session.get(MlRecording, recording_id)
+        if rec is None:
+            raise ApiError(404, "NOT_FOUND", "recording not found")
+        text = body.lyrics
+        rec.lyrics_text = text
+        rec.lyrics_sha256 = _hl.sha256(text.encode("utf-8")).hexdigest()
+        rec.lyrics_origin = "submitted"
+        rec.lyrics_provenance_json = {"actor": getattr(request.state, "username", "admin"),
+                                      "at": _now().isoformat(), "chars": len(text)}
+        session.commit()
+        return JSONResponse({"id": rec.id, "lyrics_sha256": rec.lyrics_sha256,
+                             "lyrics_chars": len(text), "lyrics_origin": "submitted"})
+
+
 class MlRightsDeclare(BaseModel):
     holder: str = Field(min_length=1, max_length=200)
     scope: str = Field(pattern="^(recording|composition|singer_identity)$")
@@ -3531,8 +3561,9 @@ def admin_model_lab_datasets(request: Request) -> JSONResponse:
     with request.app.state.db.session() as session:
         rows = session.execute(select(MlDataset).order_by(MlDataset.created_at)).scalars().all()
         return JSONResponse({"datasets": [
-            {"id": d.id, "name": d.name, "frozen_sha256": d.frozen_sha256,
-             "recording_count": d.recording_count, "total_seconds": d.total_seconds}
+            {"id": d.id, "name": d.name, "kind": d.kind, "frozen_sha256": d.frozen_sha256,
+             "recording_count": d.recording_count, "total_seconds": d.total_seconds,
+             "report": d.report_json}
             for d in rows]})
 
 

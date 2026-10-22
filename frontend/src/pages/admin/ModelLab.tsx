@@ -18,15 +18,17 @@ interface Source { id: string; name: string; path: string | null; status: string
 interface Recording {
   id: string; title: string | null; artist: string | null; duration_seconds: number | null;
   classification: string; identify_status: string; review_status: string; dataset_eligible: boolean;
+  tags_state: string; lyrics_origin: string | null; lyrics_chars: number;
 }
 interface VoiceGroup { id: string; name: string | null; embedding_model: string; member_count: number; confidence: number | null; state: string }
-interface Dataset { id: string; name: string; recording_count: number; total_seconds: number; frozen_sha256: string }
+interface Dataset { id: string; name: string; kind?: string; recording_count: number; total_seconds: number; frozen_sha256: string; report?: { splits?: Record<string, number> } }
 interface Attempt { id: string; dataset_id: string; job_id: string | null; state: string; hours: number | null; spend_usd: number | null }
 interface Recipe { id: string; name: string; base_model: string; method: string; adapter_ids: string[] }
 interface Bundle { id: string; name: string; version: string; kind: string; base_model: string; state: string }
 interface Channel { name: string; enabled: boolean; min_credits: number; bundle: { id: string; name: string; version: string; state: string } | null }
-interface BrowseEntry { name: string; path: string; is_dir: boolean; bytes: number | null; mtime: string | null }
-interface BrowseView { path: string; root: string; parent: string | null; entries: BrowseEntry[] }
+interface BrowseEntry { name: string; path: string; is_dir: boolean; bytes: number | null; mtime: string | null; n_audio?: number }
+interface BrowseView { path: string; root: string; parent: string | null; entries: BrowseEntry[]; source?: string }
+interface ImportBatch { id: string; source_id: string; state: string; scanned: number; counts: Record<string, number>; error: string | null }
 interface Budget { name: string; max_hours: number; max_spend_usd: number; used_hours: number; spent_usd: number; state: string }
 
 const nr = (v: unknown, suffix = "") => (v === null || v === undefined || v === "" ? "Not reported" : `${v}${suffix}`);
@@ -40,6 +42,13 @@ export default function ModelLabPage() {
   const [browsePath, setBrowsePath] = useState<string | null>(null);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [srcName, setSrcName] = useState("pilot-selection");
+  const [recSel, setRecSel] = useState<Record<string, boolean>>({});
+  const [tagsFilter, setTagsFilter] = useState("");
+  const [lyricsEdit, setLyricsEdit] = useState<{ id: string; text: string } | null>(null);
+  const [dsName, setDsName] = useState("voice-set-1");
+  const [dsKind, setDsKind] = useState("style");
+  const [dsAllowI, setDsAllowI] = useState(false);
+  const [dsAllowS, setDsAllowS] = useState(false);
 
   const overview = useQuery({ queryKey: ["ml-overview"], queryFn: () => api.get<Overview>("/api/v1/admin/model-lab/overview"), enabled: tab === "Overview" });
   const sources = useQuery({ queryKey: ["ml-sources"], queryFn: () => api.get<{ sources: Source[] }>("/api/v1/admin/model-lab/sources"), enabled: tab === "Catalog" });
@@ -52,6 +61,11 @@ export default function ModelLabPage() {
   const bundles = useQuery({ queryKey: ["ml-bundles"], queryFn: () => api.get<{ bundles: Bundle[] }>("/api/v1/admin/model-lab/bundles"), enabled: tab !== "Overview" && tab !== "Catalog" && tab !== "Recordings" && tab !== "Voice" && tab !== "Training" });
   const channels = useQuery({ queryKey: ["ml-channels"], queryFn: () => api.get<{ channels: Channel[] }>("/api/v1/admin/model-lab/release-channels"), enabled: tab === "Channels" });
 
+  const batches = useQuery({
+    queryKey: ["ml-batches"],
+    queryFn: () => api.get<{ batches: ImportBatch[] }>("/api/v1/admin/model-lab/batches"),
+    enabled: tab === "Catalog",
+  });
   const browse = useQuery({
     queryKey: ["ml-browse", browsePath],
     queryFn: () => api.get<BrowseView>(`/api/v1/admin/model-lab/browse${browsePath ? `?path=${encodeURIComponent(browsePath)}` : ""}`),
@@ -106,20 +120,46 @@ export default function ModelLabPage() {
 
       {tab === "Catalog" && (
         <div className="space-y-3">
+      {(batches.data?.batches ?? []).length > 0 && (
+        <div className="rounded border p-2 text-xs">
+          <div className="mb-1 font-semibold">Worker scan batches</div>
+          {batches.data!.batches.slice(0, 5).map((b) => (
+            <div key={b.id} className="flex justify-between border-b py-0.5">
+              <span className="font-mono">{b.source_id.slice(0, 8)}</span>
+              <span>{b.state}</span>
+              <span>{b.scanned} scanned</span>
+              <span>{Object.entries(b.counts ?? {}).map(([k, v]) => `${k}:${v}`).join(" ")}</span>
+              <span className="text-red-600">{b.error ?? ""}</span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="rounded border p-2">
         <button className={btn} onClick={() => setBrowseOpen(!browseOpen)}>
-          {browseOpen ? "Hide TrueNAS import" : "Import from TrueNAS"}
+          {browseOpen ? "Hide TrueNAS browser" : "Browse TrueNAS (worker catalog)"}
+        </button>
+        <button className={btn} onClick={() => act.mutate({ path: "/api/v1/admin/model-lab/dirs/refresh", method: "post", body: {} })}>
+          Refresh folder index
         </button>
         {browseOpen && browse.data && (
           <div className="mt-2 space-y-1">
             <div className="flex items-center gap-2 text-xs">
               {browse.data.parent && <button className={btn} onClick={() => setBrowsePath(browse.data.parent)}>.. up</button>}
               <span className="font-mono">{browse.data.path}</span>
+              {browse.data.source === "dir_index" && <span className="rounded bg-slate-200 px-1">catalog</span>}
+              <button className={btn} disabled={act.isPending}
+                      onClick={() => act.mutate({
+                        path: "/api/v1/admin/model-lab/scan-selected", method: "post",
+                        body: { source_name: `scan-${browse.data.path.split("/").filter(Boolean).slice(-2).join("-").replace(/[^A-Za-z0-9-]/g, "").slice(0, 60)}-${Date.now().toString(36)}`,
+                                roots: [browse.data.path] } })}>
+                Scan this folder
+              </button>
             </div>
             <div className="max-h-64 overflow-y-auto text-sm">
               {browse.data.entries.map((e) => e.is_dir ? (
-                <div key={e.path} className="border-b py-0.5">
+                <div key={e.path} className="flex items-center justify-between border-b py-0.5">
                   <button className="text-left" onClick={() => setBrowsePath(e.path)}>{e.name}/</button>
+                  {e.n_audio != null && e.n_audio > 0 && <span className="text-xs opacity-60">{e.n_audio} audio</span>}
                 </div>
               ) : (
                 <label key={e.path} className="flex items-center gap-2 border-b py-0.5">
@@ -154,20 +194,78 @@ export default function ModelLabPage() {
       )}
 
       {tab === "Recordings" && (
-        <table className="w-full text-left text-sm">
-          <thead><tr className="border-b"><th className="py-1">Title</th><th>Artist</th><th>Class</th><th>Identification</th><th>Review</th><th>Eligible</th><th /></tr></thead>
-          <tbody>{(recordings.data?.recordings ?? []).map((r) => (
-            <tr key={r.id} className="border-b">
-              <td className="py-1">{nr(r.title)}</td><td>{nr(r.artist)}</td><td>{r.classification}</td>
-              <td>{r.identify_status}</td><td>{r.review_status}</td><td>{r.dataset_eligible ? "yes" : "no"}</td>
-              <td className="space-x-1 whitespace-nowrap">
-                <button className={btn} onClick={() => act.mutate({ path: `/api/v1/admin/model-lab/recordings/${r.id}/identify`, method: "post" })}>Identify</button>
-                <button className={btn} onClick={() => act.mutate({ path: `/api/v1/admin/model-lab/recordings/${r.id}/review`, method: "post", body: { decision: "approved" } })}>Approve</button>
-                <button className={btn} onClick={() => act.mutate({ path: `/api/v1/admin/model-lab/recordings/${r.id}/voice-scan`, method: "post" })}>Voice scan</button>
-              </td>
-            </tr>
-          ))}</tbody>
-        </table>
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <label>tags_state
+              <select className="ml-1 rounded border px-1" value={tagsFilter} onChange={(e) => setTagsFilter(e.target.value)}>
+                <option value="">all</option><option>suspect</option><option>invalid</option>
+                <option>parsed</option><option>unparsed</option>
+              </select>
+            </label>
+            <span className="opacity-60">lyrics shown per row (never bulk text)</span>
+            <button className={btn} disabled={!Object.values(recSel).some(Boolean) || act.isPending}
+                    onClick={() => act.mutate({ path: "/api/v1/admin/model-lab/verify-selected", method: "post",
+                                                 body: { recording_ids: Object.keys(recSel).filter((k) => recSel[k]) } })}>
+              Verify selected (MusicBrainz)
+            </button>
+            <button className={btn} disabled={!Object.values(recSel).some(Boolean) || act.isPending}
+                    onClick={() => act.mutate({ path: "/api/v1/admin/model-lab/lyrics-fetch-selected", method: "post",
+                                                body: { recording_ids: Object.keys(recSel).filter((k) => recSel[k]) } })}>
+              Fetch lyrics (lrclib)
+            </button>
+            <button className={btn} disabled={!Object.values(recSel).some(Boolean) || act.isPending}
+                    onClick={() => act.mutate({ path: "/api/v1/admin/model-lab/rights/declare-selected", method: "post",
+                                                body: { recording_ids: Object.keys(recSel).filter((k) => recSel[k]),
+                                                        holder: "Owner (house library)", scope: "recording",
+                                                        scopes: ["recording", "composition"],
+                                                        evidence: "owned library, private training only" } })}>
+              Declare rights (selected)
+            </button>
+            <button className={btn} disabled={!Object.values(recSel).some(Boolean) || act.isPending}
+                    onClick={() => act.mutate({ path: "/api/v1/admin/model-lab/enrich-selected", method: "post",
+                                                 body: { recording_ids: Object.keys(recSel).filter((k) => recSel[k]) } })}>
+              Enrich with local LM (prep)
+            </button>
+          </div>
+          <table className="w-full text-left text-sm">
+            <thead><tr className="border-b"><th /><th className="py-1">Title</th><th>Artist</th><th>Tags</th><th>Lyrics</th><th>Identification</th><th>Review</th><th /></tr></thead>
+            <tbody>{(recordings.data?.recordings ?? [])
+              .filter((r) => !tagsFilter || r.tags_state === tagsFilter).map((r) => (
+              <tr key={r.id} className="border-b align-top">
+                <td className="py-1"><input type="checkbox" checked={!!recSel[r.id]}
+                      onChange={() => setRecSel({ ...recSel, [r.id]: !recSel[r.id] })} /></td>
+                <td>{nr(r.title)}</td><td>{nr(r.artist)}</td>
+                <td className="text-xs">{r.tags_state}</td>
+                <td className="text-xs">{r.lyrics_origin ?? "none"}{r.lyrics_chars ? ` (${r.lyrics_chars})` : ""}</td>
+                <td className="text-xs">{r.identify_status}</td><td>{r.review_status}</td>
+                <td className="space-x-1 whitespace-nowrap">
+                  <button className={btn} onClick={() => act.mutate({ path: `/api/v1/admin/model-lab/recordings/${r.id}/identify`, method: "post" })}>Identify</button>
+                  <button className={btn} onClick={() => act.mutate({ path: `/api/v1/admin/model-lab/recordings/${r.id}/verify`, method: "post" })}>Verify</button>
+                  <button className={btn} onClick={() => act.mutate({ path: `/api/v1/admin/model-lab/recordings/${r.id}/lyrics-fetch`, method: "post" })}>Lyrics</button>
+                  <button className={btn} onClick={() => act.mutate({ path: `/api/v1/admin/model-lab/recordings/${r.id}/review`, method: "post", body: { decision: "approved" } })}>Approve</button>
+                  <button className={btn} onClick={() => act.mutate({ path: `/api/v1/admin/model-lab/recordings/${r.id}/voice-scan`, method: "post" })}>Voice scan</button>
+                  <button className={btn} onClick={() => api.get<{ lyrics_text: string | null }>(
+                              `/api/v1/admin/model-lab/recordings/${r.id}`)
+                              .then((d) => setLyricsEdit({ id: r.id, text: d.lyrics_text ?? "" }))}>View lyrics</button>
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
+          {lyricsEdit && (
+            <div className="rounded border p-2 text-sm">
+              <div className="mb-1 text-xs">Submitted lyrics are stored exactly as sent (SHA-256 recorded).</div>
+              <textarea className="h-32 w-full rounded border p-2 font-mono text-xs"
+                        value={lyricsEdit.text}
+                        onChange={(e) => setLyricsEdit({ ...lyricsEdit, text: e.target.value })} />
+              <div className="mt-1 flex gap-2">
+                <button className={btn} onClick={() => act.mutate({
+                    path: `/api/v1/admin/model-lab/recordings/${lyricsEdit.id}/lyrics`, method: "post",
+                    body: { lyrics: lyricsEdit.text } })}>Save as submitted</button>
+                <button className={btn} onClick={() => setLyricsEdit(null)}>Close</button>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {tab === "Voice" && (
@@ -197,11 +295,30 @@ export default function ModelLabPage() {
               <button className={btn} onClick={() => act.mutate({ path: "/api/v1/admin/model-lab/budget", method: "put", body: { max_hours: 6, max_spend_usd: 3 } })}>Reset caps 6h/$3</button>
             </div>
           )}
+          <div className="rounded border p-2 space-y-1">
+            <div className="text-xs font-semibold">Freeze dataset (from Recordings-tab selection:
+              {Object.values(recSel).filter(Boolean).length} picked)</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <input className="rounded border px-2 py-1 text-xs" value={dsName} onChange={(e) => setDsName(e.target.value)} />
+              <select className="rounded border px-1 text-xs" value={dsKind} onChange={(e) => setDsKind(e.target.value)}>
+                <option value="style">style</option><option value="voice">voice</option>
+              </select>
+              <label className="text-xs"><input type="checkbox" checked={dsAllowI} onChange={() => setDsAllowI(!dsAllowI)} /> allow instrumental</label>
+              <label className="text-xs"><input type="checkbox" checked={dsAllowS} onChange={() => setDsAllowS(!dsAllowS)} /> allow suspect tags</label>
+              <button className={btn} disabled={!Object.values(recSel).some(Boolean) || act.isPending}
+                      onClick={() => act.mutate({ path: "/api/v1/admin/model-lab/datasets", method: "post",
+                          body: { name: dsName, kind: dsKind, recording_ids: Object.keys(recSel).filter((k) => recSel[k]),
+                                  allow_instrumental: dsAllowI, allow_suspect: dsAllowS } })}>
+                Freeze
+              </button>
+            </div>
+          </div>
           <table className="w-full text-left">
-            <thead><tr className="border-b"><th className="py-1">Dataset</th><th>Recordings</th><th>Seconds</th><th>Frozen</th><th /></tr></thead>
+            <thead><tr className="border-b"><th className="py-1">Dataset</th><th>Kind</th><th>Recordings</th><th>Seconds</th><th>Frozen</th><th /></tr></thead>
             <tbody>{(datasets.data?.datasets ?? []).map((d) => (
               <tr key={d.id} className="border-b">
-                <td className="py-1">{d.name}</td><td>{d.recording_count}</td><td>{d.total_seconds}</td>
+                <td className="py-1">{d.name}</td><td>{d.kind ?? "style"}</td>
+                <td>{d.recording_count}</td><td>{d.total_seconds}</td>
                 <td className="font-mono text-xs">{d.frozen_sha256.slice(0, 12)}</td>
                 <td><button className={btn} onClick={() => act.mutate({ path: `/api/v1/admin/model-lab/datasets/${d.id}/train`, method: "post" })}>Train</button></td>
               </tr>
@@ -235,6 +352,7 @@ export default function ModelLabPage() {
             <tr key={b.id} className="border-b">
               <td className="py-1">{b.name}</td><td>{b.version}</td><td>{b.kind}</td><td>{b.state}</td>
               <td className="space-x-1 whitespace-nowrap">
+                <button className={btn} onClick={() => act.mutate({ path: `/api/v1/admin/model-lab/bundles/${b.id}/eval-samples`, method: "post", body: {} })}>Eval A/B</button>
                 <button className={btn} onClick={() => act.mutate({ path: `/api/v1/admin/model-lab/bundles/${b.id}/release`, method: "post" })}>Release</button>
                 <button className={btn} onClick={() => act.mutate({ path: `/api/v1/admin/model-lab/bundles/${b.id}/retire`, method: "post" })}>Retire</button>
               </td>
