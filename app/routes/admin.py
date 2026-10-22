@@ -738,6 +738,9 @@ def gpu_fleet_offers(
     min_reliability: float | None = None,
     min_download: float | None = None,
     min_upload: float | None = None,
+    gpu_model: str | None = None,
+    min_disk: float | None = None,
+    min_ram: float | None = None,
     verified: bool = True,
     refresh: bool = False,
     limit: int = 10,
@@ -769,6 +772,9 @@ def gpu_fleet_offers(
         "min_cuda": stored["min_cuda"],
         "model_vram_floor_gb": 0,
         "checkpoint_gb": 0.0,
+        "gpu_model": gpu_model or None,
+        "min_disk_gb": min_disk,
+        "min_ram_gb": min_ram,
         "limit": limit,
     }
     if model:
@@ -805,6 +811,12 @@ def gpu_fleet_offers(
         query["inet_down"] = {"gte": crit["min_download_mbps"]}
     if crit["min_upload_mbps"]:
         query["inet_up"] = {"gte": crit["min_upload_mbps"]}
+    if crit["gpu_model"]:
+        query["gpu_name"] = {"like": f"%{crit['gpu_model']}%"}
+    if crit["min_disk_gb"] is not None:
+        query["disk_space"] = {"gte": crit["min_disk_gb"]}
+    if crit["min_ram_gb"] is not None:
+        query["cpu_ram"] = {"gte": int(crit["min_ram_gb"] * 1024)}
     try:
         resp = _requests.post(
             f"{settings.vast_search_url.rstrip('/')}/bundles/", json=query,
@@ -953,12 +965,14 @@ def gpu_fleet_worker_stop(worker_id: str, request: Request, force: bool = False)
     inst, busy = _worker_instance_and_busy(request, worker_id)
     if busy and not force:
         raise ApiError(409, "WORKER_BUSY", "Worker has a running attempt; use ?force=true to stop anyway.")
-    _vast_request(request, "POST", f"/instances/{inst.vast_instance_id}/action/", {"action_type": "stop"})
+    _vast_lifecycle(request, inst.vast_instance_id, "stop")
+    from ..gpu_ledger import close_entry
     with request.app.state.db.session() as session:
         rec = session.get(VastInstance, inst.id)
         if rec is not None:
             rec.state = "stopped"
             rec.stopped_at = utcnow()
+        close_entry(session, inst.vast_instance_id)
         session.add(GpuFleetEvent(id=new_uuid(), actor="admin", action="worker_stop", subject=worker_id))
         session.commit()
     return JSONResponse({"ok": True, "action": "stop"})
@@ -971,12 +985,17 @@ def gpu_fleet_worker_restart(worker_id: str, request: Request, force: bool = Fal
     inst, busy = _worker_instance_and_busy(request, worker_id)
     if busy and not force:
         raise ApiError(409, "WORKER_BUSY", "Worker has a running attempt; use ?force=true to restart anyway.")
-    _vast_request(request, "POST", f"/instances/{inst.vast_instance_id}/action/", {"action_type": "stop"})
-    _vast_request(request, "POST", f"/instances/{inst.vast_instance_id}/action/", {"action_type": "start"})
+    _vast_lifecycle(request, inst.vast_instance_id, "stop")
+    _vast_lifecycle(request, inst.vast_instance_id, "start")
+    from ..gpu_ledger import close_entry, open_entry
     with request.app.state.db.session() as session:
         rec = session.get(VastInstance, inst.id)
         if rec is not None:
             rec.state = "running"
+        closed = close_entry(session, inst.vast_instance_id)
+        open_entry(session, inst.vast_instance_id,
+                   purpose=closed.purpose if closed else "auto",
+                   dph=closed.dph if closed else None, source="reconcile")
         session.add(GpuFleetEvent(id=new_uuid(), actor="admin", action="worker_restart", subject=worker_id))
         session.commit()
     return JSONResponse({"ok": True, "action": "restart"})
@@ -989,14 +1008,174 @@ def gpu_fleet_worker_destroy(worker_id: str, request: Request, force: bool = Fal
     inst, busy = _worker_instance_and_busy(request, worker_id)
     if busy and not force:
         raise ApiError(409, "WORKER_BUSY", "Never silently destroy a worker with an in-progress task.")
-    _vast_request(request, "POST", f"/instances/{inst.vast_instance_id}/action/", {"action_type": "destroy"})
+    _vast_lifecycle(request, inst.vast_instance_id, "destroy")
+    from ..gpu_ledger import close_entry
     with request.app.state.db.session() as session:
         rec = session.get(VastInstance, inst.id)
         if rec is not None:
             session.delete(rec)
+        close_entry(session, inst.vast_instance_id)
         session.add(GpuFleetEvent(id=new_uuid(), actor="admin", action="worker_destroy", subject=worker_id))
         session.commit()
     return JSONResponse({"ok": True, "action": "destroy"})
+
+
+class FleetNodeActionRequest(BaseModel):
+    reason: str = "admin"
+    attempt_id: str | None = None
+
+
+@router.get("/admin/gpu-fleet/nodes")
+def gpu_fleet_nodes(request: Request) -> JSONResponse:
+    from sqlalchemy import select as _select
+
+    from ..fleet_nodes import node_view
+    from ..models import FleetNode
+
+    with request.app.state.db.session() as session:
+        nodes = session.execute(_select(FleetNode).order_by(FleetNode.id)).scalars().all()
+        return JSONResponse({"nodes": [node_view(n) for n in nodes]})
+
+
+@router.post("/admin/gpu-fleet/nodes/{node_key}/drain")
+def gpu_fleet_node_drain(node_key: str, body: FleetNodeActionRequest,
+                         request: Request) -> JSONResponse:
+    from ..fleet_nodes import drain_for_training, node_view
+    from ..models import FleetNode, GpuFleetEvent, new_uuid
+
+    with request.app.state.db.session() as session:
+        if session.get(FleetNode, node_key) is None:
+            raise ApiError(404, "NODE_NOT_FOUND", f"unknown fleet node: {node_key}")
+        ok = drain_for_training(session, node_key, body.attempt_id or "")
+        session.add(GpuFleetEvent(id=new_uuid(), actor="admin",
+                                  action="fleet_node_drain", subject=node_key))
+        session.commit()
+        return JSONResponse(node_view(session.get(FleetNode, node_key)),
+                            status_code=200 if ok else 409)
+
+
+@router.post("/admin/gpu-fleet/nodes/{node_key}/quarantine")
+def gpu_fleet_node_quarantine(node_key: str, body: FleetNodeActionRequest,
+                              request: Request) -> JSONResponse:
+    from ..fleet_nodes import node_view, quarantine
+    from ..models import FleetNode, GpuFleetEvent, new_uuid
+
+    with request.app.state.db.session() as session:
+        ok = quarantine(session, node_key, body.reason)
+        session.add(GpuFleetEvent(id=new_uuid(), actor="admin",
+                                  action="fleet_node_quarantine", subject=node_key))
+        session.commit()
+        return JSONResponse(node_view(session.get(FleetNode, node_key)),
+                            status_code=200 if ok else 409)
+
+
+@router.post("/admin/gpu-fleet/nodes/{node_key}/reset")
+def gpu_fleet_node_reset(node_key: str, request: Request) -> JSONResponse:
+    from ..fleet_nodes import node_view, reset_quarantine
+    from ..models import FleetNode, GpuFleetEvent, new_uuid
+
+    with request.app.state.db.session() as session:
+        ok = reset_quarantine(session, node_key)
+        session.add(GpuFleetEvent(id=new_uuid(), actor="admin",
+                                  action="fleet_node_reset", subject=node_key))
+        session.commit()
+        return JSONResponse(node_view(session.get(FleetNode, node_key)),
+                            status_code=200 if ok else 409)
+
+
+class GpuPresetList(BaseModel):
+    presets: list[dict] = []
+
+
+@router.get("/admin/gpu-fleet/presets")
+def gpu_fleet_presets_get(request: Request) -> JSONResponse:
+    from ..models import SiteSetting
+
+    import json as _json
+
+    with request.app.state.db.session() as session:
+        row = session.get(SiteSetting, "gpu_offer_presets")
+        presets = _json.loads(row.value) if row and row.value else []
+        return JSONResponse({"presets": presets})
+
+
+@router.put("/admin/gpu-fleet/presets")
+def gpu_fleet_presets_put(body: GpuPresetList, request: Request) -> JSONResponse:
+    import json as _json
+
+    from ..models import SiteSetting
+
+    names = [p.get("name") for p in body.presets]
+    if any(not n for n in names) or len(set(names)) != len(names):
+        raise ApiError(422, "PRESET_NAMES", "every preset needs a unique name")
+    for p in body.presets:
+        if not isinstance(p.get("params"), dict):
+            raise ApiError(422, "PRESET_PARAMS", f"preset {p.get('name')} needs a params object")
+    value = _json.dumps(body.presets)
+    if len(value) > 1900:
+        raise ApiError(422, "PRESET_BLOB", "preset list exceeds the settings blob guard")
+    with request.app.state.db.session() as session:
+        row = session.get(SiteSetting, "gpu_offer_presets")
+        if row is None:
+            session.add(SiteSetting(key="gpu_offer_presets", value=value))
+        else:
+            row.value = value
+        session.commit()
+    return JSONResponse({"presets": body.presets})
+
+
+class GpuDeployRequest(BaseModel):
+    offer_id: str
+    purpose: str = "training"
+    name: str | None = None
+    max_spend_usd: float | None = None
+    dph: float | None = None
+    gpu: str | None = None
+    vram_gb: float | None = None
+
+
+@router.post("/admin/gpu-fleet/deploy")
+def gpu_fleet_deploy(body: GpuDeployRequest, request: Request) -> JSONResponse:
+    """Deployment form submit: durable provisioning intent + ledger entry.
+
+    The provider create call is not exercised without a funded rental; the
+    deployment stays REQUESTED until a worker registers against it.
+    """
+    from ..gpu_ledger import entry_view, open_entry
+    from ..models import GpuDeployment, GpuFleetEvent, VastInstance, new_uuid as _uuid
+
+    with request.app.state.db.session() as session:
+        deployment = GpuDeployment(
+            id=_uuid(), origin="MANUAL_ADMIN", purpose=body.purpose,
+            offer_id=body.offer_id, state="REQUESTED", dph=body.dph,
+            max_spend_usd=body.max_spend_usd, requested_by="admin",
+            idempotency_key=f"deploy-{body.offer_id}",
+            offer_snapshot_json={"offer_id": body.offer_id, "gpu": body.gpu,
+                                 "vram_gb": body.vram_gb, "dph": body.dph,
+                                 "name": body.name})
+        session.add(deployment)
+        instance = VastInstance(vast_instance_id=f"pending-{deployment.id}",
+                                hostname=body.name or body.gpu or body.offer_id,
+                                role=body.purpose, dph=body.dph, state="requested")
+        session.add(instance)
+        session.commit()
+        entry = open_entry(session, instance.vast_instance_id, purpose=body.purpose,
+                           dph=body.dph)
+        session.add(GpuFleetEvent(id=_uuid(), actor="admin", action="deploy",
+                                  subject=body.offer_id))
+        session.commit()
+        return JSONResponse({"deployment_id": deployment.id,
+                             "vast_instance_id": instance.vast_instance_id,
+                             "state": deployment.state,
+                             "ledger": entry_view(entry)}, status_code=201)
+
+
+@router.get("/admin/gpu-fleet/ledger")
+def gpu_fleet_ledger(request: Request) -> JSONResponse:
+    from ..gpu_ledger import ledger_summary
+
+    with request.app.state.db.session() as session:
+        return JSONResponse(ledger_summary(session))
 
 
 @router.get("/admin/gpu-fleet/costs")
@@ -1676,6 +1855,16 @@ class VastActionRequest(BaseModel):
     action: str = Field(pattern=r"^(start|stop|destroy)$")
 
 
+def _vast_lifecycle(request: Request, instance_id: str, action: str) -> dict:
+    """Documented v0 lifecycle: PUT /instances/{id}/ with state; DELETE destroys."""
+    if action == "destroy":
+        return _vast_request(request, "DELETE", f"/instances/{instance_id}/")
+    state = {"start": "running", "stop": "shutdown"}.get(action)
+    if state is None:
+        raise ApiError(422, "VAST_ACTION_UNKNOWN", f"unknown lifecycle action: {action}")
+    return _vast_request(request, "PUT", f"/instances/{instance_id}/", {"state": state})
+
+
 def _vast_request(request: Request, method: str, path: str, json_body: dict | None = None):
     import httpx
 
@@ -1736,10 +1925,7 @@ def admin_vast_instance_action(
 ) -> JSONResponse:
     from ..models import VastInstance
 
-    _vast_request(
-        request, "POST", f"/instances/{vast_instance_id}/action/",
-        {"action_type": payload.action},
-    )
+    _vast_lifecycle(request, vast_instance_id, payload.action)
     with request.app.state.db.session() as session:
         rec = session.execute(
             select(VastInstance).where(VastInstance.vast_instance_id == vast_instance_id)
@@ -2734,15 +2920,41 @@ def admin_model_lab_recording(recording_id: str, request: Request) -> JSONRespon
 
 @router.post("/admin/model-lab/recordings/{recording_id}/identify")
 def admin_model_lab_identify(recording_id: str, request: Request, enrich: bool = True) -> JSONResponse:
-    from ..model_lab import identify_recording
+    """Async identification: enqueue a model_lab.identify job (202)."""
+    import hashlib as _hl
+    import json as _json
+
+    from ..models import Job, MlRecording, new_uuid as _uuid
+    from ..orchestration import enqueue
+
+    settings = request.app.state.settings
+    with request.app.state.db.session() as session:
+        rec = session.get(MlRecording, recording_id)
+        if rec is None:
+            raise ApiError(404, "NOT_FOUND", "recording not found")
+        request_json = {"recording_id": rec.id, "enrich": enrich}
+        job = Job(id=_uuid(), owner_id="model-lab", operation="model_lab.identify",
+                  model_id=settings.train_queue_model_id, model_revision="model-lab",
+                  status="queued", request_json=request_json,
+                  request_hash=_hl.sha256(_json.dumps(request_json, sort_keys=True).encode()).hexdigest(),
+                  idempotency_key=f"ml-identify-{rec.id}-{_uuid()[:8]}")
+        session.add(job)
+        enqueue(session, job, settings)
+        session.commit()
+        return JSONResponse({"id": rec.id, "job_id": job.id,
+                             "identify_status": "queued"}, status_code=202)
+
+
+@router.get("/admin/model-lab/recordings/{recording_id}/caption")
+def admin_model_lab_caption(recording_id: str, request: Request) -> JSONResponse:
+    from ..model_lab import compile_caption
     from ..models import MlRecording
 
     with request.app.state.db.session() as session:
         rec = session.get(MlRecording, recording_id)
         if rec is None:
             raise ApiError(404, "NOT_FOUND", "recording not found")
-        status = identify_recording(session, rec, request.app.state.settings, enrich=enrich)
-        return JSONResponse({"id": rec.id, "identify_status": status})
+        return JSONResponse(compile_caption(session, rec))
 
 
 class MlReview(BaseModel):
@@ -3003,7 +3215,9 @@ def admin_model_lab_dataset_train(dataset_id: str, request: Request) -> JSONResp
             raise ApiError(404, "NOT_FOUND", "dataset not found")
         budget = get_budget(session, request.app.state.settings)
         try:
-            attempt = open_attempt(session, ds, budget)
+            attempt = open_attempt(session, ds, budget,
+                                   est_hours=request.app.state.settings.model_lab_est_hours,
+                                   est_spend_usd=request.app.state.settings.model_lab_est_spend_usd)
             job = attach_job(session, attempt, "model-lab", request.app.state.settings)
             enqueue(session, job, request.app.state.settings)
             session.commit()
@@ -3062,20 +3276,37 @@ def admin_model_lab_recipes(request: Request) -> JSONResponse:
 
 @router.post("/admin/model-lab/merge-recipes/{recipe_id}/run")
 def admin_model_lab_recipe_run(recipe_id: str, request: Request) -> JSONResponse:
-    from ..model_lab_merge import MergeError, run_merge
-    from ..models import MlMergeRecipe
+    from ..model_lab_merge import MergeError, start_merge_build
+    from ..models import MlMergeRecipe, new_uuid as _uuid
+    from ..orchestration import enqueue
 
     with request.app.state.db.session() as session:
         recipe = session.get(MlMergeRecipe, recipe_id)
         if recipe is None:
             raise ApiError(404, "NOT_FOUND", "merge recipe not found")
         try:
-            bundle = run_merge(session, recipe, request.app.state.settings)
+            bundle = start_merge_build(session, recipe, request.app.state.settings)
         except MergeError as exc:
-            code = "MERGE_UNAVAILABLE" if str(exc).startswith("MERGE_UNAVAILABLE") else "MERGE_FAILED"
-            raise ApiError(409 if code == "MERGE_UNAVAILABLE" else 502, code, str(exc)) from exc
+            raise ApiError(409, "MERGE_UNAVAILABLE", str(exc)) from exc
+        import hashlib as _hl
+        import json as _json
+
+        request_json = {"bundle_id": bundle.id, "recipe_id": recipe.id,
+                        "base_model": recipe.base_model,
+                        "adapter_ids": list(recipe.adapter_ids_json),
+                        "method": recipe.method,
+                        "strengths": list((recipe.params_json or {}).get("strengths") or [])}
+        job = __import__("app.models", fromlist=["Job"]).Job(
+            id=_uuid(), owner_id="model-lab", operation="model_lab.merge",
+            model_id=request.app.state.settings.train_queue_model_id,
+            model_revision="model-lab", status="queued", request_json=request_json,
+            request_hash=_hl.sha256(_json.dumps(request_json, sort_keys=True).encode()).hexdigest(),
+            idempotency_key=f"ml-merge-{bundle.id}")
+        session.add(job)
+        enqueue(session, job, request.app.state.settings)
+        session.commit()
         return JSONResponse({"bundle": bundle.id, "version": bundle.version,
-                             "state": bundle.state}, status_code=201)
+                             "state": bundle.state, "job_id": job.id}, status_code=202)
 
 
 @router.get("/admin/model-lab/bundles")
@@ -3102,6 +3333,22 @@ def admin_model_lab_bundle_release(bundle_id: str, request: Request) -> JSONResp
         except MergeError as exc:
             raise ApiError(409, "BUNDLE_STATE", str(exc)) from exc
         return JSONResponse({"id": bundle.id, "state": bundle.state})
+
+
+@router.post("/admin/model-lab/bundles/{bundle_id}/archive")
+def admin_model_lab_bundle_archive(bundle_id: str, request: Request) -> JSONResponse:
+    from ..model_lab_merge import MergeError, bundle_view, transition_bundle
+    from ..models import MlModelBundle
+
+    with request.app.state.db.session() as session:
+        bundle = session.get(MlModelBundle, bundle_id)
+        if bundle is None:
+            raise ApiError(404, "NOT_FOUND", "bundle not found")
+        try:
+            transition_bundle(session, bundle, "archive")
+        except MergeError as exc:
+            raise ApiError(409, "BUNDLE_STATE", str(exc)) from exc
+        return JSONResponse(bundle_view(bundle))
 
 
 @router.post("/admin/model-lab/bundles/{bundle_id}/retire")
@@ -3156,6 +3403,18 @@ def admin_model_lab_evaluations(bundle_id: str, request: Request) -> JSONRespons
              "evaluator": e.evaluator} for e in rows]})
 
 
+@router.get("/admin/model-lab/bundles/{bundle_id}/card")
+def admin_model_lab_bundle_card(bundle_id: str, request: Request) -> JSONResponse:
+    from ..model_lab_release import creation_card
+    from ..models import MlModelBundle
+
+    with request.app.state.db.session() as session:
+        bundle = session.get(MlModelBundle, bundle_id)
+        if bundle is None:
+            raise ApiError(404, "NOT_FOUND", "bundle not found")
+        return JSONResponse(creation_card(session, bundle))
+
+
 @router.get("/admin/model-lab/bundles/{bundle_id}/promotion-gate")
 def admin_model_lab_promotion_gate(bundle_id: str, request: Request) -> JSONResponse:
     from ..model_lab_release import promotion_gate
@@ -3171,6 +3430,7 @@ def admin_model_lab_promotion_gate(bundle_id: str, request: Request) -> JSONResp
 class MlChannelPatch(BaseModel):
     enabled: bool | None = None
     min_credits: int | None = None
+    canary_percent: int | None = Field(default=None, ge=0, le=100)
 
 
 class MlChannelPromote(BaseModel):
@@ -3200,6 +3460,29 @@ def admin_model_lab_channel_promote(name: str, body: MlChannelPromote, request: 
         return JSONResponse(channel_view(session, channel))
 
 
+@router.post("/admin/model-lab/release-channels/{name}/rollback")
+def admin_model_lab_channel_rollback(name: str, request: Request) -> JSONResponse:
+    from ..model_lab_release import ReleaseError, channel_view, rollback_channel
+
+    with request.app.state.db.session() as session:
+        try:
+            channel = rollback_channel(session, name)
+        except ReleaseError as exc:
+            raise ApiError(409, "ROLLBACK_BLOCKED", str(exc)) from exc
+        return JSONResponse(channel_view(session, channel))
+
+
+@router.get("/admin/model-lab/release-channels/{name}/resolve")
+def admin_model_lab_channel_resolve(name: str, request: Request,
+                                    owner_id: str = "guest", credits: int = 999999
+                                    ) -> JSONResponse:
+    from ..model_lab_release import resolve_channel_bundle
+
+    with request.app.state.db.session() as session:
+        return JSONResponse(resolve_channel_bundle(session, name,
+                                                   owner_id=owner_id, credits=credits))
+
+
 @router.patch("/admin/model-lab/release-channels/{name}")
 def admin_model_lab_channel_patch(name: str, body: MlChannelPatch, request: Request) -> JSONResponse:
     from ..model_lab_release import ReleaseError, channel_view, update_channel
@@ -3207,7 +3490,8 @@ def admin_model_lab_channel_patch(name: str, body: MlChannelPatch, request: Requ
     with request.app.state.db.session() as session:
         try:
             channel = update_channel(session, name, enabled=body.enabled,
-                                     min_credits=body.min_credits)
+                                     min_credits=body.min_credits,
+                                     canary_percent=body.canary_percent)
         except ReleaseError as exc:
             raise ApiError(422, "CHANNEL_INVALID", str(exc)) from exc
         return JSONResponse(channel_view(session, channel))

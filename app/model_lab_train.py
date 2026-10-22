@@ -75,7 +75,8 @@ def _refresh_state(budget: MlBudget) -> None:
 def budget_view(budget: MlBudget) -> dict:
     return {"name": budget.name, "max_hours": budget.max_hours,
             "max_spend_usd": budget.max_spend_usd, "used_hours": budget.used_hours,
-            "spent_usd": budget.spent_usd, "state": budget.state}
+            "spent_usd": budget.spent_usd, "reserved_usd": budget.reserved_usd,
+            "state": budget.state}
 
 
 def freeze_dataset(session, name: str, recording_ids: list[str]) -> MlDataset:
@@ -107,13 +108,24 @@ def freeze_dataset(session, name: str, recording_ids: list[str]) -> MlDataset:
 
 
 def open_attempt(session, dataset: MlDataset, budget: MlBudget, *,
-                 recipe: dict | None = None) -> MlTrainingAttempt:
-    """Budget-gated dispatch: refuse explicitly when the pilot budget is spent."""
+                 recipe: dict | None = None, est_hours: float = 1.0,
+                 est_spend_usd: float = 0.25) -> MlTrainingAttempt:
+    """Budget-gated dispatch with an atomic reservation.
+
+    Headroom = max - (spent + reserved + estimate). Zero remaining budget
+    allows no new spend; retries reserve again and cannot reset the budget.
+    """
     _refresh_state(budget)
     if budget.state != "open":
         raise BudgetError(f"budget {budget.name} is {budget.state}")
+    if budget.used_hours + est_hours > budget.max_hours:
+        raise BudgetError(f"budget {budget.name}: no hour headroom for estimate {est_hours}h")
+    if budget.spent_usd + budget.reserved_usd + est_spend_usd > budget.max_spend_usd:
+        raise BudgetError(f"budget {budget.name}: no spend headroom for estimate ${est_spend_usd}")
     attempt = MlTrainingAttempt(id=new_uuid(), dataset_id=dataset.id, budget_id=budget.id,
-                                state="queued", recipe_json=recipe or {})
+                                state="queued", recipe_json=recipe or {},
+                                reserved_usd=est_spend_usd)
+    budget.reserved_usd = round(budget.reserved_usd + est_spend_usd, 4)
     session.add(attempt)
     session.commit()
     return attempt
@@ -133,14 +145,14 @@ def attach_job(session, attempt: MlTrainingAttempt, owner_id: str, settings) -> 
               idempotency_key=f"ml-attempt-{attempt.id}")
     session.add(job)
     attempt.job_id = job.id
-    attempt.state = "running"
     session.commit()
     return job
 
 
-def complete_attempt(session, attempt: MlTrainingAttempt, *, state: str,
-                     hours: float | None = None, spend_usd: float | None = None,
-                     error: str | None = None, budget: MlBudget | None = None) -> dict:
+def settle_attempt(session, attempt: MlTrainingAttempt, *, state: str,
+                   hours: float | None = None, spend_usd: float | None = None,
+                   error: str | None = None, budget: MlBudget | None = None) -> dict:
+    """Terminal outcome with idempotent budget settlement (replays re-book once)."""
     if state not in ("done", "failed", "cancelled"):
         raise BudgetError(f"unknown terminal state: {state}")
     attempt.state = state
@@ -148,17 +160,44 @@ def complete_attempt(session, attempt: MlTrainingAttempt, *, state: str,
     attempt.spend_usd = spend_usd
     attempt.error = error
     attempt.finished_at = utcnow()
-    if budget is not None and hours is not None and spend_usd is not None:
-        budget.used_hours = round(budget.used_hours + hours, 4)
-        budget.spent_usd = round(budget.spent_usd + spend_usd, 4)
+    if budget is not None and not attempt.settled:
+        budget.reserved_usd = round(max(0.0, budget.reserved_usd - attempt.reserved_usd), 4)
+        budget.used_hours = round(budget.used_hours + (hours or 0.0), 4)
+        budget.spent_usd = round(budget.spent_usd + (spend_usd or 0.0), 4)
+        attempt.settled = True
         _refresh_state(budget)
     session.commit()
     return {"id": attempt.id, "state": attempt.state, "hours": attempt.hours,
             "spend_usd": attempt.spend_usd}
 
 
+# backwards-compatible alias used by earlier milestones/tests
+complete_attempt = settle_attempt
+
+
+def register_trained_bundle(session, attempt: MlTrainingAttempt, dataset: MlDataset,
+                            result: dict, *, base_model: str = "ace-step-1.5"):
+    """Register a trained adapter as an immutable candidate bundle (slice tail)."""
+    from .models import MlModelBundle
+
+    bundle = MlModelBundle(id=new_uuid(),
+                           name=result.get("name") or f"{dataset.name}-adapter",
+                           version="v1", kind="adapter", base_model=base_model,
+                           state="candidate",
+                           artifact_key=result.get("artifact_key"),
+                           sha256=result.get("sha256"),
+                           bundle_json={"attempt_id": attempt.id, "dataset_id": dataset.id,
+                                        "frozen_sha256": dataset.frozen_sha256,
+                                        "reload": result.get("reload"),
+                                        "trainer_result": result})
+    session.add(bundle)
+    session.commit()
+    return bundle
+
+
 def attempt_view(attempt: MlTrainingAttempt) -> dict:
     return {"id": attempt.id, "dataset_id": attempt.dataset_id, "job_id": attempt.job_id,
             "state": attempt.state, "instance_id": attempt.instance_id,
             "worker_id": attempt.worker_id, "hours": attempt.hours,
-            "spend_usd": attempt.spend_usd, "error": attempt.error}
+            "spend_usd": attempt.spend_usd, "reserved_usd": attempt.reserved_usd,
+            "settled": attempt.settled, "error": attempt.error}

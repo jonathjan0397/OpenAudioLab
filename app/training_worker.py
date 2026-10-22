@@ -16,7 +16,9 @@ import hashlib
 import json
 import logging
 import os
+import signal
 import socket
+import subprocess
 import tempfile
 import threading
 import time
@@ -48,6 +50,7 @@ from .orchestration import (
     append_event,
     cancel_attempt,
     claim_attempt,
+    complete_attempt,
     fail_attempt,
     get_job_by_id,
     heartbeat,
@@ -95,6 +98,7 @@ class TrainingWorker:
         self.queues = [RedisQueue.queue_name(settings.train_queue_model_id)]
         if settings.train_xl_queue_model_id != settings.train_queue_model_id:
             self.queues.append(RedisQueue.queue_name(settings.train_xl_queue_model_id))
+        self.node_key = (settings.node_key or socket.gethostname())
         self._stop = False
         if settings.train_cuda_device and "CUDA_VISIBLE_DEVICES" not in os.environ:
             os.environ["CUDA_VISIBLE_DEVICES"] = settings.train_cuda_device
@@ -148,8 +152,11 @@ class TrainingWorker:
                 return resp.read()
 
     def register(self) -> None:
+        from .fleet_nodes import register_node
         from .uais.capabilities import VOICE_CAPABILITIES
 
+        with self.db.session() as session:
+            register_node(session, self.node_key, worker_id=self.worker_id)
         total_mb = self._gpu_total_mb()
         with self.db.session() as session:
             worker = session.get(Worker, self.worker_id)
@@ -229,6 +236,10 @@ class TrainingWorker:
                 self._validate(claimed_job, attempt_id, lease_token)
             elif operation == "model_lab.train":
                 self._model_lab_train(claimed_job, attempt_id, lease_token)
+            elif operation == "model_lab.merge":
+                self._model_lab_merge(claimed_job, attempt_id, lease_token)
+            elif operation == "model_lab.identify":
+                self._model_lab_identify(claimed_job, attempt_id, lease_token)
             else:
                 fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token,
                              "OPERATION_UNSUPPORTED", f"Training worker cannot run {operation!r}.")
@@ -619,15 +630,82 @@ class TrainingWorker:
             append_event(session, job_id, "succeeded", "succeeded", stage="done", progress=1.0, attempt_id=attempt_id)
             session.commit()
 
-    # -- model_lab.train -------------------------------------------------------------
+    # -- model_lab.train / model_lab.merge -------------------------------------------
+
+    def _supervised_run(self, command: str, env: dict, job_id: str,
+                        attempt_id: str, lease_token: str, wall_hours: float):
+        """Run a long trainer/merge command with continuous lease renewal,
+        cancellation and hard wall deadline. Returns (returncode, stdout, stderr,
+        outcome) where outcome is ok|cancelled|timeout|lease-lost."""
+        import tempfile
+
+        out = tempfile.NamedTemporaryFile("w+", suffix=".out", delete=False)
+        err = tempfile.NamedTemporaryFile("w+", suffix=".err", delete=False)
+        proc = subprocess.Popen(command, shell=True, stdout=out, stderr=err,
+                                env=env, text=True, start_new_session=True)
+        deadline = time.monotonic() + max(0.1, wall_hours) * 3600.0
+        outcome = "ok"
+        while proc.poll() is None:
+            time.sleep(10.0)
+            if not heartbeat(self.db, attempt_id, lease_token):
+                outcome = "lease-lost"
+                self._kill_group(proc, signal.SIGKILL)
+                break
+            if is_cancelling(self.db, job_id):
+                outcome = "cancelled"
+                self._kill_group(proc, signal.SIGTERM)
+                break
+            if time.monotonic() > deadline:
+                outcome = "timeout"
+                self._kill_group(proc, signal.SIGKILL)
+                break
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            self._kill_group(proc, signal.SIGKILL)
+            proc.wait(timeout=30)
+        out.close(); err.close()
+        stdout = Path(out.name).read_text(errors="replace")
+        stderr = Path(err.name).read_text(errors="replace")
+        for f in (out.name, err.name):
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
+        return proc.returncode, stdout, stderr, outcome
+
+    @staticmethod
+    def _kill_group(proc, sig) -> None:
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    @staticmethod
+    def _last_json(stdout: str) -> dict:
+        for line in reversed((stdout or "").splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    return json.loads(line)
+                except json.JSONDecodeError:
+                    pass
+        return {}
 
     def _model_lab_train(self, job_id: str, attempt_id: str, lease_token: str) -> None:
-        """Budgeted catalog training via the configured trainer command."""
-        from .model_lab_train import complete_attempt as ml_complete
-        from .models import MlBudget, MlTrainingAttempt
+        from .model_lab_train import register_trained_bundle, settle_attempt
+        from .models import MlBudget, MlDataset, MlTrainingAttempt
 
         command = (self.settings.model_lab_train_command or "").strip()
         if not command:
+            with self.db.session() as session:
+                job = get_job_by_id(session, job_id)
+                request = dict(job.request_json)
+                attempt = session.get(MlTrainingAttempt, request.get("attempt_id"))
+                if attempt is not None:
+                    settle_attempt(session, attempt, state="failed",
+                                   error="TRAINER_UNAVAILABLE",
+                                   budget=session.get(MlBudget, attempt.budget_id))
             fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
                          "TRAINER_UNAVAILABLE",
                          "model_lab.train needs OAL_MODEL_LAB_TRAIN_COMMAND.")
@@ -635,37 +713,156 @@ class TrainingWorker:
         with self.db.session() as session:
             job = get_job_by_id(session, job_id)
             request = dict(job.request_json)
+            attempt = session.get(MlTrainingAttempt, request.get("attempt_id"))
+            if attempt is not None:
+                attempt.state = "running"  # running only after claim
+                attempt.worker_id = self.worker_id
+                session.commit()
+        from .fleet_nodes import claim_for_training
+        with self.db.session() as session:
+            reserved = claim_for_training(session, self.node_key, request.get("attempt_id", ""))
+        if not reserved:
+            # A node record exists but is not exclusively reserved for us:
+            # another claim won the race or the node is not in training pool.
+            from .fleet_nodes import NODE_STATES  # noqa: F401
+            with self.db.session() as session:
+                job2 = get_job_by_id(session, job_id)
+                req2 = dict(job2.request_json)
+                attempt = session.get(MlTrainingAttempt, req2.get("attempt_id"))
+                if attempt is not None:
+                    settle_attempt(session, attempt, state="failed",
+                                   error="NODE_NOT_RESERVED",
+                                   budget=session.get(MlBudget, attempt.budget_id))
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         "NODE_NOT_RESERVED",
+                         f"node {self.node_key} is not in training_reserved state.")
+            return
         env = dict(os.environ)
         env["OAL_ML_ATTEMPT_ID"] = request.get("attempt_id", "")
         env["OAL_ML_DATASET_SHA"] = request.get("frozen_sha256", "")
-        heartbeat(self.db, attempt_id, lease_token)
-        proc = subprocess.run(command, shell=True, capture_output=True, text=True,
-                              timeout=12 * 3600, env=env, check=False)
-        result: dict = {}
-        for line in reversed((proc.stdout or "").splitlines()):
-            line = line.strip()
-            if line.startswith("{"):
-                try:
-                    result = json.loads(line)
-                except json.JSONDecodeError:
-                    pass
-                break
-        ok = proc.returncode == 0
+        rc, stdout, stderr, outcome = self._supervised_run(
+            command, env, job_id, attempt_id, lease_token,
+            self.settings.model_lab_run_wall_hours)
+        result = self._last_json(stdout)
+        code = {"ok": None, "cancelled": "TRAINING_CANCELLED",
+                "timeout": "TRAINING_TIMEOUT",
+                "lease-lost": "LEASE_LOST"}[outcome]
+        ok = outcome == "ok" and rc == 0
+        if ok and not (result.get("artifact_key") and result.get("sha256")):
+            ok, code = False, "TRAINING_NO_ARTIFACT"  # a successful no-op fails
         with self.db.session() as session:
             attempt = session.get(MlTrainingAttempt, request.get("attempt_id"))
             if attempt is not None:
                 budget = session.get(MlBudget, attempt.budget_id)
-                ml_complete(session, attempt, state="done" if ok else "failed",
-                            hours=result.get("hours"), spend_usd=result.get("spend_usd"),
-                            error=None if ok else (proc.stderr or "")[-280:], budget=budget)
+                settle_attempt(session, attempt,
+                               state="done" if ok else "failed",
+                               hours=result.get("hours"), spend_usd=result.get("spend_usd"),
+                               error=None if ok else (code + ": " + (stderr or "")[-200:]),
+                               budget=budget)
+        self._release_node()
         if not ok:
             fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
-                         "TRAINING_FAILED", (proc.stderr or "trainer failed")[-280:])
+                         code or "TRAINING_FAILED", (stderr or code or "trainer failed")[-280:])
             return
+        # Slice tail: export -> reload -> register (vertical slice M4).
+        export_path = result.get("export_path")
+        if export_path and Path(export_path).is_file():
+            key = f"ml/adapters/{attempt_id}/model.safetensors"
+            self.storage.put(key, Path(export_path).read_bytes())
+            result["artifact_key"] = key
+        result["reload"] = "skipped"
+        if self.settings.model_lab_reload_enabled and export_path:
+            try:
+                self._load_fresh(export_path)
+                result["reload"] = "ok"
+            except EngineError as exc:
+                result["reload"] = f"failed: {exc}"
+        with self.db.session() as session:
+            attempt = session.get(MlTrainingAttempt, request.get("attempt_id"))
+            dataset = session.get(MlDataset, attempt.dataset_id) if attempt else None
+            if attempt is not None and dataset is not None:
+                bundle = register_trained_bundle(session, attempt, dataset, result)
+                result["bundle_id"] = bundle.id
         complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
                          lease_token, ("train-result", json.dumps(result).encode()),
                          synthetic=False,
                          engine_result={"trainer": command.split()[0], "result": result})
+
+    def _release_node(self) -> None:
+        """active -> cleanup -> shared_ready (no-op when not under contract)."""
+        from .fleet_nodes import cleanup_done, finish_training
+
+        with self.db.session() as session:
+            finish_training(session, self.node_key)
+            cleanup_done(session, self.node_key)
+
+    def _model_lab_merge(self, job_id: str, attempt_id: str, lease_token: str) -> None:
+        from .model_lab_merge import finish_merge_build
+        from .models import MlModelBundle
+
+        command = (self.settings.model_lab_merge_command or "").strip()
+        if not command:
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         "MERGE_UNAVAILABLE", "model_lab.merge needs OAL_MODEL_LAB_MERGE_COMMAND.")
+            return
+        with self.db.session() as session:
+            job = get_job_by_id(session, job_id)
+            request = dict(job.request_json)
+            bundle = session.get(MlModelBundle, request.get("bundle_id"))
+            bundle_id = bundle.id if bundle is not None else None
+        if bundle_id is None:
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         "BUNDLE_NOT_FOUND", "Merge build bundle record missing.")
+            return
+        env = dict(os.environ)
+        env["OAL_ML_BUNDLE_ID"] = bundle_id
+        env["OAL_ML_RECIPE_ID"] = request.get("recipe_id", "")
+        env["OAL_ML_BASE_MODEL"] = request.get("base_model", "")
+        env["OAL_ML_ADAPTERS"] = ",".join(request.get("adapter_ids") or [])
+        env["OAL_ML_METHOD"] = request.get("method", "slerp")
+        env["OAL_ML_STRENGTHS"] = ",".join(
+            str(v) for v in (request.get("strengths") or []))
+        rc, stdout, stderr, outcome = self._supervised_run(
+            command, env, job_id, attempt_id, lease_token,
+            self.settings.model_lab_merge_wall_hours)
+        result = self._last_json(stdout)
+        ok = outcome == "ok" and rc == 0 and result.get("sha256")
+        with self.db.session() as session:
+            bundle = session.get(MlModelBundle, bundle_id)
+            finish_merge_build(session, bundle, ok=ok, result=result,
+                               error=None if ok else f"{outcome or 'merge'} rc={rc}")
+        if not ok:
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         "MERGE_FAILED", (stderr or outcome or "merge failed")[-280:])
+            return
+        complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
+                         lease_token, ("merge-result", json.dumps(result).encode()),
+                         synthetic=False, engine_result=result)
+
+    # -- model_lab.identify ----------------------------------------------------------
+
+    def _model_lab_identify(self, job_id: str, attempt_id: str, lease_token: str) -> None:
+        from .model_lab import identify_recording
+        from .models import MlRecording
+
+        with self.db.session() as session:
+            job = get_job_by_id(session, job_id)
+            request = dict(job.request_json)
+            rec = session.get(MlRecording, request.get("recording_id"))
+            if rec is None:
+                fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                             "RECORDING_NOT_FOUND", "Identify target recording missing.")
+                return
+            try:
+                status = identify_recording(session, rec, self.settings,
+                                            enrich=bool(request.get("enrich", True)))
+            except Exception as exc:
+                fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                             "IDENTIFY_FAILED", str(exc)[-280:])
+                return
+        complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
+                         lease_token, ("identify-status", status.encode()),
+                         synthetic=False, engine_result={"identify_status": status})
 
     # -- voice.validate ------------------------------------------------------------------
 
@@ -775,10 +972,17 @@ class TrainingWorker:
     # -- loop --------------------------------------------------------------------------
 
     def run_forever(self) -> None:
+        from .fleet_nodes import heartbeat_node, supervisor_tick
+
         self.register()
         while not self._stop:
             try:
                 self.run_once()
+                with self.db.session() as session:
+                    heartbeat_node(session, self.node_key)
+                    stale = supervisor_tick(session, self.settings.node_stale_seconds)
+                for node_id in stale:
+                    log.warning("supervisor quarantined node %s (stale heartbeat)", node_id)
             except Exception:
                 log.exception("training worker iteration failed")
                 time.sleep(2)

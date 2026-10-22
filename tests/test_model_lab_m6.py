@@ -27,7 +27,8 @@ def _bundle(client, state="candidate"):
 
     with client.app.state.db.session() as session:
         b = MlModelBundle(id=new_uuid(), name=f"b-{next(_SEQ)}", version="v1",
-                          kind="merged", base_model="ace-step-1.5", state=state)
+                          kind="merged", base_model="ace-step-1.5", state=state,
+            sha256="ab" * 32, artifact_key="ml/test/model.pt")
         session.add(b)
         session.commit()
         return b.id
@@ -69,6 +70,8 @@ def test_channel_promotion_requires_released_bundle(client) -> None:
     assert blocked.status_code == 409
     assert blocked.json()["error"]["code"] == "PROMOTION_BLOCKED"
     client.post(f"/api/v1/admin/model-lab/bundles/{bid}/release")
+    client.post(f"/api/v1/admin/model-lab/bundles/{bid}/evaluations",
+                json={"kind": "objective", "verdict": "pass"})
     ok = client.post("/api/v1/admin/model-lab/release-channels/stable/promote",
                      json={"bundle_id": bid})
     assert ok.status_code == 200 and ok.json()["bundle"]["state"] == "released"

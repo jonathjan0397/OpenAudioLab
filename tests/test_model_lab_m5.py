@@ -78,7 +78,8 @@ def test_merge_run_creates_candidate_and_versions(client, monkeypatch) -> None:
                       ).json()["id"]
     client.app.state.settings.model_lab_merge_command = "echo merge"
     r1 = client.post(f"/api/v1/admin/model-lab/merge-recipes/{rid}/run")
-    assert r1.status_code == 201 and r1.json()["version"] == "v1"
+    assert r1.status_code == 202 and r1.json()["version"] == "v1"
+    assert r1.json()["state"] == "building" and r1.json()["job_id"]
     r2 = client.post(f"/api/v1/admin/model-lab/merge-recipes/{rid}/run")
     assert r2.json()["version"] == "v2"  # immutable versions, no overwrite
 
@@ -95,7 +96,16 @@ def test_bundle_lifecycle(client, monkeypatch) -> None:
     rid = client.post("/api/v1/admin/model-lab/merge-recipes",
                       json={"name": "mix-4", "base_model": "m", "adapter_ids": [a, b]}
                       ).json()["id"]
-    bid = client.post(f"/api/v1/admin/model-lab/merge-recipes/{rid}/run").json()["bundle"]
+    run = client.post(f"/api/v1/admin/model-lab/merge-recipes/{rid}/run")
+    bid = run.json()["bundle"]
+    assert run.json()["state"] == "building"
+    building_retire = client.post(f"/api/v1/admin/model-lab/bundles/{bid}/retire")
+    assert building_retire.status_code == 409  # building cannot retire
+    with client.app.state.db.session() as session:
+        from app.model_lab_merge import finish_merge_build
+        from app.models import MlModelBundle
+        finish_merge_build(session, session.get(MlModelBundle, bid),
+                           ok=True, result={"sha256": "cd"})
     early_retire = client.post(f"/api/v1/admin/model-lab/bundles/{bid}/retire")
     assert early_retire.status_code == 409  # candidate cannot retire
     assert client.post(f"/api/v1/admin/model-lab/bundles/{bid}/release").json()["state"] == "released"

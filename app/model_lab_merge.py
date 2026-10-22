@@ -15,7 +15,8 @@ from sqlalchemy import func, select
 from .models import Lora, MlMergeRecipe, MlModelBundle, new_uuid, utcnow
 
 MERGE_METHODS = ("slerp", "dare")
-BUNDLE_STATES = ("candidate", "released", "retired")
+BUNDLE_STATES = ("building", "candidate", "released", "retired", "failed", "archived")
+SATISFACTORY = ("win", "pass")
 
 
 class MergeError(ValueError):
@@ -26,14 +27,21 @@ def create_recipe(session, name: str, base_model: str, adapter_ids: list[str],
                   method: str = "slerp", params: dict | None = None) -> MlMergeRecipe:
     if method not in MERGE_METHODS:
         raise MergeError(f"unknown merge method: {method}")
-    if not adapter_ids or len(adapter_ids) < 2:
-        raise MergeError("merge needs at least two adapters")
+    if adapter_ids is None:
+        raise MergeError("adapter_ids must be a list (zero adapters = anchor-only control)")
     for aid in adapter_ids:
         adapter = session.get(Lora, aid)
         if adapter is None:
             raise MergeError(f"unknown adapter: {aid}")
         if adapter.state not in ("active", "ready"):
             raise MergeError(f"adapter {aid} is not ready (state={adapter.state})")
+    strengths = (params or {}).get("strengths")
+    if strengths is not None:
+        if not isinstance(strengths, list) or len(strengths) != len(adapter_ids):
+            raise MergeError("params.strengths must be a list with one value per adapter")
+        for value in strengths:
+            if not isinstance(value, (int, float)) or not 0.0 <= float(value) <= 1.0:
+                raise MergeError("merge strengths must be within 0..1")
     recipe = MlMergeRecipe(id=new_uuid(), name=name, base_model=base_model,
                            adapter_ids_json=list(adapter_ids), method=method,
                            params_json=params or {})
@@ -49,21 +57,51 @@ def next_bundle_version(session, name: str) -> str:
     return f"v{count + 1}"
 
 
-def run_merge(session, recipe: MlMergeRecipe, settings) -> MlModelBundle:
-    """Execute the merge command; record the output as a candidate bundle."""
+def start_merge_build(session, recipe: MlMergeRecipe, settings) -> MlModelBundle:
+    """Create an immutable candidate placeholder in `building` state."""
     command = (getattr(settings, "model_lab_merge_command", "") or "").strip()
     if not command:
         raise MergeError("MERGE_UNAVAILABLE: no merge command configured")
-    env_keys = {
-        "OAL_ML_RECIPE_ID": recipe.id,
-        "OAL_ML_BASE_MODEL": recipe.base_model,
-        "OAL_ML_ADAPTERS": ",".join(recipe.adapter_ids_json),
-        "OAL_ML_METHOD": recipe.method,
-    }
+    bundle = MlModelBundle(id=new_uuid(), name=recipe.name,
+                           version=next_bundle_version(session, recipe.name),
+                           kind="merged", base_model=recipe.base_model,
+                           state="building",
+                           bundle_json={"recipe_id": recipe.id, "method": recipe.method,
+                                        "params": recipe.params_json,
+                                        "adapter_ids": list(recipe.adapter_ids_json)})
+    session.add(bundle)
+    session.commit()
+    return bundle
+
+
+def finish_merge_build(session, bundle: MlModelBundle | None, *, ok: bool,
+                       result: dict | None = None, error: str | None = None) -> None:
+    if bundle is None:
+        return
+    if ok:
+        result = result or {}
+        bundle.revision = result.get("revision")
+        bundle.artifact_key = result.get("artifact_key")
+        bundle.sha256 = result.get("sha256")
+        bundle.state = "candidate"
+        bundle.bundle_json = {**(bundle.bundle_json or {}), "trainer_result": result}
+    else:
+        bundle.state = "failed"
+        bundle.bundle_json = {**(bundle.bundle_json or {}), "error": (error or "")[-280:]}
+    session.commit()
+
+
+def run_merge(session, recipe: MlMergeRecipe, settings) -> MlModelBundle:
+    """Synchronous merge (tests / controller-side); worker path uses the job."""
     import os
 
+    command = (getattr(settings, "model_lab_merge_command", "") or "").strip()
+    if not command:
+        raise MergeError("MERGE_UNAVAILABLE: no merge command configured")
     env = dict(os.environ)
-    env.update(env_keys)
+    env.update({"OAL_ML_RECIPE_ID": recipe.id, "OAL_ML_BASE_MODEL": recipe.base_model,
+                "OAL_ML_ADAPTERS": ",".join(recipe.adapter_ids_json),
+                "OAL_ML_METHOD": recipe.method})
     proc = subprocess.run(command, shell=True, capture_output=True, text=True,
                           timeout=3600, env=env, check=False)
     if proc.returncode != 0:
@@ -77,16 +115,10 @@ def run_merge(session, recipe: MlMergeRecipe, settings) -> MlModelBundle:
             except json.JSONDecodeError:
                 pass
             break
-    bundle = MlModelBundle(id=new_uuid(), name=recipe.name,
-                           version=next_bundle_version(session, recipe.name),
-                           kind="merged", base_model=recipe.base_model,
-                           revision=result.get("revision"),
-                           artifact_key=result.get("artifact_key"),
-                           sha256=result.get("sha256"), state="candidate",
-                           bundle_json={"recipe_id": recipe.id, "method": recipe.method,
-                                        "params": recipe.params_json, "trainer_result": result})
-    session.add(bundle)
-    session.commit()
+    if not result.get("sha256"):
+        raise MergeError("MERGE_NO_ARTIFACT: merge reported success without an artifact")
+    bundle = start_merge_build(session, recipe, settings)
+    finish_merge_build(session, bundle, ok=True, result=result)
     return bundle
 
 
@@ -100,6 +132,10 @@ def transition_bundle(session, bundle: MlModelBundle, action: str) -> MlModelBun
         if bundle.state != "released":
             raise MergeError(f"only released bundles can be retired (state={bundle.state})")
         bundle.state = "retired"
+    elif action == "archive":
+        if bundle.state not in ("retired", "candidate", "failed"):
+            raise MergeError(f"cannot archive a {bundle.state} bundle")
+        bundle.state = "archived"
     else:
         raise MergeError(f"unknown bundle action: {action}")
     session.commit()

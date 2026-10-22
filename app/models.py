@@ -440,6 +440,40 @@ class SiteSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class GpuCostLedger(Base):
+    """Durable per-instance cost entries: opened on deploy, closed on stop/destroy."""
+
+    __tablename__ = "gpu_cost_ledger"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    vast_instance_id: Mapped[str] = mapped_column(String(60), index=True)
+    purpose: Mapped[str] = mapped_column(String(40), default="auto")
+    dph: Mapped[float | None] = mapped_column(Float, nullable=True)
+    state: Mapped[str] = mapped_column(String(10), default="open")  # open|closed
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String(20), default="deploy")  # deploy|reconcile
+
+
+class FleetNode(Base):
+    """Durable GPU-node identity surviving instance churn (exclusive-training gate)."""
+
+    __tablename__ = "fleet_nodes"
+
+    id: Mapped[str] = mapped_column(String(120), primary_key=True)  # durable node_key
+    instance_id: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    worker_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    state: Mapped[str] = mapped_column(String(20), default="shared_ready")
+    exclusive_attempt_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    in_flight_jobs: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class VastInstance(Base):
     """Recently used Vast.ai nodes kept for fast restart instead of fresh create."""
 
@@ -1066,6 +1100,7 @@ class MlBudget(Base):
     max_spend_usd: Mapped[float] = mapped_column(Float, default=3.0)
     used_hours: Mapped[float] = mapped_column(Float, default=0.0)
     spent_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    reserved_usd: Mapped[float] = mapped_column(Float, default=0.0)  # atomic pre-dispatch commitments
     state: Mapped[str] = mapped_column(String(12), default="open")  # open|exhausted|closed
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -1085,6 +1120,8 @@ class MlTrainingAttempt(Base):
     recipe_json: Mapped[dict] = mapped_column(JSON, default=dict)
     hours: Mapped[float | None] = mapped_column(Float, nullable=True)
     spend_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reserved_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    settled: Mapped[bool] = mapped_column(Boolean, default=False)
     error: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -1144,6 +1181,8 @@ class MlReleaseChannel(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     name: Mapped[str] = mapped_column(String(30), unique=True)
     bundle_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    previous_bundle_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    canary_percent: Mapped[int] = mapped_column(Integer, default=100)
     min_credits: Mapped[int] = mapped_column(Integer, default=0)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

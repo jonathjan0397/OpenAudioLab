@@ -726,7 +726,9 @@ def test_worker_destroy_and_restart(client, monkeypatch) -> None:
         session.commit()
     assert client.post("/api/v1/admin/gpu-fleet/workers/acestep-gpu-node-8-999/restart").status_code == 200
     assert client.delete("/api/v1/admin/gpu-fleet/workers/acestep-gpu-node-8-999").status_code == 200
-    assert any((body or {}).get("action_type") == "destroy" for _, _, body in calls)
+    assert ("DELETE", "/instances/dc-1/", None) in calls
+    assert ("PUT", "/instances/dc-1/", {"state": "shutdown"}) in calls
+    assert ("PUT", "/instances/dc-1/", {"state": "running"}) in calls
 
 
 def test_costs_endpoint_shape(client) -> None:

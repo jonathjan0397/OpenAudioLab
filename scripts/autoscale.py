@@ -1111,13 +1111,13 @@ def swappiness_gate(work_seconds, queued_jobs, fset, running_auto, spend_today, 
     }
     if not fset["auto_burst_enabled"]:
         return False, "HOLD", "AUTO_BURST_DISABLED", fields
-    if sw == 0:
-        return True, "PROVISION", "DEPTH_POLICY", fields
     if running_auto >= int(fset["max_auto_burst_workers"]):
         return False, "DECLINE", "EXISTING_REMOTE_CAPACITY", fields
     budget = float(fset["daily_burst_budget_usd"])
     if budget > 0 and spend_today >= budget:
         return False, "DECLINE", "BUDGET_EXHAUSTED", fields
+    if sw == 0:
+        return True, "PROVISION", "DEPTH_POLICY", fields
     local_wait = work_seconds / max(1, running_auto + 1)
     advantage = 1.5 - sw / 100.0  # 25->1.25 conservative, 50->1.0, 100->0.5 aggressive
     if REMOTE_READY_SECONDS <= local_wait * advantage:

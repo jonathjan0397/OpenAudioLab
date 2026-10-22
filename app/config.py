@@ -164,6 +164,15 @@ class Settings(BaseSettings):
     model_lab_pilot_max_spend_usd: float = 3.0
     model_lab_train_command: str = ""  # GPU trainer command; empty = no trainer wired
     model_lab_merge_command: str = ""  # GPU merge command; empty = merge unavailable
+    model_lab_run_wall_hours: float = 6.0  # hard training deadline
+    model_lab_merge_wall_hours: float = 1.0  # hard merge-build deadline
+    model_lab_est_hours: float = 1.0  # reservation estimate per attempt
+    model_lab_est_spend_usd: float = 0.25  # reservation estimate per attempt
+    node_key: str = ""  # durable fleet-node identity (default: hostname)
+    node_stale_seconds: int = 180  # supervisor heartbeat staleness
+    byol_model_path: str = ""  # singer-identity encoder weights; empty = BYOL off
+    byol_scan_command: str = ""  # encoder hook: prints {"vector": [...]} for a WAV crop
+    model_lab_reload_enabled: bool = False  # load trained adapters into the engine
     # Calibration default, not a scientifically established voice-accuracy claim.
     voice_similarity_threshold: float = 0.5
     voice_max_recording_seconds: int = 600

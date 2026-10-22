@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api";
 
-const TABS = ["Overview", "Smart Queue", "Settings", "Offers", "Deployments", "Instances", "Costs", "Events"] as const;
+const TABS = ["Overview", "Smart Queue", "Settings", "Offers", "Deployments", "Nodes", "Instances", "Costs", "Events"] as const;
 type Tab = (typeof TABS)[number];
 
 interface QueueView {
@@ -47,6 +47,8 @@ export default function GpuFleetPage() {
   const offers = useQuery({ queryKey: ["fleet-offers", search], queryFn: () => api.get<OffersView>(offerPath(search)), enabled: tab === "Offers", staleTime: 25000 });
   const deployments = useQuery({ queryKey: ["fleet-deployments"], queryFn: () => api.get<{ deployments: Deployment[] }>("/api/v1/admin/gpu-fleet/deployments"), enabled: tab === "Deployments" || tab === "Offers" });
   const costs = useQuery({ queryKey: ["fleet-costs"], queryFn: () => api.get<{ today_usd: number; combined_fleet_usd: number; categories_usd: Record<string, number>; running: { instance: string; hostname: string | null; dph: number; gpu: string | null }[] }>("/api/v1/admin/gpu-fleet/costs"), enabled: tab === "Costs" || tab === "Instances" || tab === "Overview" });
+  const nodes = useQuery({ queryKey: ["fleet-nodes"], queryFn: () => api.get<{ nodes: { id: string; instance_id: string | null; worker_id: string | null; state: string; exclusive_attempt_id: string | null; in_flight_jobs: number; last_error: string | null; heartbeat_at: string | null }[] }>("/api/v1/admin/gpu-fleet/nodes"), enabled: tab === "Nodes" });
+  const ledger = useQuery({ queryKey: ["fleet-ledger"], queryFn: () => api.get<{ entries: { id: string; vast_instance_id: string; purpose: string; dph: number | null; state: string; opened_at: string | null; closed_at: string | null; hours: number | null; usd: number | null }[]; closed_total_usd: number; open_entries: number }>("/api/v1/admin/gpu-fleet/ledger"), enabled: tab === "Nodes" });
   const events = useQuery({ queryKey: ["fleet-events"], queryFn: () => api.get<{ events: { id: string; created_at: string | null; actor: string; action: string; subject: string | null }[]; decisions: Record<string, unknown>[] }>("/api/v1/admin/gpu-fleet/events"), enabled: tab === "Events" });
 
   const cur = { ...(settings.data?.settings || {}), ...(draft || {}) } as Record<string, any>;
@@ -259,6 +261,46 @@ export default function GpuFleetPage() {
             {(deployments.data?.deployments || []).length === 0 && <tr><td colSpan={8} style={{ color: "var(--muted)" }}>No deployments yet.</td></tr>}
           </tbody>
         </table>
+      )}
+
+      {tab === "Nodes" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <table className="table">
+            <thead><tr><th>Node</th><th>Instance</th><th>Worker</th><th>State</th><th>In flight</th><th>Error</th><th>Heartbeat</th><th></th></tr></thead>
+            <tbody>
+              {(nodes.data?.nodes || []).map((n) => (
+                <tr key={n.id}>
+                  <td className="mono">{n.id}</td><td className="mono">{nr(n.instance_id)}</td><td>{nr(n.worker_id)}</td>
+                  <td><span className={`pill ${n.state === "quarantined" ? "err" : n.state === "shared_ready" ? "ok" : "info"}`}>{n.state}</span></td>
+                  <td>{n.in_flight_jobs}</td><td>{nr(n.last_error)}</td>
+                  <td>{n.heartbeat_at ? n.heartbeat_at.slice(11, 19) : "—"}</td>
+                  <td>{n.state === "quarantined" && (
+                    <button className="btn" onClick={() => api.post(`/api/v1/admin/gpu-fleet/nodes/${n.id}/reset`, {}).then(() => qc.invalidateQueries({ queryKey: ["fleet-nodes"] }))}>Reset</button>
+                  )}</td>
+                </tr>
+              ))}
+              {(nodes.data?.nodes || []).length === 0 && <tr><td colSpan={8} style={{ color: "var(--muted)" }}>No fleet nodes registered yet.</td></tr>}
+            </tbody>
+          </table>
+          <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+            <div><div className="label">Ledger closed total</div><div className="value">${ledger.data?.closed_total_usd ?? 0}</div></div>
+            <div><div className="label">Open entries</div><div className="value">{ledger.data?.open_entries ?? 0}</div></div>
+          </div>
+          <table className="table">
+            <thead><tr><th>Instance</th><th>Purpose</th><th>$/h</th><th>State</th><th>Hours</th><th>USD</th></tr></thead>
+            <tbody>
+              {(ledger.data?.entries || []).slice(0, 20).map((e) => (
+                <tr key={e.id}>
+                  <td className="mono">{e.vast_instance_id}</td><td>{e.purpose}</td>
+                  <td>{e.dph != null ? `$${e.dph.toFixed(3)}` : "—"}</td>
+                  <td>{e.state}</td><td>{e.hours != null ? e.hours.toFixed(2) : "—"}</td>
+                  <td>{e.usd != null ? `$${e.usd.toFixed(3)}` : "—"}</td>
+                </tr>
+              ))}
+              {(ledger.data?.entries || []).length === 0 && <tr><td colSpan={6} style={{ color: "var(--muted)" }}>No ledger entries yet.</td></tr>}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {tab === "Instances" && (

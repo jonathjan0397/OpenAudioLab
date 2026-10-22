@@ -1059,3 +1059,137 @@ a per-profile website display name in the Model Pricing editor (stored in the
 model_pricing SiteSetting JSON, 1-120 chars); /model-selections emits it per
 profile and as the release-level card name, falling back to the catalog label.
 No migration. Validation: 388 backend tests (2 new), 17 vitest, clean build.
+
+## 2026-10-22 — Pipeline M1: execution repairs (feat/model-lab-pipeline)
+
+- Fixed `model_lab.train` worker NameErrors (module-level `subprocess`, orchestration
+  `complete_attempt` import); the success path previously always crashed.
+- Long runs now use `_supervised_run`: continuous lease heartbeat every 10 s,
+  cooperative cancellation (SIGTERM), hard wall deadline (SIGKILL), lease-loss fencing.
+- Attempts stay `queued` until the worker claims them; `running` is set post-claim.
+- Budget reservations (migration 0044): `ml_budgets.reserved_usd` +
+  `ml_training_attempts.reserved_usd/settled`. Headroom = max − (spent + reserved +
+  estimate); settlement is idempotent and releases the reservation on every terminal
+  path (including TRAINER_UNAVAILABLE). A successful trainer no-op without
+  artifact_key+sha256 fails as TRAINING_NO_ARTIFACT.
+- Merge builds moved to the worker: `POST /merge-recipes/{id}/run` returns 202 with a
+  `building` bundle + `model_lab.merge` job; recipes accept zero/one/many adapters
+  (zero = anchor-only control). New bundle states `building`/`failed`.
+- Promotion gate now requires a satisfactory verdict (win/pass), disqualifies `fail`,
+  and requires artifact integrity (sha256 or artifact_key); `promote_channel` enforces
+  the gate transactionally.
+- Vast lifecycle switched to the documented contract: PUT /instances/{id}/
+  {"state": running|shutdown} and DELETE for destroy (was undocumented POST action/).
+- `swappiness_gate`: sw==0 no longer bypasses capacity/budget hard gates.
+- Validation: 398 backend tests pass (8 new in tests/test_model_lab_m1_repairs.py);
+  m5/m6/m16/gpu-fleet tests updated for the async-merge and lifecycle contracts.
+
+## 2026-10-22 — Pipeline M2: fleet-node contract (feat/model-lab-pipeline)
+
+- New durable `fleet_nodes` table (migration 0045): node identity survives Vast
+  instance churn; `node_key` = OAL_NODE_KEY or hostname.
+- Exclusive-training state machine in `app/fleet_nodes.py`:
+  shared_ready → draining → training_reserved → active → cleanup → shared_ready,
+  any→quarantined, quarantined→reset. Every transition is a conditional UPDATE,
+  so the claim-vs-reservation race has exactly one winner.
+- `claim_for_training` is the worker-side atomic claim: self-reserves from
+  shared_ready, activates from training_reserved, loses against active or
+  quarantined; unregistered nodes proceed (backward compatible).
+- Training worker: registers its node, heartbeats + runs `supervisor_tick` every
+  loop (stale mid-training heartbeats → quarantine), claims the node before the
+  trainer runs (NODE_NOT_RESERVED on loss) and releases it (cleanup→shared_ready)
+  after settlement.
+- Admin endpoints: GET /admin/gpu-fleet/nodes; POST .../drain, /quarantine,
+  /reset (audited via GpuFleetEvent).
+- Dockerfile.worker gains the BYOL singer-identity layer (pinned weights baked,
+  OAL_BYOL_MODEL_PATH="" keeps it config-gated off until calibration).
+- Validation: 405 backend tests pass (7 new in tests/test_fleet_nodes.py).
+
+## 2026-10-22 — Pipeline M3: offer search, presets, cost ledger (feat/model-lab-pipeline)
+
+- Offer search gains `gpu_model` (substring), `min_disk` and `min_ram` filters
+  (server-side bundle query + client-side gate with machine-readable
+  GPU_MODEL_EXCLUDED / DISK_BELOW_MINIMUM / RAM_BELOW_MINIMUM exclusions);
+  normalize now exposes `ram_gb` (cpu_ram MB -> GB).
+- Named offer-search presets persist in site_settings (`gpu_offer_presets`,
+  unique-name + params validation, 1900-char blob guard):
+  GET/PUT /admin/gpu-fleet/presets.
+- Deployment form: POST /admin/gpu-fleet/deploy records a durable
+  MANUAL_ADMIN GpuDeployment (state REQUESTED until a worker registers) plus a
+  pending VastInstance and an open ledger entry; no provider create is claimed
+  without a funded rental.
+- Durable cost ledger (migration 0046, app/gpu_ledger.py): entries open on
+  deploy, close on stop/destroy with exact hours x dph settlement; restart
+  closes and reopens (source=reconcile); close is idempotent.
+  GET /admin/gpu-fleet/ledger exposes entries + closed totals by purpose.
+- Validation: 411 backend tests pass (6 new in tests/test_gpu_ledger.py).
+
+## 2026-10-22 — Pipeline M4: vertical slice (feat/model-lab-pipeline)
+
+- Training success now runs the full slice tail on the worker: export (trainer
+  `export_path` copied to `ml/adapters/<attempt>/model.safetensors` in storage),
+  engine reload (config-gated `OAL_MODEL_LAB_RELOAD_ENABLED`; recorded as
+  ok|skipped|failed in the result), and registration
+  (`register_trained_bundle` -> immutable `kind=adapter` candidate bundle with
+  dataset/frozen-sha provenance).
+- tests/test_model_lab_m4_slice.py drives the whole chain through the API and
+  the real worker handler: import -> review -> freeze -> budget reservation ->
+  dispatch -> claim -> train -> export -> register -> node released to
+  shared_ready -> budget settled exactly once.
+- Validation: 412 backend tests pass.
+
+## 2026-10-22 — Pipeline M5: async identify, captions, BYOL (feat/model-lab-pipeline)
+
+- Identification is now async: POST /recordings/{id}/identify enqueues a
+  `model_lab.identify` job (202); the worker operation runs the provider
+  lookup and records the status as an artifact. No synchronous provider call
+  blocks the API process.
+- Caption compiler (`compile_caption`): deterministic, LLM-free caption text
+  from the recording's own fields + approved locked claims + approved tag
+  terms (sorted by namespace/label). GET /recordings/{id}/caption.
+- BYOL singer-identity challenger wired: `resolve_identity_model` fails closed
+  unless BOTH OAL_BYOL_MODEL_PATH and OAL_BYOL_SCAN_COMMAND are configured
+  (no silent mfcc fallback for a challenger run); `embed_byol` runs the pinned
+  encoder command with OAL_CROP_START/OAL_CROP_WINDOW and parses its vector.
+- Validation: 416 backend tests pass (4 new in tests/test_model_lab_m5_pipeline.py).
+
+## 2026-10-22 — Pipeline M6: merge contract, exact routing, Creation Cards (feat/model-lab-pipeline)
+
+- Merge numerical contract: `params.strengths` validated per-adapter within
+  0..1 at recipe creation; strengths flow through the merge job to the worker
+  as OAL_ML_STRENGTHS (anchor + strength x normalized delta contract; the
+  numerical verification itself remains a real-GPU item).
+- Exact-bundle routing: `resolve_exact_bundle` honors a named bundle or fails
+  explicitly (BUNDLE_NOT_FOUND / BUNDLE_NOT_AVAILABLE - never a silent
+  substitute). POST /jobs accepts `bundle_id` with admission-time validation;
+  the id is persisted in request_json for the worker.
+- Creation Card: GET /admin/model-lab/bundles/{id}/card returns the
+  deterministic provenance card (base model, method, adapters, strengths,
+  artifact integrity, evaluations, promotion gate).
+- Validation: 419 backend tests pass (3 new in tests/test_model_lab_m6_pipeline.py).
+
+## 2026-10-22 — Pipeline M7: release eligibility, canary, rollback, archive (feat/model-lab-pipeline)
+
+- Release channels gain `canary_percent` (0..100, PATCH-validated) and
+  `previous_bundle_id` history (migration 0047). Promotion records history;
+  POST /release-channels/{name}/rollback swaps back one step (409 when empty).
+- `resolve_channel_bundle` is the single eligibility decision: enabled ->
+  credits >= min_credits -> bundle released -> promotion gate ready ->
+  deterministic owner-hash canary bucket. Every rejection returns a
+  machine-readable reason (channel_disabled, credits_below_minimum,
+  bundle_not_released, gate_not_ready, outside_canary).
+  GET /release-channels/{name}/resolve?owner_id=&credits=.
+- Bundle lifecycle adds `archive` (retired/candidate/failed -> archived);
+  POST /bundles/{id}/archive.
+- Validation: 423 backend tests pass (4 new in tests/test_model_lab_m7_release.py).
+
+## 2026-10-22 — Pipeline M8: runbook + report (feat/model-lab-pipeline)
+
+- docs/MODEL_LAB_RUNBOOK.md: operator procedures for the vertical slice,
+  exclusive-training node states, offers/deploy/ledger, BYOL gating, merge
+  routing and release channels, plus the explicit unverified list.
+- docs/PIPELINE_REPORT.md: M1-M8 capability matrix with honest statuses
+  (implemented / fixture-tested / integration-tested / real-GPU-verified /
+  production-enabled); nothing real-GPU is claimed that this run did not run.
+- Frontend: GpuFleet gains a "Nodes" tab (fleet-node states + reset, cost
+  ledger totals/entries). Build + 17 vitest tests pass.

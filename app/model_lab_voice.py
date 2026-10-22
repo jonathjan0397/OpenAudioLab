@@ -27,14 +27,57 @@ class VoiceLabError(ValueError):
 
 
 def resolve_identity_model(settings) -> str:
-    """Default embedder unless the challenger is explicitly enabled and available."""
+    """Default embedder unless the challenger is explicitly enabled and available.
+
+    BYOL is wired when both the pinned weights (OAL_BYOL_MODEL_PATH) and the
+    encoder command (OAL_BYOL_SCAN_COMMAND) are configured; otherwise the
+    challenger fails closed - no silent fallback to mfcc for a challenger run.
+    """
     challenger = (getattr(settings, "voice_identity_challenger", "") or "").strip()
     if not challenger:
         return settings.voice_embedding_model
     if challenger not in CHALLENGER_MODELS:
         raise VoiceLabError(f"unknown identity challenger: {challenger}")
-    raise VoiceLabError(
-        f"challenger {challenger} requires a configured encoder (BYOL not wired in this build)")
+    if not ((getattr(settings, "byol_model_path", "") or "").strip()
+            and (getattr(settings, "byol_scan_command", "") or "").strip()):
+        raise VoiceLabError(
+            f"challenger {challenger} requires OAL_BYOL_MODEL_PATH and "
+            "OAL_BYOL_SCAN_COMMAND (BYOL not configured)")
+    return challenger
+
+
+def embed_byol(settings, crop_path, *, start: float = 0.0, window: float = 0.0) -> list[float]:
+    """Run the pinned BYOL encoder command over a WAV crop; parse its vector.
+
+    The encoder receives the source path plus OAL_CROP_START/OAL_CROP_WINDOW so
+    it can decode the exact window the mfcc path would have used.
+    """
+    import json
+    import os
+    import subprocess
+
+    command = (getattr(settings, "byol_scan_command", "") or "").strip()
+    if not command:
+        raise VoiceLabError("BYOL encoder command not configured")
+    env = dict(os.environ)
+    env["OAL_CROP_START"] = str(start)
+    env["OAL_CROP_WINDOW"] = str(window)
+    proc = subprocess.run(f"{command} {crop_path}", shell=True, capture_output=True,
+                          text=True, timeout=120, check=False, env=env)
+    if proc.returncode != 0:
+        raise VoiceLabError(f"BYOL encoder failed: {(proc.stderr or '')[-160:]}")
+    vector = None
+    for line in reversed((proc.stdout or "").splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                vector = json.loads(line).get("vector")
+            except json.JSONDecodeError:
+                continue
+            break
+    if not isinstance(vector, list) or not vector:
+        raise VoiceLabError("BYOL encoder returned no embedding vector")
+    return [float(x) for x in vector]
 
 
 def decode_crop(ffmpeg_bin: str, path: Path, start: float, seconds: float) -> array:
@@ -88,7 +131,10 @@ def scan_recording(session, rec: MlRecording, settings, *, max_segments: int = 6
         rms = frame_rms(samples)
         if rms < settings.voice_scan_rms_floor:
             continue  # near-silent window: not a vocal candidate
-        vector = embedding.embed_pcm16(samples)
+        if model == "byol-v1":
+            vector = embed_byol(settings, path, start=start, window=window)
+        else:
+            vector = embedding.embed_pcm16(samples)
         seg = MlVoiceSegment(recording_id=rec.id, crop_start=start,
                              crop_end=min(start + window, duration),
                              quality_json={"rms": round(rms, 4), "model": model})

@@ -61,6 +61,14 @@ ENV TF_USE_LEGACY_KERAS=1
 RUN pip install --no-cache-dir tensorflow-cpu tf-keras librosa \
     && pip install --no-cache-dir --no-deps musicnn
 
+# --- BYOL singer-identity encoder (Model Lab M2/M5) ---------------------------
+# Pinned weights baked in; the encoder stays config-gated (OAL_BYOL_MODEL_PATH
+# empty = disabled) until calibration on real catalog data completes.
+ARG BYOL_WEIGHTS_URL=https://huggingface.co/lyrebird/bandit-v2-byl/resolve/main/byl-light.pt
+RUN mkdir -p /opt/byol \
+    && curl -fsSL "$BYOL_WEIGHTS_URL" -o /opt/byol/byl-light.pt
+ENV OAL_BYOL_MODEL_PATH=""
+
 # --- WireGuard client + NFS mount tooling (late layer, heavy layers cached) ---
 # Lets a self-contained node bring its own tunnel up (entrypoint wg-quick) when
 # run with NET_ADMIN, and mount the hub's NFS storage dir (entrypoint mount).
