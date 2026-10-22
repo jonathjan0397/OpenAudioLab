@@ -740,8 +740,13 @@ def gpu_fleet_offers(
     min_upload: float | None = None,
     verified: bool = True,
     refresh: bool = False,
+    limit: int = 10,
 ) -> JSONResponse:
-    """Top-10 live Vast.ai offers (advisory snapshots, 30 s server cache)."""
+    """Live Vast.ai offers (advisory snapshots, 30 s server cache).
+
+    Admin-searchable: VRAM floor, bandwidth floors, price ceiling, region and
+    result count are all query parameters; defaults keep the Top-10 view.
+    """
     import json as _json
     import time
 
@@ -752,6 +757,7 @@ def gpu_fleet_offers(
 
     settings = request.app.state.settings
     stored = _fleet_settings(request)
+    limit = max(1, min(limit, 50))
     crit = {
         "max_dph": min(max_dph if max_dph is not None else stored["max_dph"], 1.0),
         "min_vram_gb": min_vram if min_vram is not None else stored["min_vram_gb"],
@@ -763,6 +769,7 @@ def gpu_fleet_offers(
         "min_cuda": stored["min_cuda"],
         "model_vram_floor_gb": 0,
         "checkpoint_gb": 0.0,
+        "limit": limit,
     }
     if model:
         prof = None
@@ -794,6 +801,10 @@ def gpu_fleet_offers(
     }
     if crit["verified_only"]:
         query["verified"] = {"eq": True}
+    if crit["min_download_mbps"]:
+        query["inet_down"] = {"gte": crit["min_download_mbps"]}
+    if crit["min_upload_mbps"]:
+        query["inet_up"] = {"gte": crit["min_upload_mbps"]}
     try:
         resp = _requests.post(
             f"{settings.vast_search_url.rstrip('/')}/bundles/", json=query,
@@ -803,7 +814,7 @@ def gpu_fleet_offers(
         raw = body.get("offers") or body.get("matches") or []
     except Exception as exc:
         raise ApiError(502, "VAST_SEARCH_FAILED", f"Vast.ai offer search failed: {exc}") from exc
-    result = vo.rank(raw, crit, limit=10)
+    result = vo.rank(raw, crit, limit=limit)
     result["refreshed_at"] = utcnow().isoformat()
     cache.update({"key": key, "at": time.time(), "result": result})
     return JSONResponse({**result, "cached": False})

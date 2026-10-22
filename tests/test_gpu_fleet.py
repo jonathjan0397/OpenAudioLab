@@ -354,6 +354,42 @@ def test_fleet_offers_endpoint_mocked(client, monkeypatch):
     assert client.get("/api/v1/admin/gpu-fleet/offers").status_code == 502
 
 
+def test_fleet_offers_search_params(client, monkeypatch):
+    """Admin GPU search: VRAM >= 24 GB + bandwidth floors + result count."""
+    import requests
+
+    import app.routes.admin as adm
+
+    _login_admin(client, "fleet-search@example.com")
+
+    class Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"offers": [_raw("fast"), _raw("fast2", dph_total=0.22),
+                               _raw("slowdl", inet_down=400.0),
+                               _raw("slowul", inet_up=100.0)]}
+
+    queries = []
+    monkeypatch.setattr(requests, "post",
+                        lambda url, json=None, headers=None, timeout=None: queries.append(json) or Resp())
+    adm._OFFER_CACHE.update({"key": None, "at": 0.0, "result": None})
+    base = "/api/v1/admin/gpu-fleet/offers?min_vram=24&min_download=1000&min_upload=250"
+    r = client.get(base + "&limit=1&refresh=true")
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["offers"]) == 1  # result count honored
+    assert data["excluded"].get("DOWNLOAD_BELOW_MINIMUM") == 1
+    assert data["excluded"].get("UPLOAD_BELOW_MINIMUM") == 1
+    q = queries[-1]
+    assert q["inet_down"] == {"gte": 1000} and q["inet_up"] == {"gte": 250}
+    assert q["gpu_ram"] == {"gte": 24576}  # MB floor for bundles
+    assert client.get(base + "&limit=1").json()["cached"] is True
+    r2 = client.get(base + "&limit=2")  # different search -> different cache key
+    assert r2.json()["cached"] is False and len(r2.json()["offers"]) == 2
+
+
 # ------------------------------------------------------- M3: deployments API
 
 def _login_admin3(client):

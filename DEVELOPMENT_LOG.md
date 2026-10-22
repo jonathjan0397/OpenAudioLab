@@ -1037,3 +1037,15 @@ Validation evidence: 385 backend tests (39 new model-lab M1–M6), 17 vitest,
 clean tsc+vite build. No GPU/Vast spend: trainer and merge commands are
 config-gated and were exercised with fakes. Real-hardware identification
 (AcoustID client key) and trainer runs remain pending deployment facts.
+
+## 2026-10-22 — GPU Fleet offer search (feat/model-lab)
+
+Admins can now search the live Vast marketplace from GPU Fleet → Offers:
+VRAM floor (default 24 GB, UI-raisable only), download/upload bandwidth
+floors (default 1000/250 Mbps pilot values, editable) and result count
+(1–50, default Top-10). Bandwidth floors are pre-filtered server-side in the
+bundles query (inet_down/inet_up gte — 0.0 placeholders drop out) and remain
+hard-gated client-side (DOWNLOAD_BELOW_MINIMUM / UPLOAD_BELOW_MINIMUM).
+Search parameters are part of the 30 s server-cache key.
+Validation: 386 backend tests (1 new search-params test), 17 vitest, clean
+tsc+vite build; provider mocked, no Vast spend.

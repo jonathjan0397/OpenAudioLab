@@ -27,17 +27,24 @@ interface Deployment {
 }
 const nr = (v: unknown, suffix = "") => (v === null || v === undefined || v === "" ? "Not reported" : `${v}${suffix}`);
 
+interface OfferSearch { vram: number; dl: number; ul: number; limit: number }
+const DEFAULT_SEARCH: OfferSearch = { vram: 24, dl: 1000, ul: 250, limit: 10 };
+const offerPath = (s: OfferSearch, refresh = false) =>
+  `/api/v1/admin/gpu-fleet/offers?min_vram=${s.vram}&min_download=${s.dl}&min_upload=${s.ul}&limit=${s.limit}${refresh ? "&refresh=true" : ""}`;
+
 export default function GpuFleetPage() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("Overview");
   const [draft, setDraft] = useState<Record<string, unknown> | null>(null);
   const [deployOffer, setDeployOffer] = useState<Offer | null>(null);
   const [deployMsg, setDeployMsg] = useState("");
+  const [search, setSearch] = useState<OfferSearch>(DEFAULT_SEARCH);
+  const [osDraft, setOsDraft] = useState<OfferSearch>(DEFAULT_SEARCH);
 
   const overview = useQuery({ queryKey: ["fleet-overview"], queryFn: () => api.get<Record<string, number>>("/api/v1/admin/gpu-fleet"), enabled: tab === "Overview" });
   const queues = useQuery({ queryKey: ["fleet-queues"], queryFn: () => api.get<QueueView>("/api/v1/admin/gpu-fleet/queues"), enabled: tab === "Smart Queue", refetchInterval: tab === "Smart Queue" ? 5000 : false });
   const settings = useQuery({ queryKey: ["fleet-settings"], queryFn: () => api.get<FleetSettings>("/api/v1/admin/gpu-fleet/settings"), enabled: tab === "Settings" });
-  const offers = useQuery({ queryKey: ["fleet-offers"], queryFn: () => api.get<OffersView>("/api/v1/admin/gpu-fleet/offers"), enabled: tab === "Offers", staleTime: 25000 });
+  const offers = useQuery({ queryKey: ["fleet-offers", search], queryFn: () => api.get<OffersView>(offerPath(search)), enabled: tab === "Offers", staleTime: 25000 });
   const deployments = useQuery({ queryKey: ["fleet-deployments"], queryFn: () => api.get<{ deployments: Deployment[] }>("/api/v1/admin/gpu-fleet/deployments"), enabled: tab === "Deployments" || tab === "Offers" });
   const costs = useQuery({ queryKey: ["fleet-costs"], queryFn: () => api.get<{ today_usd: number; combined_fleet_usd: number; categories_usd: Record<string, number>; running: { instance: string; hostname: string | null; dph: number; gpu: string | null }[] }>("/api/v1/admin/gpu-fleet/costs"), enabled: tab === "Costs" || tab === "Instances" || tab === "Overview" });
   const events = useQuery({ queryKey: ["fleet-events"], queryFn: () => api.get<{ events: { id: string; created_at: string | null; actor: string; action: string; subject: string | null }[]; decisions: Record<string, unknown>[] }>("/api/v1/admin/gpu-fleet/events"), enabled: tab === "Events" });
@@ -161,10 +168,28 @@ export default function GpuFleetPage() {
 
       {tab === "Offers" && (
         <div style={{ overflowX: "auto" }}>
-          <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+            <label style={{ fontSize: 12 }}>VRAM ≥
+              <input type="number" min={24} max={80} value={osDraft.vram} style={{ width: 56, marginLeft: 4 }}
+                onChange={(e) => setOsDraft({ ...osDraft, vram: Math.max(24, Number(e.target.value) || 24) })} /> GB
+            </label>
+            <label style={{ fontSize: 12 }}>Down ≥
+              <input type="number" min={0} value={osDraft.dl} style={{ width: 64, marginLeft: 4 }}
+                onChange={(e) => setOsDraft({ ...osDraft, dl: Math.max(0, Number(e.target.value) || 0) })} /> Mbps
+            </label>
+            <label style={{ fontSize: 12 }}>Up ≥
+              <input type="number" min={0} value={osDraft.ul} style={{ width: 64, marginLeft: 4 }}
+                onChange={(e) => setOsDraft({ ...osDraft, ul: Math.max(0, Number(e.target.value) || 0) })} /> Mbps
+            </label>
+            <label style={{ fontSize: 12 }}>Results
+              <input type="number" min={1} max={50} value={osDraft.limit} style={{ width: 48, marginLeft: 4 }}
+                onChange={(e) => setOsDraft({ ...osDraft, limit: Math.min(50, Math.max(1, Number(e.target.value) || 10)) })} />
+            </label>
+            <button className="btn" onClick={() => setSearch(osDraft)}>Search</button>
+            <button className="btn btn-ghost" onClick={() => { setOsDraft(DEFAULT_SEARCH); setSearch(DEFAULT_SEARCH); }}>Reset</button>
             <button className="btn" onClick={() => {
-              api.get<OffersView>("/api/v1/admin/gpu-fleet/offers?refresh=true").then((d) => {
-                qc.setQueryData(["fleet-offers"], d);
+              api.get<OffersView>(offerPath(search, true)).then((d) => {
+                qc.setQueryData(["fleet-offers", search], d);
               });
             }}>Refresh</button>
             <span className="sub" style={{ fontSize: 12 }}>
@@ -172,6 +197,7 @@ export default function GpuFleetPage() {
               {offers.isFetching ? " · loading…" : ""}
             </span>
             {offers.isError && <span className="pill err">provider error — offers unavailable</span>}
+            {offers.data && <span className="sub" style={{ fontSize: 12 }}>{offers.data.eligible_count} eligible</span>}
             {deployMsg && <span className="pill info">{deployMsg}</span>}
           </div>
           <table className="table">
