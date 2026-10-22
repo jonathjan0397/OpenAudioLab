@@ -852,3 +852,141 @@ class GpuFleetEvent(Base):
     action: Mapped[str] = mapped_column(String(60))
     subject: Mapped[str | None] = mapped_column(String(120), nullable=True)
     detail_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+# ------------------------------------------------------------- Model Lab (M2)
+
+class MlSource(Base):
+    """Licensed catalog source with field-level permission evidence."""
+
+    __tablename__ = "ml_sources"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    kind: Mapped[str] = mapped_column(String(20), default="directory")  # directory|upload|manifest
+    path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    agreement_json: Mapped[dict] = mapped_column(JSON, default=dict)  # scope -> {state, evidence}
+    status: Mapped[str] = mapped_column(String(20), default="restricted")  # pending|approved|restricted|expired|revoked
+    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MlRecording(Base):
+    """A catalog audio file with checksum, probe, claims and review state."""
+
+    __tablename__ = "ml_recordings"
+    __table_args__ = (UniqueConstraint("source_id", "sha256", name="uq_ml_rec_source_sha"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    source_id: Mapped[str] = mapped_column(String(36), index=True)
+    path: Mapped[str] = mapped_column(String(700))
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
+    bytes: Mapped[int] = mapped_column(Integer, default=0)
+    duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sample_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    channels: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    format: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    probe_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # clipping/silence/quality
+    vocal_status: Mapped[str] = mapped_column(String(12), default="unknown")  # vocal|instrumental|unknown
+    review_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    families_json: Mapped[list] = mapped_column(JSON, default=list)  # multilabel selector families
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    artist: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    genre_raw: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    decade: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    classification: Mapped[str] = mapped_column(String(16), default="new")  # new|cached|changed|duplicate|excluded|review
+    identify_status: Mapped[str] = mapped_column(String(24), default="unidentified")
+    review_status: Mapped[str] = mapped_column(String(16), default="unreviewed")  # unreviewed|approved|rejected|restricted
+    dataset_eligible: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class MlImportBatch(Base):
+    """Incremental importer progress: cursor, counts, state."""
+
+    __tablename__ = "ml_import_batches"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    source_id: Mapped[str] = mapped_column(String(36), index=True)
+    state: Mapped[str] = mapped_column(String(16), default="running")  # running|completed|failed
+    cursor_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    counts_json: Mapped[dict] = mapped_column(JSON, default=dict)  # new/cached/changed/duplicate/excluded/review
+    scanned: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MlMetadataClaim(Base):
+    """Field-level metadata claim with provenance; locked manual corrections."""
+
+    __tablename__ = "ml_metadata_claims"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    recording_id: Mapped[str] = mapped_column(String(36), index=True)
+    field: Mapped[str] = mapped_column(String(60))
+    value: Mapped[str] = mapped_column(String(500))
+    provenance: Mapped[str] = mapped_column(String(20))  # supplier|embedded|acoustid|musicbrainz|websearch|manual
+    provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String(12), default="suggested")  # suggested|approved|rejected|locked
+    reviewed_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MlTagTerm(Base):
+    """Canonical namespaced tag registry (stable ids, aliases, caption mapping)."""
+
+    __tablename__ = "ml_tag_terms"
+
+    id: Mapped[str] = mapped_column(String(120), primary_key=True)  # e.g. genre:outlaw_country
+    namespace: Mapped[str] = mapped_column(String(30), index=True)
+    label: Mapped[str] = mapped_column(String(120))
+    definition: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    aliases_json: Mapped[list] = mapped_column(JSON, default=list)
+    relations_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    caption_text: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    visible: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MlTagAssignment(Base):
+    """Tag claim on a recording or crop with provenance and review state."""
+
+    __tablename__ = "ml_tag_assignments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    recording_id: Mapped[str] = mapped_column(String(36), index=True)
+    term_id: Mapped[str] = mapped_column(String(120), index=True)
+    level: Mapped[str] = mapped_column(String(12), default="recording")  # recording|crop
+    crop_start: Mapped[float | None] = mapped_column(Float, nullable=True)
+    crop_end: Mapped[float | None] = mapped_column(Float, nullable=True)
+    provenance: Mapped[str] = mapped_column(String(20), default="curator")  # evidence|analysis|curator
+    confidence_basis: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    status: Mapped[str] = mapped_column(String(12), default="suggested")  # suggested|approved|rejected
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MlLane(Base):
+    """One of the 24 acquisition/coverage lanes (not mutually exclusive labels)."""
+
+    __tablename__ = "ml_lanes"
+
+    id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    group_name: Mapped[str] = mapped_column(String(60))
+    description: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
+class MlProviderCache(Base):
+    """Shared provider lookup cache (AcoustID/MusicBrainz) with expiry."""
+
+    __tablename__ = "ml_provider_cache"
+
+    key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(30), index=True)
+    body_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

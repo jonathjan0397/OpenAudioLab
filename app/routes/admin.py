@@ -2555,3 +2555,292 @@ def admin_user_detail(
             "recent_assets": recent_assets,
         }
     )
+
+
+# ------------------------------------------------------------- Model Lab (M2)
+
+def _ml_recording_payload(rec) -> dict:
+    return {
+        "id": rec.id, "source_id": rec.source_id, "path": rec.path, "sha256": rec.sha256,
+        "bytes": rec.bytes, "duration_seconds": rec.duration_seconds, "format": rec.format,
+        "vocal_status": rec.vocal_status, "review_required": rec.review_required,
+        "families": rec.families_json, "title": rec.title, "artist": rec.artist,
+        "genre_raw": rec.genre_raw, "year": rec.year, "decade": rec.decade,
+        "classification": rec.classification, "identify_status": rec.identify_status,
+        "review_status": rec.review_status, "dataset_eligible": rec.dataset_eligible,
+    }
+
+
+def _ml_source_payload(src) -> dict:
+    return {"id": src.id, "name": src.name, "kind": src.kind, "path": src.path,
+            "status": src.status, "agreement": src.agreement_json, "notes": src.notes}
+
+
+@router.get("/admin/model-lab/overview")
+def admin_model_lab_overview(request: Request) -> JSONResponse:
+    from ..model_lab import coverage, ensure_tag_terms, get_selection
+    from ..models import MlLane, MlRecording, MlSource
+
+    with request.app.state.db.session() as session:
+        ensure_tag_terms(session)
+        by_class = dict(session.execute(
+            select(MlRecording.classification, func.count()).group_by(
+                MlRecording.classification)).all())
+        by_identify = dict(session.execute(
+            select(MlRecording.identify_status, func.count()).group_by(
+                MlRecording.identify_status)).all())
+        sources = session.execute(select(func.count()).select_from(MlSource)).scalar() or 0
+        lanes = session.execute(select(func.count()).select_from(MlLane)).scalar() or 0
+        return JSONResponse({
+            "sources": sources, "lanes": lanes,
+            "recordings_by_classification": by_class,
+            "recordings_by_identify_status": by_identify,
+            "coverage": coverage(session),
+            "selection": get_selection(session),
+        })
+
+
+@router.get("/admin/model-lab/sources")
+def admin_model_lab_sources(request: Request) -> JSONResponse:
+    from ..models import MlSource
+
+    with request.app.state.db.session() as session:
+        rows = session.execute(select(MlSource).order_by(MlSource.name)).scalars().all()
+        return JSONResponse({"sources": [_ml_source_payload(s) for s in rows]})
+
+
+class MlSourceCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    path: str | None = None
+    kind: str = "directory"
+    status: str = "restricted"
+    agreement: dict = Field(default_factory=dict)
+    notes: str | None = None
+
+
+@router.post("/admin/model-lab/sources")
+def admin_model_lab_source_create(body: MlSourceCreate, request: Request) -> JSONResponse:
+    from ..models import MlSource, new_uuid
+
+    if body.status not in ("pending", "approved", "restricted", "expired", "revoked"):
+        raise ApiError(422, "VALIDATION", f"unknown source status: {body.status}")
+    with request.app.state.db.session() as session:
+        if session.execute(select(MlSource).where(MlSource.name == body.name)).scalars().first():
+            raise ApiError(409, "CONFLICT", "source name already exists")
+        src = MlSource(id=new_uuid(), name=body.name, path=body.path, kind=body.kind,
+                       status=body.status, agreement_json=body.agreement, notes=body.notes)
+        session.add(src)
+        session.commit()
+        return JSONResponse(_ml_source_payload(src), status_code=201)
+
+
+class MlSourcePatch(BaseModel):
+    status: str | None = None
+    agreement: dict | None = None
+    notes: str | None = None
+
+
+@router.patch("/admin/model-lab/sources/{source_id}")
+def admin_model_lab_source_patch(source_id: str, body: MlSourcePatch, request: Request) -> JSONResponse:
+    from ..models import MlRecording, MlSource
+
+    with request.app.state.db.session() as session:
+        src = session.get(MlSource, source_id)
+        if src is None:
+            raise ApiError(404, "NOT_FOUND", "source not found")
+        if body.status is not None:
+            if body.status not in ("pending", "approved", "restricted", "expired", "revoked"):
+                raise ApiError(422, "VALIDATION", f"unknown source status: {body.status}")
+            src.status = body.status
+        if body.agreement is not None:
+            src.agreement_json = body.agreement
+        if body.notes is not None:
+            src.notes = body.notes
+        if src.status != "approved":
+            for rec in session.execute(select(MlRecording).where(
+                    MlRecording.source_id == src.id)).scalars():
+                rec.dataset_eligible = rec.dataset_eligible and False
+        session.commit()
+        return JSONResponse(_ml_source_payload(src))
+
+
+@router.post("/admin/model-lab/sources/{source_id}/import")
+def admin_model_lab_import(source_id: str, request: Request, preview: bool = True) -> JSONResponse:
+    from ..model_lab import scan_source
+    from ..models import MlSource
+
+    with request.app.state.db.session() as session:
+        src = session.get(MlSource, source_id)
+        if src is None:
+            raise ApiError(404, "NOT_FOUND", "source not found")
+        session.expunge(src)
+        result = scan_source(session, src, preview=preview)
+        return JSONResponse(result)
+
+
+@router.get("/admin/model-lab/recordings")
+def admin_model_lab_recordings(request: Request, classification: str | None = None,
+                               identify_status: str | None = None,
+                               review_status: str | None = None, lane: str | None = None,
+                               limit: int = 50, offset: int = 0) -> JSONResponse:
+    from ..models import MlRecording
+
+    with request.app.state.db.session() as session:
+        stmt = select(MlRecording).order_by(MlRecording.created_at)
+        if classification:
+            stmt = stmt.where(MlRecording.classification == classification)
+        if identify_status:
+            stmt = stmt.where(MlRecording.identify_status == identify_status)
+        if review_status:
+            stmt = stmt.where(MlRecording.review_status == review_status)
+        rows = session.execute(stmt.limit(min(limit, 200)).offset(offset)).scalars().all()
+        if lane:
+            rows = [r for r in rows if lane in (r.families_json or [])]
+        return JSONResponse({"recordings": [_ml_recording_payload(r) for r in rows]})
+
+
+@router.get("/admin/model-lab/recordings/{recording_id}")
+def admin_model_lab_recording(recording_id: str, request: Request) -> JSONResponse:
+    from ..models import MlMetadataClaim, MlRecording, MlTagAssignment
+
+    with request.app.state.db.session() as session:
+        rec = session.get(MlRecording, recording_id)
+        if rec is None:
+            raise ApiError(404, "NOT_FOUND", "recording not found")
+        claims = session.execute(select(MlMetadataClaim).where(
+            MlMetadataClaim.recording_id == rec.id).order_by(MlMetadataClaim.created_at)).scalars().all()
+        tags = session.execute(select(MlTagAssignment).where(
+            MlTagAssignment.recording_id == rec.id)).scalars().all()
+        payload = _ml_recording_payload(rec)
+        payload["claims"] = [{"id": c.id, "field": c.field, "value": c.value,
+                              "provenance": c.provenance, "provider": c.provider,
+                              "score": c.score, "status": c.status} for c in claims]
+        payload["tags"] = [{"id": a.id, "term_id": a.term_id, "level": a.level,
+                            "provenance": a.provenance, "status": a.status} for a in tags]
+        return JSONResponse(payload)
+
+
+@router.post("/admin/model-lab/recordings/{recording_id}/identify")
+def admin_model_lab_identify(recording_id: str, request: Request, enrich: bool = True) -> JSONResponse:
+    from ..model_lab import identify_recording
+    from ..models import MlRecording
+
+    with request.app.state.db.session() as session:
+        rec = session.get(MlRecording, recording_id)
+        if rec is None:
+            raise ApiError(404, "NOT_FOUND", "recording not found")
+        status = identify_recording(session, rec, request.app.state.settings, enrich=enrich)
+        return JSONResponse({"id": rec.id, "identify_status": status})
+
+
+class MlReview(BaseModel):
+    decision: str
+    reviewer: str = "admin"
+
+
+@router.post("/admin/model-lab/recordings/{recording_id}/review")
+def admin_model_lab_review(recording_id: str, body: MlReview, request: Request) -> JSONResponse:
+    from ..model_lab import review_recording
+    from ..models import MlRecording, MlSource
+
+    with request.app.state.db.session() as session:
+        rec = session.get(MlRecording, recording_id)
+        if rec is None:
+            raise ApiError(404, "NOT_FOUND", "recording not found")
+        src = session.get(MlSource, rec.source_id)
+        try:
+            result = review_recording(session, rec, body.decision, body.reviewer, src)
+        except ValueError as exc:
+            raise ApiError(422, "VALIDATION", str(exc)) from exc
+        return JSONResponse({"id": rec.id, **result})
+
+
+class MlClaimDecision(BaseModel):
+    decision: str  # approve|reject|lock
+    reviewer: str = "admin"
+
+
+@router.post("/admin/model-lab/claims/{claim_id}/decision")
+def admin_model_lab_claim_decision(claim_id: str, body: MlClaimDecision, request: Request) -> JSONResponse:
+    from ..models import MlMetadataClaim
+
+    mapping = {"approve": "approved", "reject": "rejected", "lock": "locked"}
+    if body.decision not in mapping:
+        raise ApiError(422, "VALIDATION", "decision must be approve|reject|lock")
+    with request.app.state.db.session() as session:
+        claim = session.get(MlMetadataClaim, claim_id)
+        if claim is None:
+            raise ApiError(404, "NOT_FOUND", "claim not found")
+        claim.status = mapping[body.decision]
+        claim.reviewed_by = body.reviewer
+        session.commit()
+        return JSONResponse({"id": claim.id, "status": claim.status})
+
+
+@router.get("/admin/model-lab/tags")
+def admin_model_lab_tags(request: Request) -> JSONResponse:
+    from ..model_lab import ensure_lanes, ensure_tag_terms
+    from ..models import MlLane, MlTagTerm
+
+    with request.app.state.db.session() as session:
+        ensure_tag_terms(session)
+        ensure_lanes(session)
+        terms = session.execute(select(MlTagTerm).order_by(MlTagTerm.id)).scalars().all()
+        lanes = session.execute(select(MlLane).order_by(MlLane.id)).scalars().all()
+        return JSONResponse({
+            "terms": [{"id": t.id, "namespace": t.namespace, "label": t.label,
+                       "visible": t.visible} for t in terms],
+            "lanes": [{"id": l.id, "name": l.name, "group": l.group_name} for l in lanes],
+        })
+
+
+class MlTagAssign(BaseModel):
+    term_id: str
+    provenance: str = "curator"
+    status: str = "suggested"
+    basis: str | None = None
+
+
+@router.post("/admin/model-lab/recordings/{recording_id}/tags")
+def admin_model_lab_tag_assign(recording_id: str, body: MlTagAssign, request: Request) -> JSONResponse:
+    from ..model_lab import assign_tag
+    from ..models import MlRecording
+
+    with request.app.state.db.session() as session:
+        rec = session.get(MlRecording, recording_id)
+        if rec is None:
+            raise ApiError(404, "NOT_FOUND", "recording not found")
+        try:
+            a = assign_tag(session, rec, body.term_id, body.provenance, body.status, body.basis)
+        except ValueError as exc:
+            raise ApiError(422, "VALIDATION", str(exc)) from exc
+        return JSONResponse({"id": a.id, "recording_id": rec.id, "term_id": a.term_id,
+                             "status": a.status}, status_code=201)
+
+
+@router.get("/admin/model-lab/coverage")
+def admin_model_lab_coverage(request: Request) -> JSONResponse:
+    from ..model_lab import coverage
+
+    with request.app.state.db.session() as session:
+        return JSONResponse(coverage(session))
+
+
+@router.get("/admin/model-lab/selection")
+def admin_model_lab_selection_get(request: Request) -> JSONResponse:
+    from ..model_lab import get_selection
+
+    with request.app.state.db.session() as session:
+        return JSONResponse(get_selection(session))
+
+
+@router.patch("/admin/model-lab/selection")
+def admin_model_lab_selection_patch(payload: dict, request: Request) -> JSONResponse:
+    from ..model_lab import set_selection
+
+    with request.app.state.db.session() as session:
+        try:
+            merged = set_selection(session, payload)
+        except ValueError as exc:
+            raise ApiError(422, "VALIDATION", str(exc)) from exc
+        return JSONResponse(merged)

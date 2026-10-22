@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     lab_basic_password: str = "3671A113a05786!"
     lab_owner_token: str = "lab-token"
     acoustid_client_key: str = ""
+    musicbrainz_url: str = "https://musicbrainz.org/ws/2"
+    musicbrainz_user_agent: str = "OpenAudioLab/1.0 (https://openaudiolab.local)"
+    acoustid_min_score: float = 0.85
     # M6: cookie-session auth for the website.
     cookie_secure: bool = False
     bootstrap_admin_email: str = ""
