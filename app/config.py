@@ -155,6 +155,11 @@ class Settings(BaseSettings):
     credit_cost_training: int = 50
     credit_cost_validation: int = 10
     voice_embedding_model: str = "mfcc-stats-v1"
+    voice_identity_challenger: str = ""  # "byol-v1" enables the challenger; "" = off
+    voice_scan_window_seconds: float = 6.0
+    voice_scan_hop_seconds: float = 3.0
+    voice_scan_rms_floor: float = 0.01
+    voice_cluster_threshold: float = 0.85
     # Calibration default, not a scientifically established voice-accuracy claim.
     voice_similarity_threshold: float = 0.5
     voice_max_recording_seconds: int = 600

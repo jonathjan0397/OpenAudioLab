@@ -81,6 +81,7 @@ def _clean(_migrate) -> None:
             "worker_capabilities",
             "ml_sources", "ml_recordings", "ml_import_batches", "ml_metadata_claims",
             "ml_tag_terms", "ml_tag_assignments", "ml_lanes", "ml_provider_cache",
+            "ml_voice_segments", "ml_embedding_vectors", "ml_voice_groups",
         ):
             session.execute(text(f"DELETE FROM {table}"))
         session.commit()

@@ -990,3 +990,49 @@ class MlProviderCache(Base):
     body_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# ------------------------------------------------------------- Model Lab (M3)
+
+class MlVoiceSegment(Base):
+    """Candidate vocal crop with quality flags and singer-group assignment."""
+
+    __tablename__ = "ml_voice_segments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    recording_id: Mapped[str] = mapped_column(String(36), index=True)
+    crop_start: Mapped[float] = mapped_column(Float)
+    crop_end: Mapped[float] = mapped_column(Float)
+    quality_json: Mapped[dict] = mapped_column(JSON, default=dict)  # rms/clip/silence flags
+    state: Mapped[str] = mapped_column(String(12), default="candidate")  # candidate|accepted|rejected
+    group_id: Mapped[str | None] = mapped_column(String(36), index=True, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MlEmbeddingVector(Base):
+    """Identity embedding per segment per model (default mfcc-stats-v1; challenger models stored alongside)."""
+
+    __tablename__ = "ml_embedding_vectors"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    segment_id: Mapped[str] = mapped_column(String(36), index=True)
+    model: Mapped[str] = mapped_column(String(40), index=True)
+    vector_json: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MlVoiceGroup(Base):
+    """Singer-identity group (cluster centroid); review-gated, mergeable."""
+
+    __tablename__ = "ml_voice_groups"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    embedding_model: Mapped[str] = mapped_column(String(40))
+    centroid_json: Mapped[list] = mapped_column(JSON, default=list)
+    member_count: Mapped[int] = mapped_column(Integer, default=0)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    state: Mapped[str] = mapped_column(String(12), default="suggested")  # suggested|approved|rejected|merged
+    merged_into: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -2844,3 +2844,84 @@ def admin_model_lab_selection_patch(payload: dict, request: Request) -> JSONResp
         except ValueError as exc:
             raise ApiError(422, "VALIDATION", str(exc)) from exc
         return JSONResponse(merged)
+
+
+# ------------------------------------------------------- Model Lab voice (M3)
+
+@router.post("/admin/model-lab/recordings/{recording_id}/voice-scan")
+def admin_model_lab_voice_scan(recording_id: str, request: Request) -> JSONResponse:
+    from ..model_lab_voice import VoiceLabError, scan_recording
+    from ..models import MlRecording
+
+    with request.app.state.db.session() as session:
+        rec = session.get(MlRecording, recording_id)
+        if rec is None:
+            raise ApiError(404, "NOT_FOUND", "recording not found")
+        try:
+            result = scan_recording(session, rec, request.app.state.settings)
+        except VoiceLabError as exc:
+            raise ApiError(422, "VOICE_SCAN_INVALID", str(exc)) from exc
+        return JSONResponse({"recording_id": rec.id, **result})
+
+
+@router.post("/admin/model-lab/voice-cluster")
+def admin_model_lab_voice_cluster(request: Request) -> JSONResponse:
+    from ..model_lab_voice import VoiceLabError, cluster_segments
+
+    with request.app.state.db.session() as session:
+        try:
+            return JSONResponse(cluster_segments(session, request.app.state.settings))
+        except VoiceLabError as exc:
+            raise ApiError(422, "VOICE_CLUSTER_INVALID", str(exc)) from exc
+
+
+@router.get("/admin/model-lab/voice-groups")
+def admin_model_lab_voice_groups(request: Request) -> JSONResponse:
+    from ..models import MlVoiceGroup
+
+    with request.app.state.db.session() as session:
+        rows = session.execute(select(MlVoiceGroup).order_by(MlVoiceGroup.created_at)).scalars().all()
+        return JSONResponse({"groups": [
+            {"id": g.id, "name": g.name, "embedding_model": g.embedding_model,
+             "member_count": g.member_count, "confidence": g.confidence,
+             "state": g.state, "merged_into": g.merged_into} for g in rows]})
+
+
+@router.get("/admin/model-lab/voice-segments")
+def admin_model_lab_voice_segments(request: Request, recording_id: str | None = None,
+                                   group_id: str | None = None) -> JSONResponse:
+    from ..models import MlVoiceSegment
+
+    with request.app.state.db.session() as session:
+        stmt = select(MlVoiceSegment).order_by(MlVoiceSegment.created_at)
+        if recording_id:
+            stmt = stmt.where(MlVoiceSegment.recording_id == recording_id)
+        if group_id:
+            stmt = stmt.where(MlVoiceSegment.group_id == group_id)
+        rows = session.execute(stmt.limit(500)).scalars().all()
+        return JSONResponse({"segments": [
+            {"id": s.id, "recording_id": s.recording_id, "crop_start": s.crop_start,
+             "crop_end": s.crop_end, "quality": s.quality_json, "state": s.state,
+             "group_id": s.group_id} for s in rows]})
+
+
+class MlGroupReview(BaseModel):
+    decision: str  # approve|reject|merge
+    reviewer: str = "admin"
+    merge_into: str | None = None
+
+
+@router.post("/admin/model-lab/voice-groups/{group_id}/review")
+def admin_model_lab_voice_group_review(group_id: str, body: MlGroupReview, request: Request) -> JSONResponse:
+    from ..model_lab_voice import VoiceLabError, review_group
+    from ..models import MlVoiceGroup
+
+    with request.app.state.db.session() as session:
+        group = session.get(MlVoiceGroup, group_id)
+        if group is None:
+            raise ApiError(404, "NOT_FOUND", "voice group not found")
+        try:
+            return JSONResponse(review_group(session, group, body.decision, body.reviewer,
+                                             body.merge_into))
+        except VoiceLabError as exc:
+            raise ApiError(422, "VOICE_GROUP_REVIEW_INVALID", str(exc)) from exc
