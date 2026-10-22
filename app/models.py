@@ -1036,3 +1036,114 @@ class MlVoiceGroup(Base):
     merged_into: Mapped[str | None] = mapped_column(String(36), nullable=True)
     reviewed_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ------------------------------------------------------------- Model Lab (M4)
+
+class MlDataset(Base):
+    """Frozen training dataset manifest (immutable once created)."""
+
+    __tablename__ = "ml_datasets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    name: Mapped[str] = mapped_column(String(200))
+    frozen_sha256: Mapped[str] = mapped_column(String(64))
+    manifest_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    report_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    recording_count: Mapped[int] = mapped_column(Integer, default=0)
+    total_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MlBudget(Base):
+    """Pilot budget: hard hour/spend ceilings; exhausted budgets block dispatch."""
+
+    __tablename__ = "ml_budgets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    name: Mapped[str] = mapped_column(String(60), unique=True)
+    max_hours: Mapped[float] = mapped_column(Float, default=6.0)
+    max_spend_usd: Mapped[float] = mapped_column(Float, default=3.0)
+    used_hours: Mapped[float] = mapped_column(Float, default=0.0)
+    spent_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    state: Mapped[str] = mapped_column(String(12), default="open")  # open|exhausted|closed
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class MlTrainingAttempt(Base):
+    """One budgeted training run bound to a frozen dataset and a job."""
+
+    __tablename__ = "ml_training_attempts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    dataset_id: Mapped[str] = mapped_column(String(36), index=True)
+    budget_id: Mapped[str] = mapped_column(String(36))
+    job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    state: Mapped[str] = mapped_column(String(16), default="queued")  # queued|running|done|failed|cancelled
+    instance_id: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    worker_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    recipe_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    spend_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MlMergeRecipe(Base):
+    """Named LoRA merge recipe (method + params) over registered adapters."""
+
+    __tablename__ = "ml_merge_recipes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    name: Mapped[str] = mapped_column(String(200))
+    base_model: Mapped[str] = mapped_column(String(120))
+    adapter_ids_json: Mapped[list] = mapped_column(JSON, default=list)
+    method: Mapped[str] = mapped_column(String(20), default="slerp")  # slerp|dare
+    params_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MlModelBundle(Base):
+    """Versioned model artifact (adapter/merge/checkpoint) with provenance."""
+
+    __tablename__ = "ml_model_bundles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    name: Mapped[str] = mapped_column(String(200))
+    version: Mapped[str] = mapped_column(String(40))
+    kind: Mapped[str] = mapped_column(String(20))  # lora|merged|checkpoint
+    base_model: Mapped[str] = mapped_column(String(120))
+    revision: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    artifact_key: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    state: Mapped[str] = mapped_column(String(12), default="candidate")  # candidate|released|retired
+    bundle_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MlEvaluation(Base):
+    """Evaluation record (ab/objective/listener) against a bundle."""
+
+    __tablename__ = "ml_evaluations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    bundle_id: Mapped[str] = mapped_column(String(36), index=True)
+    kind: Mapped[str] = mapped_column(String(16))  # ab|objective|listener
+    scores_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    verdict: Mapped[str | None] = mapped_column(String(16), nullable=True)  # win|lose|tie|pass|fail
+    evaluator: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MlReleaseChannel(Base):
+    """Named channel pointing at a released bundle; explicit promotion only."""
+
+    __tablename__ = "ml_release_channels"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    name: Mapped[str] = mapped_column(String(30), unique=True)
+    bundle_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    min_credits: Mapped[int] = mapped_column(Integer, default=0)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

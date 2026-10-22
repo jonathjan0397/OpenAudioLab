@@ -227,6 +227,8 @@ class TrainingWorker:
                 self._analyze(claimed_job, attempt_id, lease_token)
             elif operation == "voice.validate":
                 self._validate(claimed_job, attempt_id, lease_token)
+            elif operation == "model_lab.train":
+                self._model_lab_train(claimed_job, attempt_id, lease_token)
             else:
                 fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token,
                              "OPERATION_UNSUPPORTED", f"Training worker cannot run {operation!r}.")
@@ -616,6 +618,54 @@ class TrainingWorker:
             job_row.finished_at = utcnow()
             append_event(session, job_id, "succeeded", "succeeded", stage="done", progress=1.0, attempt_id=attempt_id)
             session.commit()
+
+    # -- model_lab.train -------------------------------------------------------------
+
+    def _model_lab_train(self, job_id: str, attempt_id: str, lease_token: str) -> None:
+        """Budgeted catalog training via the configured trainer command."""
+        from .model_lab_train import complete_attempt as ml_complete
+        from .models import MlBudget, MlTrainingAttempt
+
+        command = (self.settings.model_lab_train_command or "").strip()
+        if not command:
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         "TRAINER_UNAVAILABLE",
+                         "model_lab.train needs OAL_MODEL_LAB_TRAIN_COMMAND.")
+            return
+        with self.db.session() as session:
+            job = get_job_by_id(session, job_id)
+            request = dict(job.request_json)
+        env = dict(os.environ)
+        env["OAL_ML_ATTEMPT_ID"] = request.get("attempt_id", "")
+        env["OAL_ML_DATASET_SHA"] = request.get("frozen_sha256", "")
+        heartbeat(self.db, attempt_id, lease_token)
+        proc = subprocess.run(command, shell=True, capture_output=True, text=True,
+                              timeout=12 * 3600, env=env, check=False)
+        result: dict = {}
+        for line in reversed((proc.stdout or "").splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    result = json.loads(line)
+                except json.JSONDecodeError:
+                    pass
+                break
+        ok = proc.returncode == 0
+        with self.db.session() as session:
+            attempt = session.get(MlTrainingAttempt, request.get("attempt_id"))
+            if attempt is not None:
+                budget = session.get(MlBudget, attempt.budget_id)
+                ml_complete(session, attempt, state="done" if ok else "failed",
+                            hours=result.get("hours"), spend_usd=result.get("spend_usd"),
+                            error=None if ok else (proc.stderr or "")[-280:], budget=budget)
+        if not ok:
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         "TRAINING_FAILED", (proc.stderr or "trainer failed")[-280:])
+            return
+        complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
+                         lease_token, ("train-result", json.dumps(result).encode()),
+                         synthetic=False,
+                         engine_result={"trainer": command.split()[0], "result": result})
 
     # -- voice.validate ------------------------------------------------------------------
 

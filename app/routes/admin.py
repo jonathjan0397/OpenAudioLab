@@ -2925,3 +2925,88 @@ def admin_model_lab_voice_group_review(group_id: str, body: MlGroupReview, reque
                                              body.merge_into))
         except VoiceLabError as exc:
             raise ApiError(422, "VOICE_GROUP_REVIEW_INVALID", str(exc)) from exc
+
+
+# --------------------------------------------------- Model Lab training (M4)
+
+@router.get("/admin/model-lab/budget")
+def admin_model_lab_budget_get(request: Request) -> JSONResponse:
+    from ..model_lab_train import budget_view, get_budget
+
+    with request.app.state.db.session() as session:
+        return JSONResponse(budget_view(get_budget(session, request.app.state.settings)))
+
+
+@router.put("/admin/model-lab/budget")
+def admin_model_lab_budget_put(payload: dict, request: Request) -> JSONResponse:
+    from ..model_lab_train import BudgetError, update_budget
+
+    with request.app.state.db.session() as session:
+        try:
+            return JSONResponse(update_budget(session, payload))
+        except BudgetError as exc:
+            raise ApiError(422, "BUDGET_INVALID", str(exc)) from exc
+
+
+class MlDatasetCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    recording_ids: list[str]
+
+
+@router.post("/admin/model-lab/datasets")
+def admin_model_lab_dataset_create(body: MlDatasetCreate, request: Request) -> JSONResponse:
+    from ..model_lab_train import freeze_dataset
+
+    with request.app.state.db.session() as session:
+        try:
+            ds = freeze_dataset(session, body.name, body.recording_ids)
+        except ValueError as exc:
+            raise ApiError(422, "DATASET_INVALID", str(exc)) from exc
+        return JSONResponse({"id": ds.id, "name": ds.name, "frozen_sha256": ds.frozen_sha256,
+                             "recording_count": ds.recording_count,
+                             "total_seconds": ds.total_seconds}, status_code=201)
+
+
+@router.get("/admin/model-lab/datasets")
+def admin_model_lab_datasets(request: Request) -> JSONResponse:
+    from ..models import MlDataset
+
+    with request.app.state.db.session() as session:
+        rows = session.execute(select(MlDataset).order_by(MlDataset.created_at)).scalars().all()
+        return JSONResponse({"datasets": [
+            {"id": d.id, "name": d.name, "frozen_sha256": d.frozen_sha256,
+             "recording_count": d.recording_count, "total_seconds": d.total_seconds}
+            for d in rows]})
+
+
+@router.post("/admin/model-lab/datasets/{dataset_id}/train")
+def admin_model_lab_dataset_train(dataset_id: str, request: Request) -> JSONResponse:
+    from ..model_lab_train import BudgetError, attach_job, get_budget, open_attempt
+    from ..models import MlDataset, new_uuid as _uuid, utcnow as _now
+    from ..orchestration import enqueue
+
+    with request.app.state.db.session() as session:
+        ds = session.get(MlDataset, dataset_id)
+        if ds is None:
+            raise ApiError(404, "NOT_FOUND", "dataset not found")
+        budget = get_budget(session, request.app.state.settings)
+        try:
+            attempt = open_attempt(session, ds, budget)
+            job = attach_job(session, attempt, "model-lab", request.app.state.settings)
+            enqueue(session, job, request.app.state.settings)
+            session.commit()
+        except BudgetError as exc:
+            raise ApiError(409, "BUDGET_EXHAUSTED", str(exc)) from exc
+        return JSONResponse({"attempt": attempt.id, "job_id": job.id,
+                             "state": attempt.state}, status_code=202)
+
+
+@router.get("/admin/model-lab/attempts")
+def admin_model_lab_attempts(request: Request) -> JSONResponse:
+    from ..model_lab_train import attempt_view
+    from ..models import MlTrainingAttempt
+
+    with request.app.state.db.session() as session:
+        rows = session.execute(
+            select(MlTrainingAttempt).order_by(MlTrainingAttempt.created_at)).scalars().all()
+        return JSONResponse({"attempts": [attempt_view(a) for a in rows]})
