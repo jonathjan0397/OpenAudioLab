@@ -173,6 +173,7 @@ class Settings(BaseSettings):
     byol_model_path: str = ""  # singer-identity encoder weights; empty = BYOL off
     byol_scan_command: str = ""  # encoder hook: prints {"vector": [...]} for a WAV crop
     model_lab_reload_enabled: bool = False  # load trained adapters into the engine
+    truenas_browse_root: str = ""  # admin file-picker root (empty = browse off)
     # Calibration default, not a scientifically established voice-accuracy claim.
     voice_similarity_threshold: float = 0.5
     voice_max_recording_seconds: int = 600

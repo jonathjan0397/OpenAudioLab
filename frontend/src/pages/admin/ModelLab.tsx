@@ -25,6 +25,8 @@ interface Attempt { id: string; dataset_id: string; job_id: string | null; state
 interface Recipe { id: string; name: string; base_model: string; method: string; adapter_ids: string[] }
 interface Bundle { id: string; name: string; version: string; kind: string; base_model: string; state: string }
 interface Channel { name: string; enabled: boolean; min_credits: number; bundle: { id: string; name: string; version: string; state: string } | null }
+interface BrowseEntry { name: string; path: string; is_dir: boolean; bytes: number | null; mtime: string | null }
+interface BrowseView { path: string; root: string; parent: string | null; entries: BrowseEntry[] }
 interface Budget { name: string; max_hours: number; max_spend_usd: number; used_hours: number; spent_usd: number; state: string }
 
 const nr = (v: unknown, suffix = "") => (v === null || v === undefined || v === "" ? "Not reported" : `${v}${suffix}`);
@@ -34,6 +36,10 @@ export default function ModelLabPage() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("Overview");
   const [msg, setMsg] = useState("");
+  const [browseOpen, setBrowseOpen] = useState(false);
+  const [browsePath, setBrowsePath] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const [srcName, setSrcName] = useState("pilot-selection");
 
   const overview = useQuery({ queryKey: ["ml-overview"], queryFn: () => api.get<Overview>("/api/v1/admin/model-lab/overview"), enabled: tab === "Overview" });
   const sources = useQuery({ queryKey: ["ml-sources"], queryFn: () => api.get<{ sources: Source[] }>("/api/v1/admin/model-lab/sources"), enabled: tab === "Catalog" });
@@ -46,6 +52,24 @@ export default function ModelLabPage() {
   const bundles = useQuery({ queryKey: ["ml-bundles"], queryFn: () => api.get<{ bundles: Bundle[] }>("/api/v1/admin/model-lab/bundles"), enabled: tab !== "Overview" && tab !== "Catalog" && tab !== "Recordings" && tab !== "Voice" && tab !== "Training" });
   const channels = useQuery({ queryKey: ["ml-channels"], queryFn: () => api.get<{ channels: Channel[] }>("/api/v1/admin/model-lab/release-channels"), enabled: tab === "Channels" });
 
+  const browse = useQuery({
+    queryKey: ["ml-browse", browsePath],
+    queryFn: () => api.get<BrowseView>(`/api/v1/admin/model-lab/browse${browsePath ? `?path=${encodeURIComponent(browsePath)}` : ""}`),
+    enabled: tab === "Catalog" && browseOpen,
+  });
+  const importSel = useMutation({
+    mutationFn: () => api.post<{ source: { id: string; name: string }; counts: Record<string, number> }>(
+      "/api/v1/admin/model-lab/import-selected",
+      { source_name: srcName, paths: Object.keys(picked).filter((k) => picked[k]) }),
+    onSuccess: (r) => {
+      setPicked({});
+      setMsg(`Imported ${srcName}: ${r.counts.new ?? 0} new, ${r.counts.duplicate ?? 0} duplicate, ${r.counts.excluded ?? 0} excluded.`);
+      qc.invalidateQueries({ queryKey: ["ml-sources"] });
+      qc.invalidateQueries({ queryKey: ["ml-recordings"] });
+      qc.invalidateQueries({ queryKey: ["ml-overview"] });
+    },
+    onError: (e: Error) => setMsg(`Import failed: ${e.message}`),
+  });
   const act = useMutation({
     mutationFn: async ({ path, method, body }: { path: string; method: "post" | "put" | "patch"; body?: unknown }) => {
       try {
@@ -82,6 +106,42 @@ export default function ModelLabPage() {
       )}
 
       {tab === "Catalog" && (
+        <div className="space-y-3">
+      <div className="rounded border p-2">
+        <button className={btn} onClick={() => setBrowseOpen(!browseOpen)}>
+          {browseOpen ? "Hide TrueNAS import" : "Import from TrueNAS"}
+        </button>
+        {browseOpen && browse.data && (
+          <div className="mt-2 space-y-1">
+            <div className="flex items-center gap-2 text-xs">
+              {browse.data.parent && <button className={btn} onClick={() => setBrowsePath(browse.data.parent)}>.. up</button>}
+              <span className="font-mono">{browse.data.path}</span>
+            </div>
+            <div className="max-h-64 overflow-y-auto text-sm">
+              {browse.data.entries.map((e) => e.is_dir ? (
+                <div key={e.path} className="border-b py-0.5">
+                  <button className="text-left" onClick={() => setBrowsePath(e.path)}>{e.name}/</button>
+                </div>
+              ) : (
+                <label key={e.path} className="flex items-center gap-2 border-b py-0.5">
+                  <input type="checkbox" checked={!!picked[e.path]} onChange={() => setPicked({ ...picked, [e.path]: !picked[e.path] })} />
+                  <span>{e.name}</span>
+                  <span className="text-xs opacity-60">{e.bytes != null ? `${(e.bytes / 1048576).toFixed(1)} MB` : ""}</span>
+                </label>
+              ))}
+              {browse.data.entries.length === 0 && <div className="text-xs opacity-60">No folders or audio files here.</div>}
+            </div>
+            <div className="flex items-center gap-2">
+              <input className="rounded border px-2 py-1 text-xs" value={srcName} onChange={(ev) => setSrcName(ev.target.value)} placeholder="source name" />
+              <button className={btn} disabled={Object.values(picked).filter(Boolean).length === 0 || importSel.isPending}
+                      onClick={() => importSel.mutate()}>
+                Import {Object.values(picked).filter(Boolean).length} selected
+              </button>
+            </div>
+          </div>
+        )}
+        {browse.isError && <div className="mt-1 text-xs text-red-600">Browse unavailable: {(browse.error as Error).message}</div>}
+      </div>
         <table className="w-full text-left text-sm">
           <thead><tr className="border-b"><th className="py-1">Source</th><th>Path</th><th>Status</th><th /></tr></thead>
           <tbody>{(sources.data?.sources ?? []).map((s) => (
@@ -91,6 +151,7 @@ export default function ModelLabPage() {
             </tr>
           ))}</tbody>
         </table>
+        </div>
       )}
 
       {tab === "Recordings" && (

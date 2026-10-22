@@ -3042,6 +3042,46 @@ def admin_model_lab_tag_assign(recording_id: str, body: MlTagAssign, request: Re
                              "status": a.status}, status_code=201)
 
 
+class MlImportSelected(BaseModel):
+    source_name: str = Field(min_length=1, max_length=200)
+    paths: list[str] = Field(min_length=1)
+
+
+def _browse_error(exc: Exception) -> ApiError:
+    message = str(exc)
+    if message.startswith("BROWSE_NOT_CONFIGURED"):
+        return ApiError(503, "BROWSE_NOT_CONFIGURED", message)
+    return ApiError(422, "BROWSE_INVALID", message)
+
+
+@router.get("/admin/model-lab/browse")
+def admin_model_lab_browse(request: Request, path: str | None = None) -> JSONResponse:
+    from ..model_lab import ModelLabError, browse_directory
+
+    try:
+        return JSONResponse(browse_directory(request.app.state.settings, path))
+    except ModelLabError as exc:
+        raise _browse_error(exc) from exc
+
+
+@router.post("/admin/model-lab/import-selected")
+def admin_model_lab_import_selected(body: MlImportSelected, request: Request) -> JSONResponse:
+    from ..model_lab import ModelLabError, import_selected
+    from ..model_lab_train import budget_view, get_budget
+
+    try:
+        with request.app.state.db.session() as session:
+            source, result = import_selected(
+                session, request.app.state.settings,
+                source_name=body.source_name, paths=body.paths)
+            return JSONResponse({"source": {"id": source.id, "name": source.name,
+                                            "kind": source.kind, "path": source.path},
+                                 "counts": result.get("counts", result)},
+                                status_code=201)
+    except ModelLabError as exc:
+        raise _browse_error(exc) from exc
+
+
 @router.get("/admin/model-lab/coverage")
 def admin_model_lab_coverage(request: Request) -> JSONResponse:
     from ..model_lab import coverage

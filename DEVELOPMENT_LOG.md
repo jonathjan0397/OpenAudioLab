@@ -1193,3 +1193,22 @@ No migration. Validation: 388 backend tests (2 new), 17 vitest, clean build.
   production-enabled); nothing real-GPU is claimed that this run did not run.
 - Frontend: GpuFleet gains a "Nodes" tab (fleet-node states + reset, cost
   ledger totals/entries). Build + 17 vitest tests pass.
+
+## 2026-10-22 — TrueNAS selection + pinned trainer (first real training prep)
+
+- Infra: ai-server01 now NFS-exports its TrueNAS mount (`/mnt/truenas`, ro,
+  `/etc/exports.d/oal-truenas.exports`); the hub mounts it at the same path
+  (fstab) and the API container gets `/mnt/truenas:/mnt/truenas:ro` +
+  `OAL_TRUENAS_BROWSE_ROOT=/mnt/truenas`. Same path string on hub and workers
+  means dataset paths need no mapping.
+- Admin file picker: `GET /admin/model-lab/browse` (read-only listing under
+  the browse root, audio files + directories, traversal-guarded) and
+  `POST /admin/model-lab/import-selected` (selected files -> jsonl manifest
+  source under storage + immediate scan). ModelLab Catalog tab gained a
+  TrueNAS import panel (browse, multi-select, named source).
+- Pinned trainer `app/model_lab_trainer.py` (ships in the worker bundle):
+  dataset manifest -> engine scan/preprocess/train/export -> JSON result line
+  with sha256/hours/export_path. `run_house_workers.sh` now sets
+  `OAL_MODEL_LAB_TRAIN_COMMAND` and mounts `/mnt/truenas` read-only.
+- Validation: 427 backend tests (4 new in tests/test_model_lab_truenas.py),
+  17 frontend tests, build clean.

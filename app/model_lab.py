@@ -12,7 +12,7 @@ import hashlib
 import json
 import subprocess
 import time
-from datetime import timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import func, select
@@ -28,6 +28,7 @@ from .models import (
     MlTagAssignment,
     MlTagTerm,
     SiteSetting,
+    new_uuid,
     utcnow,
 )
 
@@ -358,6 +359,76 @@ def compile_caption(session, rec: MlRecording) -> dict:
     parts += [f"tag[{t['lane']}]: {t['term']}" for t in tags]
     return {"recording_id": rec.id, "text": "; ".join(parts),
             "fields": fields, "tags": tags}
+
+
+AUDIO_SUFFIXES = {".mp3", ".wav", ".flac", ".m4a", ".ogg", ".opus", ".aif", ".aiff"}
+
+
+def browse_directory(settings, path: str | None) -> dict:
+    """Read-only TrueNAS file picker under OAL_TRUENAS_BROWSE_ROOT."""
+    raw_root = (settings.truenas_browse_root or "").strip()
+    root = Path(raw_root)
+    if not raw_root or not root.is_dir():
+        raise ModelLabError("BROWSE_NOT_CONFIGURED: OAL_TRUENAS_BROWSE_ROOT is not set")
+    target = (Path(path).resolve() if path else root)
+    if str(target) != str(root) and not str(target).startswith(str(root) + "/"):
+        raise ModelLabError("BROWSE_OUT_OF_ROOT: path escapes the browse root")
+    if not target.is_dir():
+        raise ModelLabError("BROWSE_NOT_A_DIRECTORY: not a directory")
+    entries: list[dict] = []
+    for p in sorted(target.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
+        if p.is_dir():
+            entries.append({"name": p.name, "path": str(p), "is_dir": True,
+                            "bytes": None, "mtime": None})
+        elif p.suffix.lower() in AUDIO_SUFFIXES and p.is_file():
+            st = p.stat()
+            entries.append({"name": p.name, "path": str(p), "is_dir": False,
+                            "bytes": st.st_size,
+                            "mtime": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat()})
+        if len(entries) >= 500:
+            break
+    return {"path": str(target), "root": str(root),
+            "parent": None if str(target) == str(root) else str(target.parent),
+            "entries": entries}
+
+
+def import_selected(session, settings, *, source_name: str, paths: list[str]):
+    """Admin-selected TrueNAS files -> manifest source + immediate scan."""
+    import re
+
+    raw_root = (settings.truenas_browse_root or "").strip()
+    root = Path(raw_root)
+    if not raw_root or not root.is_dir():
+        raise ModelLabError("BROWSE_NOT_CONFIGURED: OAL_TRUENAS_BROWSE_ROOT is not set")
+    if not source_name or not source_name.strip():
+        raise ModelLabError("source_name is required")
+    if session.execute(select(MlSource).where(MlSource.name == source_name)
+                       ).scalar_one_or_none() is not None:
+        raise ModelLabError(f"source already exists: {source_name}")
+    files = []
+    for raw in paths:
+        p = Path(raw).resolve()
+        if str(p) != str(root) and not str(p).startswith(str(root) + "/"):
+            raise ModelLabError(f"BROWSE_OUT_OF_ROOT: {raw}")
+        if not p.is_file():
+            raise ModelLabError(f"not a readable file: {raw}")
+        files.append(p)
+    if not files:
+        raise ModelLabError("no files selected")
+    slug = re.sub(r"[^a-z0-9]+", "-", source_name.lower()).strip("-") or "source"
+    manifest_dir = Path(settings.storage_dir) / "ml-manifests"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    manifest = manifest_dir / f"{slug}-{utcnow().strftime('%Y%m%d%H%M%S')}.jsonl"
+    manifest.write_text("".join(json.dumps({"path": str(p)}) + "\n" for p in files),
+                        encoding="utf-8")
+    source = MlSource(id=new_uuid(), name=source_name, kind="manifest",
+                      path=str(manifest), status="approved",
+                      agreement_json={"pilot-selection": {"state": "approved",
+                                                          "evidence": "admin-truenas-selection"}})
+    session.add(source)
+    session.commit()
+    result = scan_source(session, source, preview=False)
+    return source, result
 
 
 def coverage(session) -> dict:
