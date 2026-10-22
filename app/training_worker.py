@@ -151,12 +151,12 @@ class TrainingWorker:
             with urllib.request.urlopen(url, timeout=self.settings.train_http_timeout_seconds) as resp:
                 return resp.read()
 
-    def register(self) -> None:
+    def register(self, reset: bool = False) -> None:
         from .fleet_nodes import register_node
         from .uais.capabilities import VOICE_CAPABILITIES
 
         with self.db.session() as session:
-            register_node(session, self.node_key, worker_id=self.worker_id)
+            register_node(session, self.node_key, worker_id=self.worker_id, reset=reset)
         total_mb = self._gpu_total_mb()
         with self.db.session() as session:
             worker = session.get(Worker, self.worker_id)
@@ -974,7 +974,9 @@ class TrainingWorker:
     def run_forever(self) -> None:
         from .fleet_nodes import heartbeat_node, supervisor_tick
 
-        self.register()
+        # A fresh process cannot hold an exclusive lease; drop any stale state
+        # left by a previous incarnation of this node (crash, recreate, restart).
+        self.register(reset=True)
         while not self._stop:
             try:
                 self.run_once()

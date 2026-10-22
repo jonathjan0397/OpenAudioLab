@@ -67,6 +67,24 @@ def test_drain_waits_for_in_flight_jobs(client) -> None:
         assert drain_complete(s, key) is True
 
 
+def test_fresh_start_resets_stale_exclusive_state(client) -> None:
+    from app.fleet_nodes import activate_training, drain_complete, drain_for_training, register_node
+
+    key = _node(client)
+    with client.app.state.db.session() as s:
+        drain_for_training(s, key, "att-old")
+        drain_complete(s, key)
+        activate_training(s, key, "att-old")
+    assert _state(client, key) == "active"
+    # A recreated worker process cannot hold the old lease; it must clear it.
+    with client.app.state.db.session() as s:
+        node = register_node(s, key, worker_id="w-2", reset=True)
+    assert node.state == "shared_ready"
+    assert node.exclusive_attempt_id is None
+    assert node.in_flight_jobs == 0
+    assert node.worker_id == "w-2"
+
+
 def test_activation_race_has_one_winner(client) -> None:
     from app.fleet_nodes import activate_training, drain_complete, drain_for_training
 

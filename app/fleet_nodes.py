@@ -26,7 +26,7 @@ class NodeError(ValueError):
 
 
 def register_node(session: Session, node_key: str, *, instance_id: str | None = None,
-                  worker_id: str | None = None) -> FleetNode:
+                  worker_id: str | None = None, reset: bool = False) -> FleetNode:
     node = session.get(FleetNode, node_key)
     if node is None:
         node = FleetNode(id=node_key, instance_id=instance_id, worker_id=worker_id,
@@ -38,6 +38,11 @@ def register_node(session: Session, node_key: str, *, instance_id: str | None = 
         if worker_id is not None:
             node.worker_id = worker_id
         node.heartbeat_at = utcnow()
+        if reset:
+            node.state = "shared_ready"
+            node.exclusive_attempt_id = None
+            node.in_flight_jobs = 0
+            node.last_error = None
     session.commit()
     return node
 
