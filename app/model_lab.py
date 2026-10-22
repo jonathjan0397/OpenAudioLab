@@ -531,7 +531,8 @@ def deterministic_caption(rec: "MlRecording", path: Path | str) -> str:
         parts.append(artist)
     elif title:
         parts.append(title)
-    genre = (getattr(rec, "genre_raw", None) or "").strip()
+    from .library_parse import clean_genre
+    genre = clean_genre(getattr(rec, "genre_raw", None))
     if genre:
         parts.append(genre)
     if parts:

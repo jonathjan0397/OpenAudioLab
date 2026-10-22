@@ -177,3 +177,35 @@ def test_scan_source_wiring_via_client(client) -> None:
         assert rec.tags_state in ("parsed", "suspect")
         assert rec.lyrics_origin == "sidecar" and rec.lyrics_text
         assert rec.tags_provenance_json.get("genre") == "album.nfo"
+
+
+def test_clean_genre_rejects_codec_bitrate_garbage() -> None:
+    from app.library_parse import clean_genre
+
+    for junk in ("MP3 1", "MP3 2", "mp3", "128kbps", "192 Kbps MP3", "Audio Grabber",
+                 "Uncredited", "other5", "www"):
+        assert clean_genre(junk) is None, junk
+    for good in ("Country", "Rock", "Rap & Hip Hop", "Pop", "Metal 1"):
+        assert clean_genre(good) == good, good
+
+
+def test_parse_media_tags_drops_junk_genre() -> None:
+    from app.library_parse import parse_media_tags
+
+    out = parse_media_tags({"artist": "2Pac", "title": "Word Is Bond", "genre": "MP3 1"})
+    assert out["genre"] is None and out["artist"] == "2Pac"
+
+
+def test_nfo_junk_genre_filtered(tmp_path) -> None:
+    from app.library_parse import parse_nfo
+    nfo = tmp_path / "album.nfo"
+    nfo.write_text("<album><genre>MP3 1</genre><genre>Country</genre></album>", encoding="utf-8")
+    assert parse_nfo(nfo)["genres"] == ["Country"]
+
+
+def test_caption_excludes_junk_genre_even_on_stored_rows() -> None:
+    from types import SimpleNamespace
+    from app.model_lab import deterministic_caption
+
+    rec = SimpleNamespace(artist="311", title="Galaxy", genre_raw="MP3 1")
+    assert deterministic_caption(rec, "/x/Galaxy.mp3") == "311 - Galaxy"

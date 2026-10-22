@@ -21,6 +21,10 @@ TAG_KEYS = ("artist", "title", "genre", "year", "album")
 _JUNK_SUBSTRINGS = ("youtube.com", "freemake", "www.", "makeovervideo")
 _JUNK_EXACT = {"", "unknown", "unknown artist", "unknown album", "unknown title",
                "various", "various artists", "n/a", "na", "none"}
+# Windows Media Player / ripper era garbage written into TCON frames.
+_JUNK_GENRE_RE = re.compile(
+    r"^(mp3\s*\d*|\d+\s*k?bps(\s*(mp3|wma|aac|vbr|cbr))?|audio ?grabber|www\.?|"
+    r"itn?\d*|uncredited|other\d*)$", re.I)
 
 # Provenance priority: ffprobe/ID3 first, then Kodi nfo, then folder structure,
 # then the "Artist - Title" filename convention (lowest confidence).
@@ -41,6 +45,14 @@ def clean_value(raw: object) -> str | None:
     if any(marker in lowered for marker in _JUNK_SUBSTRINGS):
         return None
     return text or None
+
+
+def clean_genre(raw: object) -> str | None:
+    """Genre values only: also rejects codec/bitrate garbage ('MP3 1')."""
+    value = clean_value(raw)
+    if value and _JUNK_GENRE_RE.match(value.strip()):
+        return None
+    return value
 
 
 def year_from(value: object) -> int | None:
@@ -81,7 +93,7 @@ def parse_media_tags(tags: dict[str, str]) -> dict:
     return {
         "artist": pick("artist", "albumartist"),
         "title": pick("title"),
-        "genre": pick("genre"),
+        "genre": clean_genre(lowered.get("genre")),
         "year": year_from(lowered.get("date") or lowered.get("year")),
         "album": pick("album"),
         "lyrics_embedded": lowered.get("lyrics") or lowered.get("unsynchronized lyrics"),
@@ -135,6 +147,7 @@ def parse_nfo(nfo_path: Path) -> dict:
         grab = lambda tag: [m.strip() for m in re.findall(rf"<{tag}>(.*?)</{tag}>", text, re.S) if m.strip()]  # noqa: E731
         genres, moods, styles = grab("genre"), grab("mood"), grab("style")
         year = year_from(" ".join(grab("year") + grab("formed")))
+    genres = [g for g in (clean_genre(v) for v in genres) if g]
     return {"genres": genres, "moods": moods, "styles": styles, "year": year}
 
 
