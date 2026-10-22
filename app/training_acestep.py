@@ -39,6 +39,24 @@ class AceStepTrainingAdapter:
         response = self.transport.post_json("/v1/init", {"model": model} if model else {})
         return self._data(response)
 
+    def ensure_llm(self, lm_model_path: str | None = None) -> dict[str, Any]:
+        """Initialize the 5Hz LM on the engine (needed by auto_label).
+
+        Probes /health first: a second LLM init would double VRAM on the
+        shared GPU.
+        """
+        try:
+            health = self.transport.get_json("/health") or {}
+        except EngineError:
+            health = {}
+        if health.get("llm_initialized"):
+            return {"llm_initialized": True}
+        payload: dict[str, Any] = {"init_llm": True}
+        if lm_model_path:
+            payload["lm_model_path"] = lm_model_path
+        response = self.transport.post_json("/v1/init", payload)
+        return self._data(response)
+
     def scan_dataset(self, audio_dir: str, dataset_name: str, all_instrumental: bool = False) -> dict[str, Any]:
         response = self.transport.post_json(
             "/v1/dataset/scan",

@@ -1041,6 +1041,7 @@ class TrainingWorker:
                     if time.monotonic() >= deadline:
                         raise
                     time.sleep(5)
+            self.adapter.ensure_llm(os.environ.get("ACESTEP_LM_MODEL_PATH") or None)
             self.adapter.scan_dataset(str(audio), f"enrich-{job_id[:8]}", False)
             save_path = str(work / "dataset.json")
             submit = self.adapter.auto_label_async(

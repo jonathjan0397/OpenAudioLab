@@ -37,6 +37,10 @@ class _FakeTrainingAdapter:
     def ensure_model(self, model=None):
         self.calls.append("ensure")
 
+    def ensure_llm(self, lm_model_path=None):
+        self.calls.append("ensure_llm")
+        return {"llm_initialized": True}
+
     def scan_dataset(self, dir_, name, all_instrumental=False):
         self.calls.append("scan")
         assert all_instrumental is False
