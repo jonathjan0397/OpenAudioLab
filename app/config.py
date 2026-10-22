@@ -169,7 +169,9 @@ class Settings(BaseSettings):
     model_lab_est_hours: float = 1.0  # reservation estimate per attempt
     model_lab_est_spend_usd: float = 0.25  # reservation estimate per attempt
     node_key: str = ""  # durable fleet-node identity (default: hostname)
-    node_stale_seconds: int = 180  # supervisor heartbeat staleness
+    node_stale_seconds: int = 180
+    musicbrainz_interval_seconds: float = 1.2
+    lrclib_interval_seconds: float = 1.2  # supervisor heartbeat staleness
     byol_model_path: str = ""  # singer-identity encoder weights; empty = BYOL off
     byol_scan_command: str = ""  # encoder hook: prints {"vector": [...]} for a WAV crop
     model_lab_reload_enabled: bool = False  # load trained adapters into the engine

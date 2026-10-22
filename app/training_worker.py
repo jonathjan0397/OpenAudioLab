@@ -244,6 +244,10 @@ class TrainingWorker:
                 self._model_lab_scan(claimed_job, attempt_id, lease_token)
             elif operation == "model_lab.dir_index":
                 self._model_lab_dir_index(claimed_job, attempt_id, lease_token)
+            elif operation == "model_lab.verify":
+                self._model_lab_verify(claimed_job, attempt_id, lease_token)
+            elif operation == "model_lab.lyrics":
+                self._model_lab_lyrics(claimed_job, attempt_id, lease_token)
             else:
                 fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token,
                              "OPERATION_UNSUPPORTED", f"Training worker cannot run {operation!r}.")
@@ -954,6 +958,136 @@ class TrainingWorker:
         complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
                          lease_token, ("dir-index", json.dumps(result).encode()),
                          synthetic=False, engine_result={"dir_index": result})
+
+    # -- model_lab external enrichment passes (gpu1 egress only) ----------------------
+
+    def _model_lab_verify(self, job_id: str, attempt_id: str, lease_token: str) -> None:
+        self._external_pass(job_id, attempt_id, lease_token, pass_name="verify")
+
+    def _model_lab_lyrics(self, job_id: str, attempt_id: str, lease_token: str) -> None:
+        self._external_pass(job_id, attempt_id, lease_token, pass_name="lyrics")
+
+    def _external_pass(self, job_id: str, attempt_id: str, lease_token: str,
+                       *, pass_name: str) -> None:
+        """Suggested-claim enrichment over a recording list (rate-limited).
+
+        verify: MusicBrainz match -> artist/title/genre suggestions + MBID.
+        lyrics: lrclib plain lyrics (never overwrites existing text).
+        """
+        import json
+
+        from .library_external import (ExternalError, RateLimiter, lrclib_lookup,
+                                       musicbrainz_lookup)
+        from .models import MlRecording
+
+        with self.db.session() as session:
+            request = dict(get_job_by_id(session, job_id).request_json)
+        ids = list(request.get("recording_ids") or [])
+        force = bool(request.get("force"))
+        if pass_name == "verify":
+            limiter = RateLimiter(self.settings.musicbrainz_interval_seconds)
+        else:
+            limiter = RateLimiter(self.settings.lrclib_interval_seconds)
+
+        stop = threading.Event()
+        lost = {"lease": False}
+        hb = threading.Thread(target=self._lease_beat, args=(attempt_id, lease_token, stop, lost),
+                              daemon=True)
+        hb.start()
+        counts = {"done": 0, "matched": 0, "found": 0, "skipped": 0, "unmatched": 0, "errors": 0}
+        try:
+            for position, rid in enumerate(ids):
+                if lost["lease"] or is_cancelling(self.db, job_id):
+                    counts["cancelled"] = True
+                    break
+                with self.db.session() as session:
+                    rec = session.get(MlRecording, rid)
+                    if rec is None:
+                        counts["skipped"] += 1
+                        continue
+                    try:
+                        if pass_name == "verify":
+                            outcome = self._verify_one(
+                                session, rec, limiter, force=force,
+                                lookup=musicbrainz_lookup)
+                        else:
+                            outcome = self._lyrics_one(
+                                session, rec, limiter, force=force,
+                                lookup=lrclib_lookup)
+                    except ExternalError as exc:
+                        outcome = "error"
+                        log.warning("%s pass failed for %s: %s", pass_name, rid, str(exc)[:120])
+                    counts[outcome] = counts.get(outcome, 0) + 1
+                    counts["done"] += 1
+                    session.commit()  # per-record: each egress result is durable on its own
+                if position % 50 == 49:
+                    log.info("%s pass progress: %s/%s", pass_name, position + 1, len(ids))
+        finally:
+            stop.set()
+        if lost["lease"]:
+            return
+        if counts.get("cancelled"):
+            cancel_attempt(self.db, job_id, attempt_id, lease_token)
+            return
+        complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
+                         lease_token, (f"{pass_name}-summary", json.dumps(counts).encode()),
+                         synthetic=False, engine_result={pass_name: counts})
+
+    def _verify_one(self, session, rec, limiter, *, force, lookup) -> str:
+        from .models import MlMetadataClaim
+
+        if not force and (rec.identify_status or "").startswith("brainz:"):
+            return "skipped"
+        if not (rec.artist and rec.title):
+            return "skipped"
+        result = lookup(rec.artist, rec.title, rec.duration_seconds, limiter=limiter,
+                        want_genre=not rec.genre_raw)
+        if not result.get("matched"):
+            rec.identify_status = "brainz:unmatched"
+            return "unmatched"
+        rec.identify_status = f"brainz:{result['mbid']}"
+        prov = dict(rec.tags_provenance_json or {})
+        prov["mbid"] = result["mbid"]
+        rec.tags_provenance_json = prov
+        attrs = {"artist": "artist", "title": "title", "genre": "genre_raw", "year": "year"}
+        for field in ("artist", "title", "genre", "year"):
+            value = result.get(field)
+            if value and str(value) != str(getattr(rec, attrs[field], None) or ""):
+                session.add(MlMetadataClaim(
+                    recording_id=rec.id, field=field, value=str(value),
+                    provenance="musicbrainz", provider="musicbrainz"))
+        return "matched"
+
+    def _lyrics_one(self, session, rec, limiter, *, force, lookup) -> str:
+        import hashlib as _hl
+
+        from .models import utcnow as _now
+
+        if rec.lyrics_text and not force:
+            return "skipped"
+        if rec.lyrics_origin == "submitted":
+            return "skipped"  # submitted text always wins
+        if not (rec.artist and rec.title):
+            return "skipped"
+        mbid = (rec.tags_provenance_json or {}).get("mbid")
+        result = lookup(rec.artist, rec.title, rec.duration_seconds, mbid=mbid, limiter=limiter)
+        if not result.get("found"):
+            prov = dict(rec.lyrics_provenance_json or {})
+            prov.update({"lookup": result.get("reason", "no-match"),
+                         "provider": "lrclib", "at": _now().isoformat()})
+            rec.lyrics_provenance_json = prov
+            return "unmatched"
+        text = str(result["lyrics"])
+        rec.lyrics_text = text
+        rec.lyrics_sha256 = _hl.sha256(text.encode("utf-8")).hexdigest()
+        rec.lyrics_origin = "site"
+        prov = dict(rec.lyrics_provenance_json or {})
+        prov.update({"provider": "lrclib", "lrclib_id": result.get("id"),
+                     "synced_available": result.get("synced", False),
+                     "mbid_used": mbid, "fetched_at": _now().isoformat(),
+                     "actor": "admin-request"})
+        rec.lyrics_provenance_json = prov
+        return "found"
 
     # -- voice.validate ------------------------------------------------------------------
 

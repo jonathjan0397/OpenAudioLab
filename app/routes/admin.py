@@ -2945,6 +2945,55 @@ def admin_model_lab_identify(recording_id: str, request: Request, enrich: bool =
                              "identify_status": "queued"}, status_code=202)
 
 
+@router.post("/admin/model-lab/recordings/{recording_id}/verify")
+def admin_model_lab_verify(recording_id: str, request: Request, force: bool = False) -> JSONResponse:
+    return _enqueue_ml_pass(request, "model_lab.verify", [recording_id], force=force)
+
+
+class MlPassSelected(BaseModel):
+    recording_ids: list[str] = Field(min_length=1, max_length=1000)
+    force: bool = False
+
+
+@router.post("/admin/model-lab/verify-selected")
+def admin_model_lab_verify_selected(body: MlPassSelected, request: Request) -> JSONResponse:
+    return _enqueue_ml_pass(request, "model_lab.verify", body.recording_ids, force=body.force)
+
+
+@router.post("/admin/model-lab/recordings/{recording_id}/lyrics-fetch")
+def admin_model_lab_lyrics_fetch(recording_id: str, request: Request,
+                                 force: bool = False) -> JSONResponse:
+    return _enqueue_ml_pass(request, "model_lab.lyrics", [recording_id], force=force)
+
+
+@router.post("/admin/model-lab/lyrics-fetch-selected")
+def admin_model_lab_lyrics_selected(body: MlPassSelected, request: Request) -> JSONResponse:
+    return _enqueue_ml_pass(request, "model_lab.lyrics", body.recording_ids, force=body.force)
+
+
+def _enqueue_ml_pass(request: Request, operation: str, recording_ids: list[str],
+                     *, force: bool) -> JSONResponse:
+    import hashlib as _hl
+    import json as _json
+
+    from ..models import Job, new_uuid as _uuid
+    from ..orchestration import enqueue
+
+    settings = request.app.state.settings
+    request_json = {"recording_ids": recording_ids, "force": force}
+    with request.app.state.db.session() as session:
+        job = Job(id=_uuid(), owner_id="model-lab", operation=operation,
+                  model_id=settings.train_queue_model_id, model_revision="model-lab",
+                  status="queued", request_json=request_json,
+                  request_hash=_hl.sha256(_json.dumps(request_json, sort_keys=True).encode()).hexdigest(),
+                  idempotency_key=f"ml-{operation.split('.')[-1]}-{_uuid()[:8]}")
+        session.add(job)
+        enqueue(session, job, settings)
+        session.commit()
+        return JSONResponse({"job_id": job.id, "operation": operation,
+                             "count": len(recording_ids), "state": "queued"}, status_code=202)
+
+
 @router.get("/admin/model-lab/recordings/{recording_id}/caption")
 def admin_model_lab_caption(recording_id: str, request: Request) -> JSONResponse:
     from ..model_lab import compile_caption
