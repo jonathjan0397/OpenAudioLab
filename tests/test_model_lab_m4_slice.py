@@ -52,6 +52,43 @@ class _FakeProc:
         return 0
 
 
+def test_deterministic_caption_prefers_fields_then_stem() -> None:
+    from types import SimpleNamespace
+
+    from app.model_lab import deterministic_caption
+
+    rec = SimpleNamespace(artist="Alabama", title="Song Of The South", genre_raw="Country")
+    assert deterministic_caption(rec, "/x/any.mp3") == "Alabama - Song Of The South, Country"
+    bare = SimpleNamespace(artist=None, title=None, genre_raw=None)
+    assert deterministic_caption(bare, "/x/Strip It Down.mp3") == "Strip It Down"
+    artist_only = SimpleNamespace(artist="Alabama", title=None, genre_raw=None)
+    assert deterministic_caption(artist_only, "/x/x.mp3") == "Alabama"
+
+
+def test_freeze_embeds_caption_in_manifest(client) -> None:
+    from app.models import MlRecording, MlSource, new_uuid
+
+    with client.app.state.db.session() as session:
+        src = MlSource(id=new_uuid(), name=f"cap-src-{next(_SEQ)}", status="approved")
+        session.add(src)
+        session.commit()
+        rec = MlRecording(id=new_uuid(), source_id=src.id,
+                          path="/x/Strip It Down.mp3", sha256=f"cap-{next(_SEQ)}",
+                          duration_seconds=200.0, review_status="approved",
+                          dataset_eligible=True)
+        session.add(rec)
+        session.commit()
+        rid = rec.id
+    ds = client.post("/api/v1/admin/model-lab/datasets",
+                     json={"name": f"cap-ds-{next(_SEQ)}", "recording_ids": [rid]})
+    assert ds.status_code == 201
+    from app.models import MlDataset
+
+    with client.app.state.db.session() as session:
+        entry = session.get(MlDataset, ds.json()["id"]).manifest_json["entries"][0]
+    assert entry["caption"] == "Strip It Down"
+
+
 def test_vertical_slice_end_to_end(client, monkeypatch, tmp_path) -> None:
     import app.training_worker as tw
     from app.models import (FleetNode, Job, MlBudget, MlDataset, MlModelBundle,

@@ -92,8 +92,10 @@ def freeze_dataset(session, name: str, recording_ids: list[str]) -> MlDataset:
     blocked = [r.id for r in recs if r.review_status != "approved"]
     if blocked:
         raise ValueError(f"recordings not approved for training: {len(blocked)}")
+    from .model_lab import deterministic_caption
     entries = sorted(({"sha256": r.sha256, "path": r.path,
-                       "seconds": r.duration_seconds or 0.0} for r in recs),
+                       "seconds": r.duration_seconds or 0.0,
+                       "caption": deterministic_caption(r, r.path)} for r in recs),
                      key=lambda e: e["sha256"])
     digest = hashlib.sha256(json.dumps(entries, sort_keys=True).encode()).hexdigest()
     total = sum(e["seconds"] for e in entries)

@@ -361,6 +361,31 @@ def compile_caption(session, rec: MlRecording) -> dict:
             "fields": fields, "tags": tags}
 
 
+def deterministic_caption(rec: "MlRecording", path: Path | str) -> str:
+    """Deterministic training label for a recording (no LLM, invariant 1).
+
+    Prefers the recording's own evidence (artist/title/genre); falls back to
+    the filename stem so every sample is always labeled. Never invents a
+    style: only joins fields already on the record.
+    """
+    parts: list[str] = []
+    artist = (getattr(rec, "artist", None) or "").strip()
+    title = (getattr(rec, "title", None) or "").strip()
+    if artist and title:
+        parts.append(f"{artist} - {title}")
+    elif artist:
+        parts.append(artist)
+    elif title:
+        parts.append(title)
+    genre = (getattr(rec, "genre_raw", None) or "").strip()
+    if genre:
+        parts.append(genre)
+    if parts:
+        return ", ".join(parts)
+    stem = Path(path).stem.strip()
+    return stem or "untitled"
+
+
 AUDIO_SUFFIXES = {".mp3", ".wav", ".flac", ".m4a", ".ogg", ".opus", ".aif", ".aiff"}
 
 

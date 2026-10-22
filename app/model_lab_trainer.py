@@ -66,7 +66,13 @@ def main() -> int:
     audio.mkdir(parents=True)
     for entry in entries:
         src = Path(entry["path"])
-        shutil.copy2(src, audio / f"{entry['sha256'][:6]}-{src.name}")
+        dest_name = f"{entry['sha256'][:6]}-{src.name}"
+        dest = audio / dest_name
+        shutil.copy2(src, dest)
+        # ACE-Step training needs a per-sample label: <basename>.caption.txt.
+        caption = (entry.get("caption") or src.stem or "untitled").strip()
+        dest.with_name(dest.name + ".caption.txt").write_text(caption + "\n",
+                                                               encoding="utf-8")
 
     transport = RequestsTransport(settings.acestep_base_url,
                                   settings.acestep_api_key or None,
