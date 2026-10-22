@@ -144,8 +144,9 @@ def scan_source(session, source: MlSource, *, preview: bool = True,
             existing.bytes = size
             existing.probe_json = probe or existing.probe_json
             existing.review_required = review_required
+            record = existing
         else:
-            session.add(MlRecording(
+            record = MlRecording(
                 source_id=source.id, path=str(path), sha256=sha, bytes=size,
                 duration_seconds=probe.get("duration_seconds"),
                 sample_rate=probe.get("sample_rate"), channels=probe.get("channels"),
@@ -154,7 +155,10 @@ def scan_source(session, source: MlSource, *, preview: bool = True,
                 families_json=row.get("families") or [],
                 title=row.get("title"), artist=row.get("artist"),
                 genre_raw=row.get("genre"), year=row.get("year"), decade=row.get("decade"),
-                classification=classification))
+                classification=classification)
+            session.add(record)
+        from .library_parse import enrich_recording
+        enrich_recording(record, path)
         for field in ("title", "artist", "genre", "year", "decade"):
             value = row.get(field)
             if value and not preview:

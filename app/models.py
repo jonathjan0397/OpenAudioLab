@@ -933,6 +933,12 @@ class MlRecording(Base):
     identify_status: Mapped[str] = mapped_column(String(24), default="unidentified")
     review_status: Mapped[str] = mapped_column(String(16), default="unreviewed")  # unreviewed|approved|rejected|restricted
     dataset_eligible: Mapped[bool] = mapped_column(Boolean, default=False)
+    tags_state: Mapped[str] = mapped_column(String(16), default="unparsed")  # parsed|verified|suspect|invalid|unparsed
+    tags_provenance_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    lyrics_text: Mapped[str | None] = mapped_column(Text, nullable=True)  # verbatim source text
+    lyrics_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lyrics_origin: Mapped[str | None] = mapped_column(String(20), nullable=True)  # submitted|sidecar|site|id3|lm
+    lyrics_provenance_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
