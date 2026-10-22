@@ -1003,7 +1003,7 @@ class MlMetadataClaim(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     recording_id: Mapped[str] = mapped_column(String(36), index=True)
     field: Mapped[str] = mapped_column(String(60))
-    value: Mapped[str] = mapped_column(String(500))
+    value: Mapped[str] = mapped_column(Text)
     provenance: Mapped[str] = mapped_column(String(20))  # supplier|embedded|acoustid|musicbrainz|websearch|manual
     provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
     score: Mapped[float | None] = mapped_column(Float, nullable=True)

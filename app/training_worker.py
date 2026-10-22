@@ -1085,7 +1085,7 @@ class TrainingWorker:
                                          ("language", sample.get("language"))):
                         if value:
                             session.add(MlMetadataClaim(
-                                recording_id=rid, field=field, value=str(value),
+                                recording_id=rid, field=field, value=str(value)[:4000],
                                 provenance="acestep-lm", provider=lm_revision))
                             counts["claims"] += 1
                     lyrics = str(sample.get("formatted_lyrics") or sample.get("lyrics") or "").strip()
