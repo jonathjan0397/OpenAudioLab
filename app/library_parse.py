@@ -70,7 +70,7 @@ def read_format_tags(path: Path, ffprobe_bin: str = "ffprobe") -> dict[str, str]
         out = subprocess.run(
             [ffprobe_bin, "-v", "error", "-show_entries", "format_tags",
              "-of", "json", str(path)],
-            capture_output=True, timeout=60, check=False)
+            capture_output=True, timeout=25, check=False)
         import json as _json
         data = _json.loads(out.stdout.decode() or "{}")
         tags = (data.get("format") or {}).get("tags") or {}

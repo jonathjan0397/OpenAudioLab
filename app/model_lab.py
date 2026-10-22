@@ -61,7 +61,7 @@ def probe_file(path: Path, ffprobe_bin: str = "ffprobe") -> dict:
         [ffprobe_bin, "-v", "error", "-show_entries",
          "format=duration,format_name:stream=sample_rate,channels,codec_name",
          "-of", "json", str(path)],
-        capture_output=True, timeout=60, check=False)
+        capture_output=True, timeout=25, check=False)
     if out.returncode != 0:
         return {}
     try:
