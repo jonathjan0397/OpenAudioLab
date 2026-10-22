@@ -1908,6 +1908,7 @@ def _model_pricing_view(session, settings) -> dict:
                 "system_availability": p.availability,
                 "availability": _mp.effective_availability(p, mp),
                 "multiplier": _mp.effective_multiplier(p, mp),
+                "display_name": _mp.effective_display_name(p, mp, p.label),
             })
     return {
         "base_credit_cost": _mp.base_credit_cost(mp, settings),

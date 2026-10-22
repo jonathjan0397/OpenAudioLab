@@ -133,6 +133,14 @@ export default function CreateWidget({
   });
   const [modelSelection, setModelSelection] = useState("ace-step-1.5-turbo");
   const [quote, setQuote] = useState<GenerationQuote | null>(null);
+  const visibleCatalog = (catalog.data || []).filter((m) => m.profiles[0]?.availability !== "disabled");
+  useEffect(() => {
+    if (!catalog.data) return;
+    if (!visibleCatalog.some((m) => m.model_selection === modelSelection)) {
+      const first = visibleCatalog[0];
+      if (first) { setModelSelection(first.model_selection); setQuote(null); }
+    }
+  }, [catalog.data]);  // eslint-disable-line react-hooks/exhaustive-deps
   const selectedModel = (catalog.data || []).find((m) => m.model_selection === modelSelection) || null;
   const selectedProfile = selectedModel?.profiles?.[0] || null;
   const stepsRange = selectedProfile?.control_ranges?.inference_steps ?? null;
@@ -683,7 +691,7 @@ export default function CreateWidget({
                 <div className="field" style={{ width: "100%" }}>
                   <label>Model</label>
                   <div className="model-cards" role="radiogroup" aria-label="Model selection">
-                    {(catalog.data || []).map((m) => {
+                    {visibleCatalog.map((m) => {
                       const p = m.profiles[0];
                       const selectable = p.runnable && (!p.requires_paid || !!me.data?.user);
                       const selected = m.model_selection === modelSelection;

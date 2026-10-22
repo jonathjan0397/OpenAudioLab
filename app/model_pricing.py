@@ -51,6 +51,11 @@ def _clean(payload: dict) -> dict:
             if not MULT_RANGE[0] <= mult <= MULT_RANGE[1]:
                 raise ModelPricingError(f"profile {pid}: multiplier must be {MULT_RANGE[0]}-{MULT_RANGE[1]}")
             out["multiplier"] = mult
+        if entry.get("display_name") is not None:
+            name = str(entry["display_name"]).strip()
+            if not 1 <= len(name) <= 120:
+                raise ModelPricingError(f"profile {pid}: display_name must be 1-120 characters")
+            out["display_name"] = name
         profiles[str(pid)] = out
     return {"base_credit_cost": base, "profiles": profiles}
 
@@ -86,6 +91,12 @@ def effective_availability(profile, mp: dict) -> str:
         return "unconfigured"
     entry = (mp.get("profiles") or {}).get(profile.profile_id) or {}
     return entry.get("availability", profile.availability)
+
+
+def effective_display_name(profile, mp: dict, fallback: str) -> str:
+    """Admin-set website display name; catalog label/release name as fallback."""
+    entry = (mp.get("profiles") or {}).get(profile.profile_id) or {}
+    return entry.get("display_name") or fallback
 
 
 def effective_multiplier(profile, mp: dict) -> float:

@@ -119,6 +119,7 @@ export interface ModelProfile {
   label: string;
   quality_note: string;
   availability: string;
+  display_name?: string;
   runnable: boolean;
   requires_paid: boolean;
   experimental: boolean;

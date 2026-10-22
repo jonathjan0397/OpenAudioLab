@@ -223,6 +223,7 @@ interface ModelPricingProfile {
   system_availability: string;
   availability: string;
   multiplier: number;
+  display_name: string;
 }
 interface ModelPricingView {
   base_credit_cost: number;
@@ -834,7 +835,7 @@ export default function AdminPage() {
   const saveModelPricing = useMutation({
     mutationFn: () => api.put<ModelPricingView>("/api/v1/admin/model-pricing", {
       base_credit_cost: mpView?.base_credit_cost,
-      profiles: Object.fromEntries((mpView?.profiles || []).map((pr) => [pr.profile_id, { availability: pr.availability, multiplier: pr.multiplier }])),
+      profiles: Object.fromEntries((mpView?.profiles || []).map((pr) => [pr.profile_id, { availability: pr.availability, multiplier: pr.multiplier, display_name: pr.display_name }])),
     }),
     onSuccess: () => {
       setMpDraft(null);
@@ -1961,7 +1962,7 @@ export default function AdminPage() {
                 <span className="sub" style={{ fontSize: 11 }}>env default {mpView.base_default}</span>
               </label>
               <table className="table">
-                <thead><tr><th>Model profile</th><th>Available</th><th>Credit multiplier</th></tr></thead>
+                <thead><tr><th>Model profile</th><th>Display name (website)</th><th>Available</th><th>Credit multiplier</th></tr></thead>
                 <tbody>
                   {mpView.profiles.map((pr) => {
                     const unconf = pr.system_availability === "unconfigured";
@@ -1970,6 +1971,10 @@ export default function AdminPage() {
                     return (
                       <tr key={pr.profile_id}>
                         <td>{pr.label} <span className="mono" style={{ fontSize: 11 }}>({pr.profile_id})</span></td>
+                        <td>
+                          <input style={{ width: 160 }} type="text" maxLength={120} value={pr.display_name}
+                                 placeholder={pr.label} onChange={(e) => patch({ display_name: e.target.value })} />
+                        </td>
                         <td>
                           <input type="checkbox" disabled={unconf} checked={pr.availability === "available"}
                                  onChange={(e) => patch({ availability: e.target.checked ? "available" : "disabled" })} />

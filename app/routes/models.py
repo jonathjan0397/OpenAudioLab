@@ -77,6 +77,7 @@ def list_model_selections(request: Request) -> list[dict]:
                 "label": p.label,
                 "quality_note": p.quality_note,
                 "availability": _mp.effective_availability(p, mp),
+                "display_name": _mp.effective_display_name(p, mp, p.label),
                 "runnable": (p.model_selection, p.profile_id) in runnable,
                 "requires_paid": release.family != "turbo",
                 "experimental": release.experimental,
@@ -94,7 +95,8 @@ def list_model_selections(request: Request) -> list[dict]:
             })
         out.append({
             "model_selection": release.selection,
-            "display_name": release.display_name,
+            "display_name": (_mp.effective_display_name(release.profiles[0], mp, release.display_name)
+                             if release.profiles else release.display_name),
             "family": release.family,
             "license_status": release.license_status,
             "experimental": release.experimental,

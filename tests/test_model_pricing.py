@@ -99,3 +99,26 @@ def test_model_pricing_nonadmin_denied(client) -> None:
                     json={"email": "mp7@example.com", "username": "mp7", "password": "super-secret-1"})
     assert r.status_code == 201
     assert client.get("/api/v1/admin/model-pricing").status_code == 403
+
+
+def test_display_name_override_flows_to_catalog(client) -> None:
+    _login_admin(client, "mp8@example.com")
+    r = client.put("/api/v1/admin/model-pricing", json={
+        "profiles": {"turbo-fast-v1": {"display_name": "Starter Beat"}}})
+    assert r.status_code == 200
+    turbo = next(p for p in r.json()["profiles"] if p["profile_id"] == "turbo-fast-v1")
+    assert turbo["display_name"] == "Starter Beat"
+    selections = client.get("/api/v1/model-selections").json()
+    release = next(s for s in selections if s["model_selection"] == "ace-step-1.5-turbo")
+    assert release["display_name"] == "Starter Beat"  # release-level card name overridden
+    assert release["profiles"][0]["display_name"] == "Starter Beat"
+    other = next(s for s in selections if s["model_selection"] != "ace-step-1.5-turbo")
+    assert other["display_name"] != "Starter Beat"  # untouched models keep catalog names
+
+
+def test_display_name_validation(client) -> None:
+    _login_admin(client, "mp9@example.com")
+    assert client.put("/api/v1/admin/model-pricing",
+                      json={"profiles": {"x": {"display_name": "   "}}}).status_code == 422
+    assert client.put("/api/v1/admin/model-pricing",
+                      json={"profiles": {"x": {"display_name": "x" * 121}}}).status_code == 422

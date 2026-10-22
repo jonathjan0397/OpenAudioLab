@@ -1049,3 +1049,13 @@ hard-gated client-side (DOWNLOAD_BELOW_MINIMUM / UPLOAD_BELOW_MINIMUM).
 Search parameters are part of the 30 s server-cache key.
 Validation: 386 backend tests (1 new search-params test), 17 vitest, clean
 tsc+vite build; provider mocked, no Vast spend.
+
+## 2026-10-22 — Model pricing: hide disabled + admin display names (feat/model-lab)
+
+Disabled models now disappear from the customer generation model cards
+(CreateWidget filters availability=disabled and auto-falls back to the first
+visible model with quote reset); server admission still 409s them. Admins set
+a per-profile website display name in the Model Pricing editor (stored in the
+model_pricing SiteSetting JSON, 1-120 chars); /model-selections emits it per
+profile and as the release-level card name, falling back to the catalog label.
+No migration. Validation: 388 backend tests (2 new), 17 vitest, clean build.
