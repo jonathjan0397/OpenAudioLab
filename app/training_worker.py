@@ -757,10 +757,13 @@ class TrainingWorker:
                 settle_attempt(session, attempt,
                                state="done" if ok else "failed",
                                hours=result.get("hours"), spend_usd=result.get("spend_usd"),
-                               error=None if ok else (code + ": " + (stderr or "")[-200:]),
+                               error=None if ok else (f"{code or 'rc=' + str(rc)}: "
+                                                      f"{(stderr or '')[-200:]}"),
                                budget=budget)
         self._release_node()
         if not ok:
+            log.error("model-lab train failed attempt=%s rc=%s outcome=%s stderr=%s",
+                      attempt_id, rc, outcome, (stderr or "")[-2000:])
             fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
                          code or "TRAINING_FAILED", (stderr or code or "trainer failed")[-280:])
             return
