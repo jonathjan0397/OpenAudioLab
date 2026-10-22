@@ -40,9 +40,12 @@ def _clean(payload: dict) -> dict:
             raise ModelPricingError(f"profile {pid}: expected an object")
         out: dict = {}
         if entry.get("availability") is not None:
-            if entry["availability"] not in AVAILABILITY:
+            if entry["availability"] == "unconfigured":
+                pass  # provisioning fact, not an admin override: store nothing
+            elif entry["availability"] not in AVAILABILITY:
                 raise ModelPricingError(f"profile {pid}: availability must be available|disabled")
-            out["availability"] = entry["availability"]
+            else:
+                out["availability"] = entry["availability"]
         if entry.get("multiplier") is not None:
             try:
                 mult = float(entry["multiplier"])

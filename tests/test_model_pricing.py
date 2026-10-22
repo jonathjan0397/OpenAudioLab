@@ -122,3 +122,17 @@ def test_display_name_validation(client) -> None:
                       json={"profiles": {"x": {"display_name": "   "}}}).status_code == 422
     assert client.put("/api/v1/admin/model-pricing",
                       json={"profiles": {"x": {"display_name": "x" * 121}}}).status_code == 422
+
+
+def test_full_view_roundtrip_disable(client) -> None:
+    """The admin editor PUTs the whole view back; that round-trip must save."""
+    _login_admin(client, "mp10@example.com")
+    view = client.get("/api/v1/admin/model-pricing").json()
+    profiles = {p["profile_id"]: {"availability": "disabled" if i == 0 else p["availability"],
+                                  "multiplier": p["multiplier"], "display_name": p["display_name"]}
+                for i, p in enumerate(view["profiles"])}
+    r = client.put("/api/v1/admin/model-pricing",
+                   json={"base_credit_cost": view["base_credit_cost"], "profiles": profiles})
+    assert r.status_code == 200, r.text
+    saved = next(p for p in r.json()["profiles"] if p["availability"] == "disabled")
+    assert saved is not None
