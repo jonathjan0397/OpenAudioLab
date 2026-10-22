@@ -50,6 +50,7 @@ class GenerateJobRequest(StrictModel):
     voice_adapter_id: str | None = None
     voice_fidelity: Literal["native", "reference", "best"] | None = None
     lora_id: str | None = None
+    bundle_id: str | None = None
     workspace_id: str | None = Field(default=None, max_length=36)
     client_reference: str | None = Field(default=None, max_length=200)
     policy_version: str | None = Field(default=None, max_length=80)

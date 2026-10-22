@@ -1152,3 +1152,18 @@ No migration. Validation: 388 backend tests (2 new), 17 vitest, clean build.
   (no silent mfcc fallback for a challenger run); `embed_byol` runs the pinned
   encoder command with OAL_CROP_START/OAL_CROP_WINDOW and parses its vector.
 - Validation: 416 backend tests pass (4 new in tests/test_model_lab_m5_pipeline.py).
+
+## 2026-10-22 — Pipeline M6: merge contract, exact routing, Creation Cards (feat/model-lab-pipeline)
+
+- Merge numerical contract: `params.strengths` validated per-adapter within
+  0..1 at recipe creation; strengths flow through the merge job to the worker
+  as OAL_ML_STRENGTHS (anchor + strength x normalized delta contract; the
+  numerical verification itself remains a real-GPU item).
+- Exact-bundle routing: `resolve_exact_bundle` honors a named bundle or fails
+  explicitly (BUNDLE_NOT_FOUND / BUNDLE_NOT_AVAILABLE - never a silent
+  substitute). POST /jobs accepts `bundle_id` with admission-time validation;
+  the id is persisted in request_json for the worker.
+- Creation Card: GET /admin/model-lab/bundles/{id}/card returns the
+  deterministic provenance card (base model, method, adapters, strengths,
+  artifact integrity, evaluations, promotion gate).
+- Validation: 419 backend tests pass (3 new in tests/test_model_lab_m6_pipeline.py).

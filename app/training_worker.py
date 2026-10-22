@@ -820,6 +820,8 @@ class TrainingWorker:
         env["OAL_ML_BASE_MODEL"] = request.get("base_model", "")
         env["OAL_ML_ADAPTERS"] = ",".join(request.get("adapter_ids") or [])
         env["OAL_ML_METHOD"] = request.get("method", "slerp")
+        env["OAL_ML_STRENGTHS"] = ",".join(
+            str(v) for v in (request.get("strengths") or []))
         rc, stdout, stderr, outcome = self._supervised_run(
             command, env, job_id, attempt_id, lease_token,
             self.settings.model_lab_merge_wall_hours)

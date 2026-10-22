@@ -545,6 +545,17 @@ def create_job(
                     "The registry LoRA was trained for a different base model.",
                     {"lora_base_model_id": lora.base_model_id, "model_id": payload.model_id},
                 )
+        if payload.bundle_id is not None:
+            from ..model_lab_release import ReleaseError, resolve_exact_bundle
+
+            try:
+                resolve_exact_bundle(session, payload.bundle_id)
+            except ReleaseError as exc:
+                message = str(exc)
+                code = "BUNDLE_NOT_FOUND" if message.startswith("BUNDLE_NOT_FOUND") \
+                    else "BUNDLE_NOT_AVAILABLE"
+                raise ApiError(404 if code == "BUNDLE_NOT_FOUND" else 409,
+                               code, message) from exc
         if payload.workspace_id is not None:
             from ..models import Workspace
 

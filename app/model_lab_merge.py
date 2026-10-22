@@ -35,6 +35,13 @@ def create_recipe(session, name: str, base_model: str, adapter_ids: list[str],
             raise MergeError(f"unknown adapter: {aid}")
         if adapter.state not in ("active", "ready"):
             raise MergeError(f"adapter {aid} is not ready (state={adapter.state})")
+    strengths = (params or {}).get("strengths")
+    if strengths is not None:
+        if not isinstance(strengths, list) or len(strengths) != len(adapter_ids):
+            raise MergeError("params.strengths must be a list with one value per adapter")
+        for value in strengths:
+            if not isinstance(value, (int, float)) or not 0.0 <= float(value) <= 1.0:
+                raise MergeError("merge strengths must be within 0..1")
     recipe = MlMergeRecipe(id=new_uuid(), name=name, base_model=base_model,
                            adapter_ids_json=list(adapter_ids), method=method,
                            params_json=params or {})

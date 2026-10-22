@@ -3294,7 +3294,8 @@ def admin_model_lab_recipe_run(recipe_id: str, request: Request) -> JSONResponse
         request_json = {"bundle_id": bundle.id, "recipe_id": recipe.id,
                         "base_model": recipe.base_model,
                         "adapter_ids": list(recipe.adapter_ids_json),
-                        "method": recipe.method}
+                        "method": recipe.method,
+                        "strengths": list((recipe.params_json or {}).get("strengths") or [])}
         job = __import__("app.models", fromlist=["Job"]).Job(
             id=_uuid(), owner_id="model-lab", operation="model_lab.merge",
             model_id=request.app.state.settings.train_queue_model_id,
@@ -3384,6 +3385,18 @@ def admin_model_lab_evaluations(bundle_id: str, request: Request) -> JSONRespons
         return JSONResponse({"evaluations": [
             {"id": e.id, "kind": e.kind, "scores": e.scores_json, "verdict": e.verdict,
              "evaluator": e.evaluator} for e in rows]})
+
+
+@router.get("/admin/model-lab/bundles/{bundle_id}/card")
+def admin_model_lab_bundle_card(bundle_id: str, request: Request) -> JSONResponse:
+    from ..model_lab_release import creation_card
+    from ..models import MlModelBundle
+
+    with request.app.state.db.session() as session:
+        bundle = session.get(MlModelBundle, bundle_id)
+        if bundle is None:
+            raise ApiError(404, "NOT_FOUND", "bundle not found")
+        return JSONResponse(creation_card(session, bundle))
 
 
 @router.get("/admin/model-lab/bundles/{bundle_id}/promotion-gate")

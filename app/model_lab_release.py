@@ -55,6 +55,44 @@ def promotion_gate(session, bundle: MlModelBundle) -> dict:
     return {"ready": not reasons, "reasons": reasons, "evaluations": len(evals)}
 
 
+def resolve_exact_bundle(session, bundle_id: str) -> MlModelBundle:
+    """Exact-bundle routing: a named bundle is honored or the request fails.
+
+    No silent substitution to another engine, tone or cloud provider.
+    """
+    bundle = session.get(MlModelBundle, bundle_id)
+    if bundle is None:
+        raise ReleaseError("BUNDLE_NOT_FOUND: no such model bundle")
+    if bundle.state not in ("candidate", "released"):
+        raise ReleaseError(f"BUNDLE_NOT_AVAILABLE: bundle is {bundle.state}")
+    if not (bundle.sha256 or bundle.artifact_key):
+        raise ReleaseError("BUNDLE_NOT_AVAILABLE: bundle has no artifact integrity")
+    return bundle
+
+
+def creation_card(session, bundle: MlModelBundle) -> dict:
+    """Deterministic Creation Card: provenance, contract and evidence."""
+    from .model_lab_merge import MlMergeRecipe
+
+    bundle_json = bundle.bundle_json or {}
+    recipe = (session.get(MlMergeRecipe, bundle_json.get("recipe_id"))
+              if bundle_json.get("recipe_id") else None)
+    evals = session.execute(
+        select(MlEvaluation).where(MlEvaluation.bundle_id == bundle.id)).scalars().all()
+    return {"bundle_id": bundle.id, "name": bundle.name, "version": bundle.version,
+            "kind": bundle.kind, "base_model": bundle.base_model,
+            "state": bundle.state,
+            "method": recipe.method if recipe else bundle_json.get("method"),
+            "adapters": (list(recipe.adapter_ids_json) if recipe
+                         else bundle_json.get("adapter_ids", [])),
+            "strengths": (recipe.params_json or {}).get("strengths", []) if recipe else [],
+            "sha256": bundle.sha256, "artifact_key": bundle.artifact_key,
+            "reload": bundle_json.get("reload"),
+            "error": bundle_json.get("error"),
+            "evaluations": [{"kind": e.kind, "verdict": e.verdict} for e in evals],
+            "gate": promotion_gate(session, bundle)}
+
+
 def get_or_create_channel(session, name: str) -> MlReleaseChannel:
     channel = session.execute(
         select(MlReleaseChannel).where(MlReleaseChannel.name == name)).scalars().first()
