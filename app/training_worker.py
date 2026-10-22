@@ -974,9 +974,28 @@ class TrainingWorker:
 
     # -- loop --------------------------------------------------------------------------
 
+    def _touch_heartbeat(self) -> None:
+        path = self.settings.worker_heartbeat_file
+        if not path:
+            return
+        try:
+            with open(path, "w") as f:
+                f.write(str(time.time()))
+        except OSError:
+            log.debug("could not write heartbeat file %s", path)
+
+    def _heartbeat_loop(self) -> None:
+        # The container healthcheck watches this file; keep it fresh in a
+        # dedicated thread so long training runs don't read as unhealthy.
+        while not self._stop:
+            self._touch_heartbeat()
+            time.sleep(5)
+
     def run_forever(self) -> None:
         from .fleet_nodes import heartbeat_node, supervisor_tick
 
+        hb = threading.Thread(target=self._heartbeat_loop, daemon=True)
+        hb.start()
         # A fresh process cannot hold an exclusive lease; drop any stale state
         # left by a previous incarnation of this node (crash, recreate, restart).
         self.register(reset=True)
