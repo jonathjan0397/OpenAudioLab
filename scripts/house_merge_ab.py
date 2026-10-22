@@ -62,7 +62,13 @@ def merge_one(
     from transformers import AutoModel
 
     if out_path.exists():
-        shutil.rmtree(out_path)
+        # Immutable builds: never destroy a previous merged checkpoint on
+        # collision; pick the next free version suffix instead.
+        n = 2
+        while (out_path.parent / f"{out_path.name}_v{n}").exists():
+            n += 1
+        out_path = out_path.parent / f"{out_path.name}_v{n}"
+        log(f"output exists; building immutable variant {out_path.name}")
     out_path.mkdir(parents=True, exist_ok=True)
 
     log(f"loading base model {base_checkpoint}")

@@ -111,6 +111,16 @@ def criteria_defaults() -> dict:
     }
 
 
+def _ver_tuple(value) -> tuple:
+    """Parse a version-ish value into a comparable tuple (12.10 > 12.8, unlike floats)."""
+    parts = str(value).strip().split(".")
+    out = []
+    for p in parts:
+        digits = "".join(ch for ch in p if ch.isdigit())
+        out.append(int(digits) if digits else 0)
+    return tuple(out)
+
+
 def ineligible_reason(offer: dict, crit: dict) -> str | None:
     """Hard filters first; returns a machine-readable reason or None."""
     if offer["dph"] is None or offer["dph"] <= 0:
@@ -119,7 +129,7 @@ def ineligible_reason(offer: dict, crit: dict) -> str | None:
         return "PRICE_ABOVE_CEILING"
     if offer["vram_gb"] is None or offer["vram_gb"] < max(crit["min_vram_gb"], crit["model_vram_floor_gb"]):
         return "VRAM_BELOW_MINIMUM"
-    if offer["cuda"] is not None and offer["cuda"] < crit["min_cuda"]:
+    if offer["cuda"] is not None and _ver_tuple(offer["cuda"]) < _ver_tuple(crit["min_cuda"]):
         return "CUDA_UNSUPPORTED"
     if offer["compute_cap"] is not None and offer["compute_cap"] < crit["min_compute_cap"]:
         return "INCOMPATIBLE_GPU"
@@ -158,7 +168,7 @@ def score(offer: dict, crit: dict, weights: dict | None = None) -> float:
         network = min(1.0, ((offer["download_mbps"] or 0) / 1000.0 + (offer["upload_mbps"] or 0) / 250.0) / 2.0)
     else:
         network = 0.5
-    rel = min(1.0, max(0.0, offer["reliability"] or 0.0))
+    rel = 0.5 if offer["reliability"] is None else min(1.0, max(0.0, offer["reliability"]))
     disk = min(1.0, (offer["disk_gb"] or 0.0) / (REQUIRED_DISK_GB * 2))
     return round(
         w["compatibility"] * compat + w["readiness"] * readiness + w["cost"] * cost

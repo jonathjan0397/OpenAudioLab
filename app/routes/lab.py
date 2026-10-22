@@ -271,8 +271,11 @@ async def lab_upload(
         finally:
             tmp_path.unlink(missing_ok=True)
     matches = []
+    ident_status = "skipped"
     if fp:
-        matches = tagging.acoustid_lookup(fp["signature"], fp["duration"], settings.acoustid_client_key)
+        result = tagging.acoustid_lookup(fp["fingerprint"], fp["duration"], settings.acoustid_client_key)
+        ident_status = result["status"]
+        matches = result["matches"]
     tags = tagging.tags_from_matches(matches)
     with request.app.state.db.session() as session:
         session.add(
@@ -292,7 +295,8 @@ async def lab_upload(
             )
         )
         session.commit()
-    return JSONResponse({"asset_id": asset_id, "tags": tags, "matches": matches}, status_code=201)
+    return JSONResponse({"asset_id": asset_id, "tags": tags, "matches": matches,
+                         "identification": ident_status}, status_code=201)
 
 
 @router.post("/lab/api/assets/{asset_id}/tags")

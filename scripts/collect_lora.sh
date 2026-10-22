@@ -88,7 +88,7 @@ if cur.fetchone():
 else:
     cur.execute(
         'INSERT INTO loras (id,name,kind,tags_json,storage_prefix,files_json,base_model_id,'
-        'base_revision,default_scale,state,provenance,profile_version_id,auto_apply,priority,created_at) '
+        'base_revision,default_scale,state,provenance,adapter_id,auto_apply,priority,created_at) '
         'VALUES (%s,%s,%s,%s::json,%s,%s::json,%s,%s,%s,%s,%s,NULL,%s,%s,%s)',
         (str(uuid.uuid4()), fam, 'genre', json.dumps([fam]), f'loras/{fam}',
          json.dumps(['adapter_config.json', 'adapter_model.safetensors']),

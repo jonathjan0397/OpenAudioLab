@@ -37,13 +37,21 @@ RUN sed -i 's/num_workers: int = 4/num_workers: int = 0/' \
 # Note: the engine's MODEL_REPO_MAPPING has no xl entry, so a runtime download
 # of acestep-v15-xl-turbo would wrongly fetch the unified repo — baking it
 # makes ensure_model_downloaded skip entirely.
+# Weight revisions are pinned build args (recorded to WEIGHTS_REVISION for
+# provenance); override with --build-arg when bumping.
+ARG ACESTEP_WEIGHTS_REVISION=main
+ARG XL_TURBO_WEIGHTS_REVISION=main
 RUN /opt/acestep/.venv/bin/python -c \
     "from huggingface_hub import snapshot_download; \
-     snapshot_download('ACE-Step/Ace-Step1.5', local_dir='/opt/acestep/checkpoints')"
+     r = snapshot_download('ACE-Step/Ace-Step1.5', local_dir='/opt/acestep/checkpoints', \
+                           revision='${ACESTEP_WEIGHTS_REVISION}'); \
+     open('/opt/acestep/WEIGHTS_REVISION','w').write('Ace-Step1.5='+r+'\n')"
 RUN /opt/acestep/.venv/bin/python -c \
     "from huggingface_hub import snapshot_download; \
-     snapshot_download('ACE-Step/acestep-v15-xl-turbo', \
-                       local_dir='/opt/acestep/checkpoints/acestep-v15-xl-turbo')"
+     r = snapshot_download('ACE-Step/acestep-v15-xl-turbo', \
+                           local_dir='/opt/acestep/checkpoints/acestep-v15-xl-turbo', \
+                           revision='${XL_TURBO_WEIGHTS_REVISION}'); \
+     open('/opt/acestep/WEIGHTS_REVISION','a').write('xl-turbo='+r+'\n')"
 
 # --- House agent ---------------------------------------------------------------
 COPY docker/house-agent.sh /usr/local/bin/house-agent.sh

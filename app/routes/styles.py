@@ -52,8 +52,15 @@ def styles_suggest(
 def _active_lora_tags(session) -> list[str]:
     from ..models import Lora
 
-    rows = list(session.execute(select(Lora).where(Lora.state == "active")).scalars())
+    rows = list(session.execute(
+        select(Lora).where(Lora.state == "active", Lora.visibility != "private")
+    ).scalars())
     return [t for l in rows for t in (l.tags_json or [])]
+
+
+# Catalog-identity namespaces (from reference identification) are not
+# generation-style controls and must not surface as public style chips.
+_IDENTITY_TAG_PREFIXES = ("artist:", "title:")
 
 
 def _trending_tags(session, limit: int = 12) -> list[str]:
@@ -62,6 +69,8 @@ def _trending_tags(session, limit: int = 12) -> list[str]:
         select(Asset.tags_json).where(Asset.deleted_at.is_(None), Asset.tags_json.isnot(None))
     ):
         for t in tags or []:
+            if not t or t.startswith(_IDENTITY_TAG_PREFIXES):
+                continue
             counts[t] = counts.get(t, 0) + 1
     ranked = sorted(counts, key=lambda t: -counts[t])
     return ranked[:limit]

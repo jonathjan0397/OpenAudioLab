@@ -116,7 +116,7 @@ TRAIN_XL_MAX_DPH = float(os.environ.get("OAL_TRAIN_XL_MAX_DPH", "0.60"))
 # Optional training-specific image (defaults to the engine worker image; the
 # UAIS decision is slim image + runtime checkpoint download).
 TRAIN_IMAGE = os.environ.get("OAL_TRAIN_WORKER_IMAGE", "")
-MAX_DPH = float(os.environ.get("OAL_SCALE_MAX_DPH", "0.40"))  # 0 = uncapped (R9: never default to unlimited spend)
+MAX_DPH = float(os.environ.get("OAL_SCALE_MAX_DPH", "0.25"))  # 0 = uncapped (R9: never default to unlimited spend)
 PRUNE_SECONDS = float(os.environ.get("OAL_PRUNE_SECONDS", "3600"))
 RETENTION_DAYS = int(os.environ.get("OAL_RETENTION_DAYS", "30"))
 # Baseline fallback: when the always-on dev worker is unhealthy, create one

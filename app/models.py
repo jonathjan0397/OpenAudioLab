@@ -390,6 +390,7 @@ class Lora(Base):
     priority: Mapped[int] = mapped_column(Integer, default=0)
     state: Mapped[str] = mapped_column(String(20), default="active")
     provenance: Mapped[str] = mapped_column(String(20), default="external")
+    visibility: Mapped[str] = mapped_column(String(12), default="public")  # public | private
     adapter_id: Mapped[str | None] = mapped_column(String(36), nullable=True)  # UAIS VoiceAdapter provenance
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
