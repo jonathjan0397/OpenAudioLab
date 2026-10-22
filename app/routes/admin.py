@@ -3106,3 +3106,96 @@ def admin_model_lab_bundle_retire(bundle_id: str, request: Request) -> JSONRespo
         except MergeError as exc:
             raise ApiError(409, "BUNDLE_STATE", str(exc)) from exc
         return JSONResponse({"id": bundle.id, "state": bundle.state})
+
+
+# -------------------------------------------------- Model Lab releases (M6)
+
+class MlEvaluationCreate(BaseModel):
+    kind: str
+    scores: dict = Field(default_factory=dict)
+    verdict: str | None = None
+    evaluator: str | None = None
+
+
+@router.post("/admin/model-lab/bundles/{bundle_id}/evaluations")
+def admin_model_lab_evaluation_create(bundle_id: str, body: MlEvaluationCreate,
+                                      request: Request) -> JSONResponse:
+    from ..model_lab_release import ReleaseError, record_evaluation
+
+    with request.app.state.db.session() as session:
+        try:
+            ev = record_evaluation(session, bundle_id, body.kind, body.scores,
+                                   body.verdict, body.evaluator)
+        except ReleaseError as exc:
+            raise ApiError(422, "EVALUATION_INVALID", str(exc)) from exc
+        return JSONResponse({"id": ev.id, "bundle_id": ev.bundle_id, "kind": ev.kind,
+                             "verdict": ev.verdict}, status_code=201)
+
+
+@router.get("/admin/model-lab/bundles/{bundle_id}/evaluations")
+def admin_model_lab_evaluations(bundle_id: str, request: Request) -> JSONResponse:
+    from ..models import MlEvaluation
+
+    with request.app.state.db.session() as session:
+        rows = session.execute(select(MlEvaluation).where(
+            MlEvaluation.bundle_id == bundle_id)).scalars().all()
+        return JSONResponse({"evaluations": [
+            {"id": e.id, "kind": e.kind, "scores": e.scores_json, "verdict": e.verdict,
+             "evaluator": e.evaluator} for e in rows]})
+
+
+@router.get("/admin/model-lab/bundles/{bundle_id}/promotion-gate")
+def admin_model_lab_promotion_gate(bundle_id: str, request: Request) -> JSONResponse:
+    from ..model_lab_release import promotion_gate
+    from ..models import MlModelBundle
+
+    with request.app.state.db.session() as session:
+        bundle = session.get(MlModelBundle, bundle_id)
+        if bundle is None:
+            raise ApiError(404, "NOT_FOUND", "bundle not found")
+        return JSONResponse(promotion_gate(session, bundle))
+
+
+class MlChannelPatch(BaseModel):
+    enabled: bool | None = None
+    min_credits: int | None = None
+
+
+class MlChannelPromote(BaseModel):
+    bundle_id: str
+
+
+@router.get("/admin/model-lab/release-channels")
+def admin_model_lab_channels(request: Request) -> JSONResponse:
+    from ..model_lab_release import channel_view
+    from ..models import MlReleaseChannel
+
+    with request.app.state.db.session() as session:
+        rows = session.execute(select(MlReleaseChannel).order_by(
+            MlReleaseChannel.name)).scalars().all()
+        return JSONResponse({"channels": [channel_view(session, c) for c in rows]})
+
+
+@router.post("/admin/model-lab/release-channels/{name}/promote")
+def admin_model_lab_channel_promote(name: str, body: MlChannelPromote, request: Request) -> JSONResponse:
+    from ..model_lab_release import ReleaseError, channel_view, promote_channel
+
+    with request.app.state.db.session() as session:
+        try:
+            channel = promote_channel(session, name, body.bundle_id)
+        except ReleaseError as exc:
+            raise ApiError(409, "PROMOTION_BLOCKED", str(exc)) from exc
+        return JSONResponse(channel_view(session, channel))
+
+
+@router.patch("/admin/model-lab/release-channels/{name}")
+def admin_model_lab_channel_patch(name: str, body: MlChannelPatch, request: Request) -> JSONResponse:
+    from ..model_lab_release import ReleaseError, channel_view, update_channel
+
+    with request.app.state.db.session() as session:
+        try:
+            channel = update_channel(session, name, enabled=body.enabled,
+                                     min_credits=body.min_credits)
+        except ReleaseError as exc:
+            raise ApiError(422, "CHANNEL_INVALID", str(exc)) from exc
+        return JSONResponse(channel_view(session, channel))
