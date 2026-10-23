@@ -89,7 +89,8 @@ def test_browse_falls_back_to_index_when_mount_gone(client, lib_root) -> None:
     assert {e["name"] for e in body["entries"]} == {"01 Song One.mp3", "02 Song Two.mp3"}
 
 
-def test_scan_selected_directory_source(client, lib_root) -> None:
+def test_scan_selected_directory_source(client, lib_root, monkeypatch) -> None:
+    monkeypatch.setattr("app.library_parse.quick_decode_ok", lambda p, **k: True)
     album = lib_root / "Music Library" / "Alabama" / "Pass It On Down"
     r = client.post("/api/v1/admin/model-lab/scan-selected",
                     json={"source_name": f"dirsrc-{next(_SEQ)}", "roots": [str(album)]})
@@ -109,7 +110,8 @@ def test_scan_selected_directory_source(client, lib_root) -> None:
     assert any(b["source_id"] == sid and b["counts"].get("new") == 2 for b in batches)
 
 
-def test_import_selected_and_resume(client, lib_root) -> None:
+def test_import_selected_and_resume(client, lib_root, monkeypatch) -> None:
+    monkeypatch.setattr("app.library_parse.quick_decode_ok", lambda p, **k: True)
     album = lib_root / "Music Library" / "Alabama" / "Pass It On Down"
     paths = [str(album / "01 Song One.mp3"), str(album / "02 Song Two.mp3")]
     r = client.post("/api/v1/admin/model-lab/import-selected",

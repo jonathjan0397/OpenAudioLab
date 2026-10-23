@@ -145,10 +145,11 @@ def test_enrich_never_overwrites_existing_fields(tmp_path) -> None:
     assert rec.lyrics_origin == "submitted"
 
 
-def test_scan_source_wiring_via_client(client) -> None:
+def test_scan_source_wiring_via_client(client, monkeypatch) -> None:
     import json
     from pathlib import Path
 
+    monkeypatch.setattr("app.library_parse.quick_decode_ok", lambda p, **k: True)
     from app.model_lab import scan_source
     from app.models import MlRecording, MlSource, new_uuid
     from sqlalchemy import select
@@ -209,3 +210,34 @@ def test_caption_excludes_junk_genre_even_on_stored_rows() -> None:
 
     rec = SimpleNamespace(artist="311", title="Galaxy", genre_raw="MP3 1")
     assert deterministic_caption(rec, "/x/Galaxy.mp3") == "311 - Galaxy"
+
+
+def test_scan_flags_undecodable_sources(client, tmp_path, monkeypatch) -> None:
+    import json
+
+    import app.model_lab as ml
+    from app.models import MlSource, new_uuid
+
+    good = tmp_path / "good.mp3"
+    good.write_bytes(b"fake-audio")
+    bad = tmp_path / "bad.mp3"
+    bad.write_bytes(b"fake-audio-bad")
+    (tmp_path / "m.jsonl").write_text(
+        json.dumps({"path": str(good)}) + "\n" + json.dumps({"path": str(bad)}))
+    monkeypatch.setattr(ml, "probe_file", lambda p, **k: {"duration_seconds": 200.0})
+    monkeypatch.setattr("app.library_parse.read_format_tags",
+                        lambda p: {"artist": "A", "title": p.stem})
+    monkeypatch.setattr("app.library_parse.quick_decode_ok",
+                        lambda p, **k: p.name != "bad.mp3")
+    with client.app.state.db.session() as session:
+        src = MlSource(id=new_uuid(), name=f"qc-{next(_SEQ)}", kind="manifest",
+                       path=str(tmp_path / "m.jsonl"), status="approved")
+        session.add(src)
+        session.commit()
+        ml.scan_source(session, src, preview=False)
+        from app.models import MlRecording
+        from sqlalchemy import select
+        rows = {r.path: r for r in session.execute(
+            select(MlRecording).where(MlRecording.source_id == src.id)).scalars()}
+    assert rows[str(bad)].tags_state == "invalid" and rows[str(bad)].review_required
+    assert rows[str(good)].tags_state != "invalid"

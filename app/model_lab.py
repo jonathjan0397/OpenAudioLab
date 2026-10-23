@@ -152,6 +152,13 @@ def _scan_row(session, source: MlSource, batch: MlImportBatch, row: dict,
         session.add(record)
     from .library_parse import enrich_recording
     enrich_recording(record, path)
+    from .library_parse import quick_decode_ok
+    if record.tags_state in ("parsed", "verified") and not quick_decode_ok(path):
+        record.tags_state = "invalid"
+        record.review_required = True
+        prov = dict(record.tags_provenance_json or {})
+        prov["decode_failed"] = True
+        record.tags_provenance_json = prov
     session.flush()
     for field in ("title", "artist", "genre", "year", "decade"):
         value = row.get(field)
