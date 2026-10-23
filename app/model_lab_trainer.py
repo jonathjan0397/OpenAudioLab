@@ -156,7 +156,11 @@ def main() -> int:
         from .engine_acestep import AceStepAdapter
 
         gen = AceStepAdapter(transport, model=settings.acestep_model)
-        adapter.load_lora(str(artifact.parent))  # PEFT dir with adapter_config.json
+        try:
+            adapter.unload_lora()  # clear any leaked adapter from an earlier run
+        except Exception:
+            pass
+        adapter.load_lora(str(artifact.parent), f"accept-{attempt_id[:8]}")
         acceptance["lora_load"] = True
         first_caption = next((e.get("caption") for e in entries if e.get("caption")),
                              "instrumental acceptance test")
