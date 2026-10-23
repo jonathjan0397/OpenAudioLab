@@ -1479,3 +1479,20 @@ Your Man) — different album, never trained on), control_instr; 4 prompts x
 baseline/candidate x 60 s rendered on gpu1; review folder refreshed:
 OAL-Model-Training-A1/review/4917e9f3-…/index.html with references +
 acceptance row.
+
+## 2026-10-23 — Owner acceptance executed: first released voice adapter + Wave 2
+
+- Owner verdict recorded on alabama-poid-voice-v1-adapter: `pass` (evaluator
+  owner, review page path recorded in scores). Promotion gate satisfied
+  (verdict satisfactory + sha integrity) -> `release` -> state `released`.
+- Release channel `default` created via promote: enabled, min_credits 0,
+  canary_percent 10 (observed 8/60 synthetic-owner resolves routed, reason
+  machine-readable; rollback channel built-in). No interactive generation
+  behavior changes today beyond the 10% deterministic owner bucket.
+- Archived superseded style pilot media-library-pilot-v2-adapter (filename-
+  caption era) -> state `archived`; registry keeps it with sha + artifact.
+- Wave 2: 316 artists (~5,005 files, Corrosion Of Conformity -> Everything
+  But The Girl) scanned to completion (316/316 jobs succeeded); catalog grew
+  to 10,049 recordings (9,959 parsed / 85 suspect / 5 legacy unparsed).
+  MusicBrainz verify re-run over all 85 suspects (force) and a 7-job lrclib
+  sweep over 6,497 lyricless parsed tracks queued in background.
