@@ -1552,3 +1552,17 @@ in 278e7b8 (hub-side only, workers untouched mid-wave):
   killing running jobs): heartbeat the fleet node from the lease-beat thread
   during long ops, so supervisor quarantine can't false-positive either.
 - 495 tests green incl. new lease/reconcile fixtures.
+
+## 2026-10-23 — Wave-1 mid-flight incidents handled
+
+- country+alt pre-hit the old-code registry leak ("adapter" name collision
+  after a killed run) -> requeued with fixed trainer (unique per-attempt
+  adapter names + pre-unload) queued behind running jobs.
+- pop's chained eval died on the pre-fix model.safetensors naming in the eval
+  dir; re-queued via the route (which now auto-derives taxonomy prompts from
+  the bundle's dataset style_tag when none are supplied).
+- Sweeper/outbox mechanics: manual LPUSHes hit rotated redis auth; the
+  sweeper's own re-queue path already worked (attempt_number bumped,
+  duplicates dedupe safely on claim).
+- Metal trained + registered on the fixed bundle: proof the acceptance gate
+  passes at 162-sample scale (style-metal-heavy-metal-v1 candidate).
