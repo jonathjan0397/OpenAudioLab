@@ -178,3 +178,15 @@ def channel_view(session, channel: MlReleaseChannel) -> dict:
             "previous_bundle_id": channel.previous_bundle_id,
             "bundle": ({"id": bundle.id, "name": bundle.name, "version": bundle.version,
                         "state": bundle.state} if bundle else None)}
+
+
+def bundle_base_compatible(base_model: str | None, engine_model: str | None) -> bool:
+    """LoRA families are checkpoint-incompatible across the xl boundary
+    (hidden 2048 vs 2560). Same-family or unknown strings pass through,
+    mirroring engine_worker._lora_compatible."""
+    def is_xl(t: str | None) -> bool:
+        return "xl" in (t or "").lower()
+    base, engine = (base_model or "").strip(), (engine_model or "").strip()
+    if not base or not engine:
+        return True
+    return is_xl(base) == is_xl(engine)

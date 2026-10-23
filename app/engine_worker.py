@@ -352,6 +352,39 @@ class EngineWorker:
             log.info("engine idle %ds >= %ss -> stopping to free GPU/RAM", int(idle), int(limit))
             proc.stop()
 
+    def _materialize_bundle(self, bundle_id: str | None) -> str | None:
+        """Local PEFT dir for a routed model-lab bundle (cache + PEFT naming).
+
+        Family compatibility was already enforced at admission
+        (BUNDLE_BASE_MISMATCH); a missing artifact degrades to a plain render
+        with a warning rather than swapping engines."""
+        if not bundle_id:
+            return None
+        from .model_lab_release import resolve_exact_bundle
+
+        with self.db.session() as session:
+            try:
+                bundle = resolve_exact_bundle(session, bundle_id)
+            except Exception:
+                return None
+            if bundle is None or not bundle.artifact_key:
+                return None
+            key = bundle.artifact_key
+            prefix, _ = key.rsplit("/", 1)
+            body = self.storage.get(key).body
+            try:
+                cfg = self.storage.get(f"{prefix}/adapter_config.json").body
+            except Exception:
+                cfg = None
+        cache = Path(self.settings.adapter_cache_dir) / f"bundle-{bundle.id[:16]}"
+        cache.mkdir(parents=True, exist_ok=True)
+        (cache / "adapter_model.safetensors").write_bytes(body)
+        if cfg is not None:
+            (cache / "adapter_config.json").write_bytes(cfg)
+        else:
+            log.warning("bundle %s has no adapter_config.json sidecar", bundle.id)
+        return str(cache)
+
     def _materialize_adapter(self, artifacts: dict) -> str | None:
         """Resolve a loadable local adapter dir from durable object storage.
 
@@ -766,10 +799,16 @@ class EngineWorker:
                             payload["prompt"] = f"{payload.get('prompt', '')}, {extra}".strip(", ")
                 append_event(session, claimed_job, "stage", "running", stage="submitting", attempt_id=attempt_id)
                 session.commit()
+            # M7 released bundle: apply the exact adapter the job routed to
+            # (admission already enforced the family check; a failed load is
+            # recorded, never silently swapped).
+            bundle_path = self._materialize_bundle(dict(job.request_json).get("bundle_id"))
+
             set_job_stage(self.db, claimed_job, "preparing model")
 
             adapter_artifacts = lora_artifacts or profile_artifacts
-            profile_path = self._materialize_adapter(adapter_artifacts) if adapter_artifacts else None
+            profile_path = self._materialize_adapter(adapter_artifacts) if adapter_artifacts \
+                else bundle_path
             if profile_path:
                 self.adapter.ensure_model()
                 try:

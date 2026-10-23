@@ -546,16 +546,27 @@ def create_job(
                     {"lora_base_model_id": lora.base_model_id, "model_id": payload.model_id},
                 )
         if payload.bundle_id is not None:
-            from ..model_lab_release import ReleaseError, resolve_exact_bundle
+            from ..model_lab_release import (ReleaseError, bundle_base_compatible,
+                                             resolve_exact_bundle)
 
             try:
-                resolve_exact_bundle(session, payload.bundle_id)
+                bundle = resolve_exact_bundle(session, payload.bundle_id)
             except ReleaseError as exc:
                 message = str(exc)
                 code = "BUNDLE_NOT_FOUND" if message.startswith("BUNDLE_NOT_FOUND") \
                     else "BUNDLE_NOT_AVAILABLE"
                 raise ApiError(404 if code == "BUNDLE_NOT_FOUND" else 409,
                                code, message) from exc
+            from ..uais.capabilities import VOICE_CAPABILITIES
+            cap = VOICE_CAPABILITIES.get(payload.model_id)
+            engine = getattr(cap, "engine_model", None) or payload.model_id
+            if not bundle_base_compatible(bundle.base_model, engine):
+                raise ApiError(
+                    409, "BUNDLE_BASE_MISMATCH",
+                    "This bundle was trained for a different checkpoint family "
+                    "than the requested model.",
+                    {"bundle_base_model": bundle.base_model, "engine_model": engine},
+                )
         if payload.workspace_id is not None:
             from ..models import Workspace
 

@@ -144,5 +144,6 @@ def transition_bundle(session, bundle: MlModelBundle, action: str) -> MlModelBun
 
 def bundle_view(bundle: MlModelBundle) -> dict:
     return {"id": bundle.id, "name": bundle.name, "version": bundle.version,
-            "kind": bundle.kind, "base_model": bundle.base_model, "state": bundle.state,
+            "kind": bundle.kind, "base_model": bundle.base_model,
+        "compat": (bundle.bundle_json or {}).get("compat") or {}, "state": bundle.state,
             "sha256": bundle.sha256, "artifact_key": bundle.artifact_key}

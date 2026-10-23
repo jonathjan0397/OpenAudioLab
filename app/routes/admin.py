@@ -3013,6 +3013,68 @@ def admin_model_lab_enrich_selected(body: MlEnrichBody, request: Request) -> JSO
                              "state": "queued"}, status_code=202)
 
 
+class MlCompatProbe(BaseModel):
+    target_model: str = Field(min_length=3, max_length=120)
+    prompts: list[dict] = Field(default_factory=list, max_length=16)
+    seed: int = 42
+    duration_seconds: int = Field(default=60, ge=10, le=120)
+
+
+@router.post("/admin/model-lab/bundles/{bundle_id}/compat-probe")
+def admin_model_lab_bundle_compat_probe(bundle_id: str, body: MlCompatProbe,
+                                        request: Request) -> JSONResponse:
+    """Queue a cross-checkpoint portability probe (native vs adapted renders)."""
+    import hashlib as _hl
+    import json as _json
+
+    from ..models import Job, MlModelBundle, new_uuid as _uuid
+    from ..orchestration import enqueue
+
+    settings = request.app.state.settings
+    with request.app.state.db.session() as session:
+        if session.get(MlModelBundle, bundle_id) is None:
+            raise ApiError(404, "NOT_FOUND", "bundle not found")
+        request_json = {"bundle_id": bundle_id, "target_model": body.target_model,
+                        "prompts": body.prompts, "seed": body.seed,
+                        "duration_seconds": body.duration_seconds}
+        job = Job(id=_uuid(), owner_id="model-lab", operation="model_lab.compat_eval",
+                  model_id=settings.train_queue_model_id, model_revision="model-lab",
+                  status="queued", request_json=request_json,
+                  request_hash=_hl.sha256(_json.dumps(request_json, sort_keys=True)
+                                          .encode()).hexdigest(),
+                  idempotency_key=f"ml-compat-{bundle_id[:8]}-{_uuid()[:6]}")
+        session.add(job)
+        enqueue(session, job, settings)
+        session.commit()
+        return JSONResponse({"job_id": job.id, "bundle_id": bundle_id,
+                             "target_model": body.target_model, "state": "queued"},
+                            status_code=202)
+
+
+class MlCompatVerdict(BaseModel):
+    target_model: str = Field(min_length=3, max_length=120)
+    verdict: str = Field(pattern="^(verified|incompatible)$")
+
+
+@router.post("/admin/model-lab/bundles/{bundle_id}/compat")
+def admin_model_lab_bundle_compat_stamp(bundle_id: str, body: MlCompatVerdict,
+                                        request: Request) -> JSONResponse:
+    """Owner verdict on a probed target: writes the bundle's governed compat map."""
+    from ..models import MlModelBundle
+
+    with request.app.state.db.session() as session:
+        b = session.get(MlModelBundle, bundle_id)
+        if b is None:
+            raise ApiError(404, "NOT_FOUND", "bundle not found")
+        bj = dict(b.bundle_json or {})
+        compat = dict(bj.get("compat") or {})
+        compat[body.target_model] = body.verdict
+        bj["compat"] = compat
+        b.bundle_json = bj
+        session.commit()
+        return JSONResponse({"bundle_id": bundle_id, "compat": compat})
+
+
 @router.post("/admin/model-lab/bundles/{bundle_id}/eval-samples")
 def admin_model_lab_bundle_eval(bundle_id: str, body: MlEvalBody,
                                 request: Request) -> JSONResponse:

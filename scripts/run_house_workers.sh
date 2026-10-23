@@ -6,7 +6,11 @@ IMAGE=stratastack/oal-worker:house-v1-070-int8
 . "$OAL_WORKERS_ENV"
 export DB REDIS SECRET
 
-docker rm -f oal-worker-hub oal-worker-gpu1 2>/dev/null || true
+# Usage: run_house_workers.sh [all|hub|gpu1|llm]   (default: all)
+TARGET="${1:-all}"
+
+if [ "$TARGET" = "all" ] || [ "$TARGET" = "hub" ]; then
+docker rm -f oal-worker-hub 2>/dev/null || true
 
 docker run -d --name oal-worker-hub --gpus all --network host --restart unless-stopped \
   -e CUDA_VISIBLE_DEVICES=0 \
@@ -40,6 +44,10 @@ docker run -d --name oal-worker-hub --gpus all --network host --restart unless-s
   -v /Cold-Archive/oal-models/acestep-v15-xl-sft:/opt/acestep/checkpoints/acestep-v15-xl-sft \
   -v /Cold-Archive/oal-models/acestep-v15-xl-turbo:/opt/acestep/checkpoints/acestep-v15-xl-turbo \
   "$IMAGE"
+fi
+
+if [ "$TARGET" = "all" ] || [ "$TARGET" = "gpu1" ]; then
+docker rm -f oal-worker-gpu1 2>/dev/null || true
 
 docker run -d --name oal-worker-gpu1 --gpus all --restart unless-stopped \
   -e CUDA_VISIBLE_DEVICES=0 \
@@ -54,23 +62,27 @@ docker run -d --name oal-worker-gpu1 --gpus all --restart unless-stopped \
   -e OAL_TRAIN_WORKDIR=/opt/acestep/training-data-gpu1 -e OAL_TRAIN_MIN_FREE_MB=10000 \
   -e OAL_TRAIN_HTTP_TIMEOUT_SECONDS=7200 -e OAL_ENGINE_AUTOSTART=0 \
   -e OAL_MODEL_LAB_TRAIN_COMMAND="python3 -m app.model_lab_trainer" \
+  -e OAL_REVIEW_DIR=/opt/oal-review \
   -e OAL_WORKER_ID=oal-training-gpu1 -e OAL_NODE_KEY=oal-baseline-gpu1 \
   -e OAL_WORKER_ROLE=training_worker -e OAL_WORKER_TIER=baseline \
   -v /mnt/oal-storage:/data/oal -v oal-acestep-cache-gpu1:/root/.cache \
   -v /mnt/truenas:/mnt/truenas:ro \
   -v /Cold-Archive/OAL-Model-Training-A1/scratch:/opt/acestep/training-data-gpu1 \
   -v /Cold-Archive/OAL-Model-Training-A1/review:/opt/oal-review \
-  -e OAL_REVIEW_DIR=/opt/oal-review \
+  -v /Cold-Archive/oal-models/acestep-v15-sft:/opt/acestep/checkpoints/acestep-v15-sft \
    "$IMAGE"
+fi
 
 # Drafting lyrics LLM (Qwen3-4B): its OWN CPU-only container on this host, kept OFF
 # the GPU worker so XL/SFT premium has VRAM. Reuses the worker image's baked
 # llama-server + model (no download). The backend's llm_base_url -> :8082/v1.
+if [ "$TARGET" = "all" ] || [ "$TARGET" = "llm" ]; then
 docker rm -f oal-llm 2>/dev/null || true
 docker run -d --name oal-llm --restart unless-stopped -p 8082:8082 \
   --entrypoint /usr/local/bin/llama-server "$IMAGE" \
   --model /opt/llm/qwen3-4b-q4_k_m.gguf --host 0.0.0.0 --port 8082 \
   --ctx-size 4096 --n-gpu-layers 0 --alias qwen3-4b --flash-attn off --reasoning-budget 512
+fi
 
 sleep 5
-docker ps --format '{{.Names}}\t{{.Status}}' | grep -E "oal-worker|oal-llm"
+docker ps --format '{{.Names}}\t{{.Status}}' | grep -E "oal-worker|oal-llm" || true

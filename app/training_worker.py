@@ -252,6 +252,8 @@ class TrainingWorker:
                 self._model_lab_enrich(claimed_job, attempt_id, lease_token)
             elif operation == "model_lab.eval":
                 self._model_lab_eval(claimed_job, attempt_id, lease_token)
+            elif operation == "model_lab.compat_eval":
+                self._model_lab_compat(claimed_job, attempt_id, lease_token)
             else:
                 fail_attempt(self.db, self.settings, claimed_job, attempt_id, lease_token,
                              "OPERATION_UNSUPPORTED", f"Training worker cannot run {operation!r}.")
@@ -852,7 +854,8 @@ class TrainingWorker:
             attempt = session.get(MlTrainingAttempt, request.get("attempt_id"))
             dataset = session.get(MlDataset, attempt.dataset_id) if attempt else None
             if attempt is not None and dataset is not None:
-                bundle = register_trained_bundle(session, attempt, dataset, result)
+                bundle = register_trained_bundle(session, attempt, dataset, result,
+                                                 base_model=self.settings.acestep_model)
                 result["bundle_id"] = bundle.id
                 auto_eval = bool((attempt.recipe_json or {}).get("auto_eval"))
                 dataset_id = dataset.id
@@ -1318,6 +1321,146 @@ class TrainingWorker:
         complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
                          lease_token, ("eval-summary", json.dumps(samples).encode()),
                          synthetic=False, engine_result={"eval_samples": len(samples)})
+
+    def _model_lab_compat(self, job_id: str, attempt_id: str, lease_token: str) -> None:
+        """Cross-base portability probe (T-B): render the bundle's prompts on an
+        ALTERNATIVE engine checkpoint, native vs adapter-loaded. Evidence for
+        the bundle's compat map; never auto-promotes anything."""
+        import hashlib as _hl
+        import json
+        import shutil
+
+        from .models import MlModelBundle
+        from .review import build_review_page, review_bundle_dir, slug
+        from .style_tags import eval_prompts_for, voice_eval_prompts
+
+        with self.db.session() as session:
+            request = dict(get_job_by_id(session, job_id).request_json)
+            bundle = session.get(MlModelBundle, request.get("bundle_id"))
+            if bundle is None or not bundle.artifact_key:
+                fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                             "BUNDLE_NOT_FOUND", "compat target bundle missing.")
+                return
+            bundle_id, artifact_key = bundle.id, bundle.artifact_key
+            bundle_meta = {"name": bundle.name, "version": bundle.version,
+                           "kind": bundle.kind, "sha256": bundle.sha256}
+            dataset_id = (bundle.bundle_json or {}).get("dataset_id")
+            from .models import MlDataset
+            ds = session.get(MlDataset, dataset_id) if dataset_id else None
+        target = str(request.get("target_model") or "").strip()
+        if not target:
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         "COMPAT_NO_TARGET", "target_model required.")
+            return
+        prompts = request.get("prompts") or []
+        if not prompts and ds is not None:
+            with self.db.session() as session:
+                if getattr(ds, "kind", "style") == "voice":
+                    prompts = voice_eval_prompts(ds)
+                else:
+                    prompts = eval_prompts_for(session, (ds.report_json or {}).get("style_tag")
+                                               or "pop.pop")
+        if not prompts:
+            prompts = [{"name": "control-neutral",
+                        "caption": "instrumental control, neutral mood", "instrumental": True}]
+        seed = int(request.get("seed", 42))
+        duration = int(request.get("duration_seconds", 60))
+        work = Path(self.settings.train_workdir) / f"ml-compat-{job_id[:8]}"
+        lora_dir = work / "lora"
+        lora_dir.mkdir(parents=True, exist_ok=True)
+        (lora_dir / "adapter_model.safetensors").write_bytes(bytes(self.storage.get(
+            artifact_key).body))
+        try:
+            (lora_dir / "adapter_config.json").write_bytes(self.storage.get(
+                artifact_key.rsplit("/", 1)[0] + "/adapter_config.json").body)
+        except Exception:
+            pass
+        review_dest = review_bundle_dir(self.settings.review_dir, bundle_id)
+        samples: list[dict] = []
+        stop = threading.Event()
+        lost = {"lease": False}
+        threading.Thread(target=self._lease_beat, args=(attempt_id, lease_token, stop, lost),
+                         daemon=True).start()
+        adapter_name = f"compat-{bundle_id[:8]}-{slug(target)}"
+        try:
+            self.adapter.ensure_model(target)
+            for mode in ("native", "adapted"):
+                if mode == "adapted":
+                    try:
+                        self.adapter.unload_lora()
+                    except EngineError:
+                        pass
+                    self.adapter.load_lora(str(lora_dir), adapter_name)
+                else:
+                    try:
+                        self.adapter.unload_lora()
+                    except EngineError:
+                        pass
+                for p in prompts:
+                    lyr = str(p.get("lyrics") or "").strip() or None
+                    instr = False if lyr else bool(p.get("instrumental", True))
+                    payload = self.gen_adapter.build_payload(
+                        music_description=str(p.get("caption") or ""), lyrics=lyr,
+                        instrumental=instr, seed=seed, duration_seconds=duration,
+                        thinking=False)
+                    sub = self.gen_adapter.submit(payload)
+                    deadline = time.monotonic() + 600
+                    state, items = "pending", None
+                    while state == "pending" and time.monotonic() < deadline:
+                        if lost["lease"]:
+                            return
+                        time.sleep(5)
+                        state, items = self.gen_adapter.poll(sub.task_id)
+                    if state != "succeeded" or not items:
+                        raise EngineError("COMPAT_RENDER_FAILED",
+                                          f"{target}/{mode}/{p.get('name')}: {state} "
+                                          f"{self.gen_adapter.last_error}")
+                    url = next((i.get("file") or i.get("audio_url") for i in items
+                                if i.get("file") or i.get("audio_url")), None)
+                    if not url:
+                        raise EngineError("COMPAT_NO_AUDIO", str(p.get("name")))
+                    audio = self.gen_adapter.download(url)
+                    fname = f"compat-{slug(target)}-{mode}-{slug(str(p.get('name')))}.mp3"
+                    key = f"ml/eval/{bundle_id}/{fname}"
+                    self.storage.put(key, audio)
+                    entry = {"mode": "baseline" if mode == "native" else "candidate",
+                             "engine_mode": mode, "engine": target,
+                             "prompt": p.get("name"),
+                             "caption": p.get("caption"), "artifact_key": key,
+                             "bytes": len(audio), "sha256": _hl.sha256(audio).hexdigest(),
+                             "instrumental": instr}
+                    if review_dest is not None:
+                        (review_dest / fname).write_bytes(audio)
+                        entry["file"] = fname
+                    samples.append(entry)
+            with self.db.session() as session:
+                b = session.get(MlModelBundle, bundle_id)
+                bj = dict(b.bundle_json or {})
+                compat_map = dict(bj.get("compat") or {})
+                compat_map[target] = "rendered_pending_review"
+                bj["compat"] = compat_map
+                b.bundle_json = bj
+                session.commit()
+            if review_dest is not None:
+                build_review_page(review_dest,
+                                  bundle={**bundle_meta, "base_model": target, "seed": seed,
+                                          "duration_seconds": duration},
+                                  samples=samples, references=[])
+        except EngineError as exc:
+            fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
+                         getattr(exc, "code", "COMPAT_FAILED"), str(exc)[:280])
+            return
+        finally:
+            stop.set()
+            try:
+                self.adapter.unload_lora()
+            except Exception:
+                pass
+            shutil.rmtree(work, ignore_errors=True)
+        complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
+                         lease_token, ("compat-summary", json.dumps(samples).encode()),
+                         synthetic=False,
+                         engine_result={"compat": {"target": target, "samples": len(samples)}})
 
     def _model_lab_dir_index(self, job_id: str, attempt_id: str, lease_token: str) -> None:
         import json
