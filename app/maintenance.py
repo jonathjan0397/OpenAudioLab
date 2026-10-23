@@ -10,11 +10,11 @@ from __future__ import annotations
 import argparse
 import time
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 
 from .config import Settings, get_settings
 from .db import Db
-from .models import Asset, Job, Worker, utcnow
+from .models import Asset, Job, JobAttempt, MlTrainingAttempt, Worker, utcnow
 from .orchestration import get_job_by_id
 from .storage import Storage, build_storage, delete_asset_blobs
 
@@ -117,8 +117,6 @@ def reap_orphaned_attempts(db: Db, settings: Settings, now=None) -> int:
         return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
     now = _aware(now or utcnow())
-    training_states = ("draining", "training_reserved", "active", "cleanup")
-    assert training_states and all(s in NODE_STATES for s in training_states)
     cutoff = now - timedelta(seconds=max(1.0, settings.node_stale_seconds))
     grace = timedelta(minutes=2)
     reaped = 0
@@ -133,21 +131,50 @@ def reap_orphaned_attempts(db: Db, settings: Settings, now=None) -> int:
             created = _aware(attempt.created_at)
             if created and now - created < grace:
                 continue  # freshly claimed: let the worker wire up its node
-            node = session.execute(
-                select(FleetNode).where(
-                    FleetNode.exclusive_attempt_id == attempt.id,
-                    FleetNode.state.in_(training_states),
-                )
-            ).scalars().first()
-            if node is not None and _aware(node.heartbeat_at) is not None \
-                    and _aware(node.heartbeat_at) >= cutoff:
-                continue
+            # The authoritative liveness signal is the JOB lease: workers
+            # heartbeat JobAttempt every ~10 s inside long operations, while
+            # the fleet-node heartbeat only advances between queue iterations.
+            if attempt.job_id is not None:
+                live = session.execute(
+                    select(JobAttempt.id).where(
+                        JobAttempt.job_id == attempt.job_id,
+                        JobAttempt.status == "running",
+                        JobAttempt.heartbeat_at.is_not(None),
+                        JobAttempt.heartbeat_at >= cutoff,
+                    ).limit(1)).scalar_one_or_none()
+                if live is not None:
+                    continue
             budget = session.get(MlBudget, attempt.budget_id)
             settle_attempt(session, attempt, state="failed",
-                           error="worker lost: no active training node",
+                           error="worker lost: no live job lease",
                            budget=budget)
             reaped += 1
     return reaped
+
+
+def reconcile_budget(db) -> dict:
+    """Recompute budget counters from durable attempt rows (source of truth)."""
+    from .model_lab_train import _refresh_state
+    from .models import MlBudget
+
+    with db.session() as session:
+        budgets = session.execute(select(MlBudget)).scalars().all()
+        for b in budgets:
+            b.used_hours = round(float(session.execute(
+                select(func.coalesce(func.sum(MlTrainingAttempt.hours), 0.0))
+                .where(MlTrainingAttempt.budget_id == b.id,
+                       MlTrainingAttempt.settled.is_(True))).scalar() or 0.0), 4)
+            b.spent_usd = round(float(session.execute(
+                select(func.coalesce(func.sum(MlTrainingAttempt.spend_usd), 0.0))
+                .where(MlTrainingAttempt.budget_id == b.id,
+                       MlTrainingAttempt.settled.is_(True))).scalar() or 0.0), 4)
+            b.reserved_usd = round(float(session.execute(
+                select(func.coalesce(func.sum(MlTrainingAttempt.reserved_usd), 0.0))
+                .where(MlTrainingAttempt.budget_id == b.id,
+                       MlTrainingAttempt.settled.is_(False))).scalar() or 0.0), 4)
+            _refresh_state(b)
+        session.commit()
+    return {"budgets": len(budgets)}
 
 
 def main() -> None:
@@ -169,6 +196,9 @@ def main() -> None:
         reaped = reap_orphaned_attempts(db, settings)
         if reaped:
             print(f"reaped {reaped} orphaned model-lab attempt(s)")
+        rec = reconcile_budget(db)
+        if rec["budgets"]:
+            print(f"reconciled {rec['budgets']} budget(s) from durable attempts")
         if args.once:
             break
         time.sleep(args.interval)
