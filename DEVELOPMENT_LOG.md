@@ -1496,3 +1496,19 @@ acceptance row.
   to 10,049 recordings (9,959 parsed / 85 suspect / 5 legacy unparsed).
   MusicBrainz verify re-run over all 85 suspects (force) and a 7-job lrclib
   sweep over 6,497 lyricless parsed tracks queued in background.
+
+## 2026-10-23 — Lyric sweep paused by owner decision (on-demand policy)
+
+Owner learned the sweep's value model (voice-trainability per track) and chose
+"pause, on-demand later" to keep the training queue instantly responsive:
+7 remaining model_lab.lyrics jobs cancelled in-place (durable status flip;
+worker's per-record cancel-check fenced the running one cleanly; dispatcher
+redeliveries of cancelled jobs no-op via claim_attempt). Written results are
+kept and idempotent-skipped on any future pass.
+
+Final state: catalog 10,049 (9,959 parsed); 3,701 site lyrics + 11 sidecar +
+4 lm = ~37% voice-trainable right now; suspects 85 (48 MB-checked unmatched,
+0 leaked into eligibility); lrclib threw late-503s at the tail (burst
+cooling) — retried per-selection on demand from now on. Queue: empty.
+Waves held at owner's choice (Wave 3 on hold). Released:
+alabama-poid-voice-v1-adapter @ default channel, canary 10%.
