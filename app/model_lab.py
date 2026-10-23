@@ -518,11 +518,15 @@ def compile_caption(session, rec: MlRecording) -> dict:
 def deterministic_caption(rec: "MlRecording", path: Path | str) -> str:
     """Deterministic training label for a recording (no LLM, invariant 1).
 
-    Prefers the recording's own evidence (artist/title/genre); falls back to
-    the filename stem so every sample is always labeled. Never invents a
-    style: only joins fields already on the record.
+    Leads with taxonomy style phrases (the generation-prompt vocabulary),
+    then the recording's own evidence (artist/title/genre/decade); falls back
+    to the filename stem. Never invents: joins only fields on the record.
     """
     parts: list[str] = []
+    from .style_tags import caption_for
+    style = caption_for(rec)
+    if style:
+        parts.append(style)
     artist = (getattr(rec, "artist", None) or "").strip()
     title = (getattr(rec, "title", None) or "").strip()
     if artist and title:
@@ -532,8 +536,9 @@ def deterministic_caption(rec: "MlRecording", path: Path | str) -> str:
     elif title:
         parts.append(title)
     from .library_parse import clean_genre
+    from .library_parse import clean_genre
     genre = clean_genre(getattr(rec, "genre_raw", None))
-    if genre:
+    if genre and not style:
         parts.append(genre)
     if parts:
         return ", ".join(parts)

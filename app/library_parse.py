@@ -270,8 +270,9 @@ def enrich_recording(rec, path: Path, *, tags_reader: Callable[[Path], dict] | N
     state = decide_tags_state(
         {"artist": rec.artist, "title": rec.title},
         dict(provenance))
+    prov = provenance
     rec.tags_state = state
-    rec.tags_provenance_json = provenance
+    rec.tags_provenance_json = prov
 
     if not rec.lyrics_text:
         embedded = clean_value(id3.get("lyrics_embedded") or "")
@@ -291,6 +292,12 @@ def enrich_recording(rec, path: Path, *, tags_reader: Callable[[Path], dict] | N
             rec.lyrics_origin = "id3"
             rec.lyrics_provenance_json = {"kind": "id3-LYRICS"}
 
+    prov["styles"] = values.get("styles") or []
+    prov["moods"] = values.get("moods") or []
+    rec.tags_provenance_json = prov
+
     if state == "suspect":
         rec.review_required = True
+    from .style_tags import apply_style_tags
+    apply_style_tags(rec)
     return state

@@ -3352,6 +3352,23 @@ def admin_model_lab_scan_selected(body: MlScanRoots, request: Request) -> JSONRe
         raise _browse_error(exc) from exc
 
 
+@router.post("/admin/model-lab/restyle")
+def admin_model_lab_restyle(request: Request) -> JSONResponse:
+    """Idempotent deterministic (re)derivation of style tags for every recording."""
+    from ..style_tags import recompute_all
+
+    counts = recompute_all(request.app.state.db)
+    return JSONResponse(counts)
+
+
+@router.get("/admin/model-lab/style-coverage")
+def admin_model_lab_style_coverage(request: Request) -> JSONResponse:
+    from ..style_tags import coverage
+
+    with request.app.state.db.session() as session:
+        return JSONResponse(coverage(session))
+
+
 @router.get("/admin/model-lab/batches")
 def admin_model_lab_batches(request: Request, state: str | None = None) -> JSONResponse:
     """Import/scan batch progress (worker-run + legacy sync scans)."""
@@ -3530,7 +3547,12 @@ def admin_model_lab_budget_put(payload: dict, request: Request) -> JSONResponse:
 
 class MlDatasetCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
-    recording_ids: list[str]
+    recording_ids: list[str] = Field(default_factory=list)
+    style_tag: str | None = None
+    target: int = Field(default=200, ge=5, le=500)
+    floor: int = Field(default=40, ge=3, le=500)
+    declare_rights_for_selection: bool = False
+    approve_selection: bool = False
     kind: str = Field(default="style", pattern="^(style|voice)$")
     allow_instrumental: bool = False
     allow_suspect: bool = False
@@ -3542,12 +3564,44 @@ def admin_model_lab_dataset_create(body: MlDatasetCreate, request: Request) -> J
 
     with request.app.state.db.session() as session:
         try:
-            ds = freeze_dataset(session, body.name, body.recording_ids, kind=body.kind,
+            ids = list(body.recording_ids)
+            if body.style_tag:
+                from ..style_tags import select_for_style_tag
+                picked = select_for_style_tag(session, body.style_tag,
+                                              target=body.target, floor=body.floor)
+                if len(picked) < max(3, min(body.floor, len(picked))):
+                    raise ApiError(422, "STYLE_TAG_THIN",
+                                   f"tag {body.style_tag!r} has only {len(picked)} "
+                                   f"eligible recordings (floor {body.floor})",
+                                   {"style_tag": body.style_tag, "available": len(picked)})
+                ids = [r.id for r in picked]
+                if body.approve_selection:
+                    from ..models import MlRecording
+                    for r in picked:
+                        session.get(MlRecording, r.id).review_status = "approved"
+                    session.commit()
+                if body.declare_rights_for_selection:
+                    from ..models import MlRightsRecord, new_uuid as _u
+                    existing = {rr for (rr,) in session.execute(
+                        select(MlRightsRecord.recording_id).where(
+                            MlRightsRecord.purpose == "house-training")).all()}
+                    for r in picked:
+                        if r.id in existing:
+                            continue
+                        for scope in ("recording", "composition"):
+                            session.add(MlRightsRecord(
+                                id=_u(), recording_id=r.id, holder="Owner (house library)",
+                                scope=scope, purpose="house-training",
+                                evidence="owner blanket: owned library, private style training",
+                                declared_by=getattr(request.state, "username", "admin")))
+                    session.commit()
+            ds = freeze_dataset(session, body.name, ids, kind=body.kind,
                                 allow_instrumental=body.allow_instrumental,
                                 allow_suspect=body.allow_suspect)
         except ValueError as exc:
             raise ApiError(422, "DATASET_INVALID", str(exc)) from exc
         return JSONResponse({"id": ds.id, "name": ds.name, "kind": ds.kind,
+                             "style_tag": body.style_tag,
                              "frozen_sha256": ds.frozen_sha256,
                              "recording_count": ds.recording_count,
                              "total_seconds": ds.total_seconds,

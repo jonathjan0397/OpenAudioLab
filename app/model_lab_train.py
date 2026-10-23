@@ -167,7 +167,9 @@ def freeze_dataset(session, name: str, recording_ids: list[str], *, kind: str = 
         title = r.title or next((c.value for c in approved_claims if c.field == "title"), None)
         genre = r.genre_raw or next((c.value for c in approved_claims if c.field == "genre"), None)
         caption = deterministic_caption(
-            SimpleNamespace(artist=artist, title=title, genre_raw=genre), r.path)
+            SimpleNamespace(artist=artist, title=title, genre_raw=genre,
+                            year=r.year, decade=r.decade,
+                            families_json=r.families_json), r.path)
         train_lyrics = training_lyrics_text(r)
         entries.append({"sha256": r.sha256, "path": r.path, "bytes": r.bytes,
                         "seconds": r.duration_seconds or 0.0, "caption": caption,
