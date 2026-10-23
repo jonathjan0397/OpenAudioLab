@@ -1162,7 +1162,20 @@ class TrainingWorker:
             {"name": "neutral_neon", "caption": "neon city pulse, driving synth"},
         ]
         seed = int(request.get("seed", 42))
-        duration = int(request.get("duration_seconds", 30))
+        duration = int(request.get("duration_seconds", 60))
+        # Vocal default: a voice-bundle eval reuses the exact lyrics the adapter
+        # was trained from (frozen manifest entries), so the console button
+        # renders baseline-vs-candidate SINGING without extra admin input.
+        from .models import MlDataset
+        with self.db.session() as session:
+            ds = session.get(MlDataset, (bundle.bundle_json or {}).get("dataset_id"))
+        lyric_pool = [e for e in ((ds.manifest_json or {}).get("entries", []) if ds else [])
+                      if (e.get("lyrics") or "").strip()]
+        ds_voice = bool(ds) and getattr(ds, "kind", "style") == "voice"
+        for i, p in enumerate(prompts):
+            if p.get("lyrics") is None and p.get("instrumental") is None and ds_voice \
+                    and lyric_pool:
+                p["lyrics"] = lyric_pool[i % len(lyric_pool)]["lyrics"]
         work = Path(self.settings.train_workdir) / f"ml-eval-{job_id[:8]}"
         (work / "lora").mkdir(parents=True, exist_ok=True)
         body = self.storage.get(artifact_key).body
@@ -1179,7 +1192,6 @@ class TrainingWorker:
             (lora_dir / "adapter_config.json").write_bytes(self.storage.get(cfg_key).body)
         except Exception:
             pass  # engine rejects without config; candidate pass will fail loudly
-        lora_path = lora_dir / "model.safetensors"
         from .review import (build_review_page, review_bundle_dir, slug,
                              write_reference_clips)
 
@@ -1197,9 +1209,11 @@ class TrainingWorker:
                 else:
                     self.adapter.unload_lora()
                 for p in prompts:
+                    lyr = str(p.get("lyrics") or "").strip() or None
+                    instr = False if lyr else bool(p.get("instrumental", True))
                     payload = self.gen_adapter.build_payload(
-                        music_description=str(p.get("caption") or ""), lyrics=None,
-                        instrumental=True, seed=seed, duration_seconds=duration,
+                        music_description=str(p.get("caption") or ""), lyrics=lyr,
+                        instrumental=instr, seed=seed, duration_seconds=duration,
                         thinking=False)
                     sub = self.gen_adapter.submit(payload)
                     deadline = time.monotonic() + 600
@@ -1222,8 +1236,11 @@ class TrainingWorker:
                     self.storage.put(key, audio)
                     entry = {"mode": mode, "prompt": p.get("name"),
                              "caption": p.get("caption"), "artifact_key": key,
-                             "bytes": len(audio),
+                             "bytes": len(audio), "instrumental": instr,
                              "sha256": _hl.sha256(audio).hexdigest()}
+                    if lyr:  # never persist full lyric text in job payloads
+                        entry["lyrics_chars"] = len(lyr)
+                        entry["lyrics_sha256"] = _hl.sha256(lyr.encode("utf-8")).hexdigest()
                     if review_dest is not None:
                         fname = f"{mode}-{slug(str(p.get('name')))}.mp3"
                         (review_dest / fname).write_bytes(audio)

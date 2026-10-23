@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -143,8 +144,10 @@ def test_enrich_never_overwrites_existing_lyrics(client, tmp_path) -> None:
 def _fake_gen(storage_ref):
     class _Gen:
         last_error = ""
+        payloads: list[dict] = []
 
         def build_payload(self, **kw):
+            self.payloads.append(dict(kw))
             return dict(kw)
 
         def submit(self, payload):
@@ -229,3 +232,94 @@ def test_auto_label_status_unwraps_data_envelope() -> None:
         def get_json(self, path):
             return {"data": {"task_id": "t", "status": "completed"}}
     assert AceStepTrainingAdapter(_T()).auto_label_status("t")["status"] == "completed"
+
+
+def _voice_setup(client, tmp_path, *, kind="voice"):
+    import hashlib
+
+    from app.models import MlDataset, MlModelBundle, new_uuid
+
+    body = b"lora-bytes"
+    key = f"ml/adapters/att-voc-{next(_SEQ)}/model.safetensors"
+    client.app.state.storage.put(key, body)
+    ds = MlDataset(id=new_uuid(), name="voc-ds", kind=kind, frozen_sha256="f",
+                   manifest_json={"entries": [
+                       {"path": "/x/one.mp3", "sha256": "a", "caption": "Alabama - One",
+                        "lyrics": "first trained lyric line\nsecond line"},
+                       {"path": "/x/two.mp3", "sha256": "b", "caption": "Alabama - Two",
+                        "lyrics": "another trained lyric"}]})
+    bundle_id = new_uuid()
+    with client.app.state.db.session() as session:
+        session.add(ds)
+        session.add(MlModelBundle(id=bundle_id, name="voc-b", version="v1", kind="adapter",
+                                  base_model="ace-step-1.5-turbo", state="candidate",
+                                  artifact_key=key,
+                                  sha256=hashlib.sha256(body).hexdigest(),
+                                  bundle_json={"dataset_id": ds.id}))
+        session.commit()
+    return bundle_id
+
+
+def test_eval_voice_bundle_sings_by_default(client, tmp_path) -> None:
+    import hashlib
+
+    import app.training_worker as tw
+    from app.models import MlEvaluation
+    from app.orchestration import claim_attempt
+
+    client.app.state.settings.train_workdir = str(tmp_path / "work")
+    client.app.state.settings.review_dir = str(tmp_path / "review")
+    bundle_id = _voice_setup(client, tmp_path)
+    r = client.post(f"/api/v1/admin/model-lab/bundles/{bundle_id}/eval-samples",
+                    json={"prompts": [{"name": "story", "caption": "country ballad"}]})
+    job_id = r.json()["job_id"]
+    _, att, lease = claim_attempt(client.app.state.db, job_id, "w-b5")
+    adapter = _FakeTrainingAdapter({"samples": []})
+    w = SimpleNamespace(db=client.app.state.db, storage=client.app.state.storage,
+                        settings=client.app.state.settings,
+                        adapter=adapter, gen_adapter=None)
+    w._lease_beat = lambda *a: TrainingWorker._lease_beat(w, *a)
+    w._external_pass = lambda *a, **k: TrainingWorker._external_pass(w, *a, **k)
+    w._verify_one = lambda *a, **k: TrainingWorker._verify_one(w, *a, **k)
+    w._lyrics_one = lambda *a, **k: TrainingWorker._lyrics_one(w, *a, **k)
+    gen = _fake_gen(None)
+    w.gen_adapter = gen
+    TrainingWorker._model_lab_eval(w, job_id, att, lease)
+    vocal = [p for p in gen.payloads if p["music_description"] == "country ballad"]
+    assert vocal and all(p["instrumental"] is False for p in vocal)
+    assert vocal[0]["lyrics"] == "first trained lyric line\nsecond line"
+    with client.app.state.db.session() as session:
+        ev = session.query(MlEvaluation).filter(
+            MlEvaluation.bundle_id == bundle_id).one()
+        entry = ev.scores_json["samples"][0]
+        assert entry["instrumental"] is False
+        assert entry["lyrics_sha256"] == hashlib.sha256(
+            "first trained lyric line\nsecond line".encode()).hexdigest()
+        assert "first trained lyric" not in json.dumps(ev.scores_json)
+    page = (tmp_path / "review" / bundle_id / "index.html").read_text()
+    assert "lyrics sha" in page
+
+
+def test_eval_style_bundle_stays_instrumental(client, tmp_path) -> None:
+    import app.training_worker as tw  # noqa: F401
+    from app.orchestration import claim_attempt
+
+    client.app.state.settings.train_workdir = str(tmp_path / "work2")
+    bundle_id = _voice_setup(client, tmp_path, kind="style")
+    r = client.post(f"/api/v1/admin/model-lab/bundles/{bundle_id}/eval-samples",
+                    json={"prompts": [{"name": "instr", "caption": "test"}]})
+    job_id = r.json()["job_id"]
+    _, att, lease = claim_attempt(client.app.state.db, job_id, "w-b5")
+    adapter = _FakeTrainingAdapter({"samples": []})
+    w = SimpleNamespace(db=client.app.state.db, storage=client.app.state.storage,
+                        settings=client.app.state.settings,
+                        adapter=adapter, gen_adapter=None)
+    w._lease_beat = lambda *a: TrainingWorker._lease_beat(w, *a)
+    w._external_pass = lambda *a, **k: TrainingWorker._external_pass(w, *a, **k)
+    w._verify_one = lambda *a, **k: TrainingWorker._verify_one(w, *a, **k)
+    w._lyrics_one = lambda *a, **k: TrainingWorker._lyrics_one(w, *a, **k)
+    gen = _fake_gen(None)
+    w.gen_adapter = gen
+    TrainingWorker._model_lab_eval(w, job_id, att, lease)
+    assert gen.payloads and all(p["instrumental"] is True and p["lyrics"] is None
+                                for p in gen.payloads)

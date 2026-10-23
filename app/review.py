@@ -85,7 +85,10 @@ def build_review_page(dest: Path, *, bundle: dict, samples: list[dict],
     """(Re)write index.html for one bundle's review folder; returns its path."""
     prompts: dict[str, dict] = {}
     for s in samples:
-        row = prompts.setdefault(s.get("prompt") or "p", {"caption": s.get("caption") or ""})
+        row = prompts.setdefault(s.get("prompt") or "p",
+                                 {"caption": s.get("caption") or "",
+                                  "instrumental": s.get("instrumental", True),
+                                  "lyrics_sha256": s.get("lyrics_sha256")})
         row[s.get("mode") or "?"] = s
     acceptance = dest / "acceptance-sample.mp3"
 
@@ -114,7 +117,8 @@ def build_review_page(dest: Path, *, bundle: dict, samples: list[dict],
                      f"adapter was trained from</div></th><td colspan='2'>{cells}</td></tr>")
     if acceptance.is_file():
         lines.append("<tr><th>Acceptance sample<div class='p'>post-training gate "
-                     "inference stored with the attempt</div></th>"
+                     "render — instrumental integrity check, not a vocal test"
+                     "</div></th>"
                      "<td colspan='2'><audio controls preload='none' "
                      "src='acceptance-sample.mp3'></audio></td></tr>")
     for name, row in sorted(prompts.items()):
@@ -123,7 +127,10 @@ def build_review_page(dest: Path, *, bundle: dict, samples: list[dict],
             s = row.get(mode)
             if s and (dest / str(s.get("file"))).is_file():
                 sha = str(s.get("sha256") or "")[:8]
-                cells.append(f"<div class='m'>{mode} · {s.get('bytes', 0)} B · sha {sha}</div>"
+                kind = ("lyrics sha " + str(s.get("lyrics_sha256") or "")[:8]) \
+                    if not row.get("instrumental", True) else "instrumental"
+                cells.append(f"<div class='m'>{mode} · {kind} · {s.get('bytes', 0)} B "
+                             f"· sha {sha}</div>"
                              f"<audio controls preload='none' "
                              f"src='{html.escape(str(s['file']))}'></audio>")
             else:
