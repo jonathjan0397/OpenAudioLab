@@ -181,6 +181,8 @@ def coverage(session) -> dict:
 
 
 def has_tag(rec, tag: str) -> bool:
+    if tag.startswith("fam:"):
+        tag = tag[4:]
     tags = rec.families_json or []
     if "." in tag:
         return tag in tags
