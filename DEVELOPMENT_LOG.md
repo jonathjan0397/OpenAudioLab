@@ -1533,3 +1533,22 @@ alabama-poid-voice-v1-adapter @ default channel, canary 10%.
   Full-file decode audit running on the pop copy; plan: full-decode pass at
   dataset BUILD time (selected ~200 tracks is cheap) so frozen manifests are
   clean, plus stronger scan-time QC after this wave.
+
+## 2026-10-23 — Reaper collision found + fixed mid-wave; budgets self-heal
+
+Country attempt was pre-settled `failed` while its job kept running: the
+orphan reaper judged liveness by the FLEET-NODE heartbeat, which only
+advances between queue iterations — long trainings starve it. Fixes shipped
+in 278e7b8 (hub-side only, workers untouched mid-wave):
+- reap_orphaned_attempts now uses the JOB lease (JobAttempt heartbeat every
+  ~10 s inside _supervised_run/_lease_beat) as the authoritative liveness
+  signal; node state no longer consulted.
+- New reconcile_budget runs every maintenance tick and recomputes
+  used/spent/reserved from durable attempt rows (DB-authoritative). It
+  restored pop's 0.7926 h (budget: used 0.8194, reserved 1.5, open) and will
+  absorb country's hours when its job finishes (attempt fields flip back to
+  done at completion; only the guarded budget block had been skipped).
+- Worker-side follow-up queued for next refresh (after the wave, to avoid
+  killing running jobs): heartbeat the fleet node from the lease-beat thread
+  during long ops, so supervisor quarantine can't false-positive either.
+- 495 tests green incl. new lease/reconcile fixtures.
