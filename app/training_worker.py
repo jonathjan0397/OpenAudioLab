@@ -1248,7 +1248,10 @@ class TrainingWorker:
                 if mode == "candidate":
                     self.adapter.load_lora(str(lora_dir), f"ml-{bundle_id[:8]}")
                 else:
-                    self.adapter.unload_lora()
+                    try:
+                        self.adapter.unload_lora()
+                    except EngineError:
+                        pass  # fresh engine has no backup to restore
                 for p in prompts:
                     lyr = str(p.get("lyrics") or "").strip() or None
                     instr = False if lyr else bool(p.get("instrumental", True))
