@@ -162,3 +162,10 @@ def submit_body(**overrides) -> dict:
 def submit(client: TestClient, token: str = TOKEN_A, key: str = "k1", **overrides) -> "object":
     headers = auth(token, **{"Idempotency-Key": key})
     return client.post("/api/v1/jobs", json=submit_body(**overrides), headers=headers)
+
+
+@pytest.fixture(autouse=True)
+def no_decode_qc(monkeypatch) -> None:
+    """Fast deterministic scans in tests; the QC itself is covered in
+    test_library_parse::test_scan_flags_undecodable_sources."""
+    monkeypatch.setattr("app.library_parse.quick_decode_ok", lambda p, **k: True)

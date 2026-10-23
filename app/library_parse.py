@@ -151,6 +151,23 @@ def parse_nfo(nfo_path: Path) -> dict:
     return {"genres": genres, "moods": moods, "styles": styles, "year": year}
 
 
+def quick_decode_ok(path: Path, *, seconds: int = 60, ffmpeg_bin: str = "ffmpeg") -> bool:
+    """Cheap integrity check: the first N seconds must decode cleanly.
+
+    ACE-Step's preprocessor aborts per-sample on undecodable audio; flagging
+    bad sources at scan time keeps them out of dataset selection
+    (tags_state=invalid) instead of poisoning a training run."""
+    import subprocess
+
+    try:
+        done = subprocess.run(
+            [ffmpeg_bin, "-v", "error", "-t", str(seconds), "-i", str(path),
+             "-f", "null", "-"], capture_output=True, timeout=120, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return True  # cannot check -> do not block scanning on tool issues
+    return done.returncode == 0
+
+
 def find_lyrics_sidecar(audio_path: Path) -> dict | None:
     """<stem>.lrc preferred, then <stem>.lyrics.txt, then <stem>.txt."""
     stem = audio_path.with_suffix("")
