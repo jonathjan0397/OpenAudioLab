@@ -1566,3 +1566,39 @@ in 278e7b8 (hub-side only, workers untouched mid-wave):
   duplicates dedupe safely on claim).
 - Metal trained + registered on the fixed bundle: proof the acceptance gate
   passes at 162-sample scale (style-metal-heavy-metal-v1 candidate).
+
+## 2026-10-23 — T-A + T-B approved and shipped; XL-1 program pinned
+
+T-A (bundle base enforcement, correctness gap found during review):
+- Bundles previously recorded the generic selection "ace-step-1.5" as base and
+  generation NEVER applied a routed bundle's adapter at all (admission only
+  checked release state). Fixed on both sides: register_trained_bundle now
+  records the worker's actual engine checkpoint; engine_worker materializes
+  released-bundle adapters (PEFT naming) with the same load/unload discipline
+  as profile LoRAs; admission hard-fails cross-family routing with
+  BUNDLE_BASE_MISMATCH (xl vs non-xl shapes are physically incompatible —
+  2048 vs 2560 hidden). All 6 existing bundles backfilled to
+  acestep-v15-turbo (they were trained there). Generation worker refreshed to
+  d2f5305 mid-wave (training container untouched); 500 tests green incl. 5
+  new tier tests.
+
+T-B (cross-checkpoint portability probe):
+- model_lab.compat_eval worker op + POST /bundles/{id}/compat-probe renders
+  native-vs-adapted clips of the bundle's own taxonomy prompts on an
+  ALTERNATIVE checkpoint (e.g. acestep-v15-sft — same family, untested load),
+  writes clips to storage + the review page, and stamps
+  bundle_json.compat[target]="rendered_pending_review". Owner verdicts via
+  POST /bundles/{id}/compat {verified|incompatible} populate the governed
+  compat map surfaced in the bundles list (bundle_view now exposes
+  base_model + compat). Probe op needs the gpu1 refresh (after wave drain)
+  to run.
+
+XL-1 (pinned backlog, owner decision):
+- Current local checkpoints ARE the XL training bases (acestep-v15-xl-turbo
+  + xl-sft complete on disk); no downloads needed. Turbo LoRAs cannot port to
+  XL (shape mismatch) — XL twins come from retraining the same frozen
+  datasets. Trigger: after wave-1 verdicts, only keeper styles get an
+  XL-Turbo attempt. Steps when unpinned: mount XL checkpoints on the training
+  worker, 20-track VRAM/step probe (rank 32 + gradient checkpointing likely),
+  record measured evidence in MODEL_POLICY, then per-keeper retrain + compat
+  baselines. Datasets/rights/eval machinery carry over untouched.
