@@ -1,0 +1,4963 @@
+{
+ "version": 1,
+ "families": [
+  "alt",
+  "blues",
+  "country",
+  "electronic",
+  "folk",
+  "gospel",
+  "hiphop",
+  "jazz",
+  "metal",
+  "pop",
+  "punk",
+  "rnb_soul",
+  "rock",
+  "score",
+  "soundfx",
+  "special",
+  "world"
+ ],
+ "subgenres": [
+  {
+   "id": "rock.classic-rock",
+   "family": "rock",
+   "caption": "classic rock, driving guitars, live drum feel, anthemic chorus",
+   "aliases": [
+    "classic rock",
+    "classic",
+    "rock classics",
+    "old rock"
+   ]
+  },
+  {
+   "id": "rock.album-rock",
+   "family": "rock",
+   "caption": "album-oriented rock, layered guitars, polished production",
+   "aliases": [
+    "album rock"
+   ]
+  },
+  {
+   "id": "rock.southern-rock",
+   "family": "rock",
+   "caption": "southern rock, slide guitars, boogie groove, outlaw swagger",
+   "aliases": [
+    "southern rock",
+    "south rock"
+   ]
+  },
+  {
+   "id": "rock.blues-rock",
+   "family": "rock",
+   "caption": "blues rock, gritty guitar riffs, shuffling groove",
+   "aliases": [
+    "blues-rock",
+    "blues rock",
+    "blues/rock"
+   ]
+  },
+  {
+   "id": "rock.folk-rock",
+   "family": "rock",
+   "caption": "folk rock, jangly acoustic-electric blend, earnest vocals",
+   "aliases": [
+    "folk-rock",
+    "folk rock",
+    "folk/rock"
+   ]
+  },
+  {
+   "id": "rock.psychedelic-rock",
+   "family": "rock",
+   "caption": "psychedelic rock, swirling fuzz guitars, surreal textures",
+   "aliases": [
+    "psychedelic rock",
+    "psychedelic",
+    "psych",
+    "psych rock"
+   ]
+  },
+  {
+   "id": "rock.glam-rock",
+   "family": "rock",
+   "caption": "glam rock, stomping beat, shiny distorted guitars, theatrical vocals",
+   "aliases": [
+    "glam rock",
+    "glam",
+    "glitter rock"
+   ]
+  },
+  {
+   "id": "rock.arena-rock",
+   "family": "rock",
+   "caption": "arena rock, huge singalong choruses, punchy power chords",
+   "aliases": [
+    "arena rock",
+    "stadium rock"
+   ]
+  },
+  {
+   "id": "rock.heartland-rock",
+   "family": "rock",
+   "caption": "heartland rock, harmonica, working-class earnestness, E-band sweep",
+   "aliases": [
+    "heartland rock"
+   ]
+  },
+  {
+   "id": "rock.progressive-rock",
+   "family": "rock",
+   "caption": "progressive rock, odd time signatures, keyboards and guitar interplay, epic structures",
+   "aliases": [
+    "progressive rock",
+    "prog rock",
+    "progressive"
+   ]
+  },
+  {
+   "id": "rock.post-rock",
+   "family": "rock",
+   "caption": "post-rock, instrumental crescendos, texture-driven dynamics",
+   "aliases": [
+    "post-rock",
+    "post rock"
+   ]
+  },
+  {
+   "id": "rock.experimental-rock",
+   "family": "rock",
+   "caption": "experimental rock, unusual structures, adventurous textures",
+   "aliases": [
+    "experimental rock",
+    "experimental"
+   ]
+  },
+  {
+   "id": "rock.soft-rock",
+   "family": "rock",
+   "caption": "soft rock, mellow electric pianos, smooth harmonies",
+   "aliases": [
+    "soft rock",
+    "yacht rock"
+   ]
+  },
+  {
+   "id": "rock.pub-rock",
+   "family": "rock",
+   "caption": "pub rock, lean guitars, straight-ahead backbeat",
+   "aliases": [
+    "pub rock"
+   ]
+  },
+  {
+   "id": "rock.desert-rock",
+   "family": "rock",
+   "caption": "desert rock, fuzzy mid-tempo riffs, dry spacious groove",
+   "aliases": [
+    "desert rock",
+    "stoner rock",
+    "desert"
+   ]
+  },
+  {
+   "id": "rock.garage-rock",
+   "family": "rock",
+   "caption": "garage rock, raw fuzz, frantic energy, lo-fi snarl",
+   "aliases": [
+    "garage rock",
+    "garage",
+    "garage punk"
+   ]
+  },
+  {
+   "id": "rock.instrumental-rock",
+   "family": "rock",
+   "caption": "instrumental rock, guitar-led themes, reverb-drenched groove",
+   "aliases": [
+    "instrumental rock"
+   ]
+  },
+  {
+   "id": "rock.math-rock",
+   "family": "rock",
+   "caption": "math rock, angular interlocking guitars, odd meters, clean tone",
+   "aliases": [
+    "math rock"
+   ]
+  },
+  {
+   "id": "rock.country-rock",
+   "family": "rock",
+   "caption": "country rock, twangy guitars, rock backbeat, storytelling vocals",
+   "aliases": [
+    "country rock",
+    "country-rock"
+   ]
+  },
+  {
+   "id": "rock.chillwave",
+   "family": "rock",
+   "caption": "chillwave, washed synths, hazy beat",
+   "aliases": [
+    "chillwave"
+   ]
+  },
+  {
+   "id": "rock.pop-rock",
+   "family": "rock",
+   "caption": "pop rock, catchy guitar hooks, bright chorus",
+   "aliases": [
+    "pop rock",
+    "pop-rock",
+    "power pop"
+   ]
+  },
+  {
+   "id": "rock.hard-rock",
+   "family": "rock",
+   "caption": "hard rock, heavy riff-driven guitars, pounding drums, raspy vocal",
+   "aliases": [
+    "hard rock",
+    "hard rock",
+    "hard-rock",
+    "harrdcore? none"
+   ]
+  },
+  {
+   "id": "rock.surf-rock",
+   "family": "rock",
+   "caption": "surf rock, reverb-drenched twang guitars, fast tremolo, wet drum reverb",
+   "aliases": [
+    "surf rock",
+    "surf",
+    "beach music",
+    "beach"
+   ]
+  },
+  {
+   "id": "rock.britpop",
+   "family": "rock",
+   "caption": "britpop, dry english swagger, chiming guitar hooks, lad chorus",
+   "aliases": [
+    "britpop",
+    "brit pop",
+    "british pop"
+   ]
+  },
+  {
+   "id": "rock.space-rock",
+   "family": "rock",
+   "caption": "space rock, hypnotic fuzz drones, cosmic slow riff",
+   "aliases": [
+    "space rock"
+   ]
+  },
+  {
+   "id": "rock.krautrock",
+   "family": "rock",
+   "caption": "krautrock, motorik repetition, hypnotic improv",
+   "aliases": [
+    "krautrock"
+   ]
+  },
+  {
+   "id": "rock.proto-punk",
+   "family": "rock",
+   "caption": "proto punk, simple distorted garage rock attitude",
+   "aliases": [
+    "proto-punk",
+    "proto punk"
+   ]
+  },
+  {
+   "id": "rock.piano-rock",
+   "family": "rock",
+   "caption": "piano rock, galloping piano riff, earnest shout",
+   "aliases": [
+    "piano rock"
+   ]
+  },
+  {
+   "id": "rock.boogie-rock",
+   "family": "rock",
+   "caption": "boogie rock, rolling shuffle piano and boogie riff",
+   "aliases": [
+    "boogie rock"
+   ]
+  },
+  {
+   "id": "alt.alternative-rock",
+   "family": "alt",
+   "caption": "alternative rock, distorted guitars, loud-quiet dynamics, anguished vocals",
+   "aliases": [
+    "alternative rock",
+    "alternative",
+    "alt rock",
+    "alt. rock",
+    "alt rock",
+    "alternrock",
+    "general alternative",
+    "modern rock",
+    "modern rock / alternative",
+    "alternative & punk",
+    "alternativo"
+   ]
+  },
+  {
+   "id": "alt.grunge",
+   "family": "alt",
+   "caption": "grunge, sludgy drop-d tuned riffs, dynamic quiet-loud, strained vocals",
+   "aliases": [
+    "grunge",
+    "seattle grunge"
+   ]
+  },
+  {
+   "id": "alt.post-grunge",
+   "family": "alt",
+   "caption": "post-grunge, polished heavy guitars, big emotional chorus",
+   "aliases": [
+    "post-grunge",
+    "post grunge"
+   ]
+  },
+  {
+   "id": "alt.new-wave",
+   "family": "alt",
+   "caption": "new wave, angular synths and guitars, dry production, quirky vocals",
+   "aliases": [
+    "new wave",
+    "newwave"
+   ]
+  },
+  {
+   "id": "alt.synthpop",
+   "family": "alt",
+   "caption": "synthpop, driving sequenced synths, glossy drums, yearning vocals",
+   "aliases": [
+    "synthpop",
+    "synth pop",
+    "electropop"
+   ]
+  },
+  {
+   "id": "alt.gothic-rock",
+   "family": "alt",
+   "caption": "gothic rock, baritone vocals, chiming reverb guitars, dark romantic atmosphere",
+   "aliases": [
+    "gothic rock",
+    "gothic",
+    "goth rock"
+   ]
+  },
+  {
+   "id": "alt.shoegaze",
+   "family": "alt",
+   "caption": "shoegaze, blurred walls of guitar, washed ethereal vocals",
+   "aliases": [
+    "shoegaze"
+   ]
+  },
+  {
+   "id": "alt.post-punk",
+   "family": "alt",
+   "caption": "post-punk, driving bass-led grooves, angular jagged guitars, detached vocals",
+   "aliases": [
+    "post-punk",
+    "post punk"
+   ]
+  },
+  {
+   "id": "alt.indie-rock",
+   "family": "alt",
+   "caption": "indie rock, jangly or scruffy guitars, DIY vocal attitude",
+   "aliases": [
+    "indie rock",
+    "indie",
+    "indie/alternative"
+   ]
+  },
+  {
+   "id": "alt.indie-pop",
+   "family": "alt",
+   "caption": "indie pop, bright chiming guitars, sweet understated vocals",
+   "aliases": [
+    "indie pop",
+    "twee pop",
+    "twee"
+   ]
+  },
+  {
+   "id": "alt.emo",
+   "family": "alt",
+   "caption": "emo, emotional dynamics, interlocking guitars, raw confessional vocals",
+   "aliases": [
+    "emo",
+    "emo rock",
+    "screamo"
+   ]
+  },
+  {
+   "id": "alt.art-rock",
+   "family": "alt",
+   "caption": "art rock, sophisticated arrangements, theatrical mood",
+   "aliases": [
+    "art rock"
+   ]
+  },
+  {
+   "id": "alt.dark-wave",
+   "family": "alt",
+   "caption": "dark wave, brooding analog synths, deep baritone mood",
+   "aliases": [
+    "dark wave",
+    "darkwave"
+   ]
+  },
+  {
+   "id": "alt.dream-pop",
+   "family": "alt",
+   "caption": "dream pop, shimmering reverb guitars, breathy floating vocals",
+   "aliases": [
+    "dream pop",
+    "dream pop",
+    "dreampop"
+   ]
+  },
+  {
+   "id": "alt.noise-rock",
+   "family": "alt",
+   "caption": "noise rock, abrasive feedback, pounding rhythm",
+   "aliases": [
+    "noise rock"
+   ]
+  },
+  {
+   "id": "alt.alternative-pop",
+   "family": "alt",
+   "caption": "alternative pop, off-kilter hooks, modern glossy production",
+   "aliases": [
+    "alternative pop",
+    "alt pop"
+   ]
+  },
+  {
+   "id": "alt.trip-hop",
+   "family": "alt",
+   "caption": "trip hop, downtempo breakbeats, moody cinematic soul",
+   "aliases": [
+    "trip hop",
+    "trip-hop"
+   ]
+  },
+  {
+   "id": "alt.jangle-pop",
+   "family": "alt",
+   "caption": "jangle pop, chiming clean guitar arpeggio, Byrds-like shimmer",
+   "aliases": [
+    "jangle pop",
+    "jangle"
+   ]
+  },
+  {
+   "id": "alt.noise-pop",
+   "family": "alt",
+   "caption": "noise pop, fuzz wash but sweet melody",
+   "aliases": [
+    "noise pop"
+   ]
+  },
+  {
+   "id": "alt.post-punk-revival",
+   "family": "alt",
+   "caption": "post-punk revival, tight angular riff, diction-art rock",
+   "aliases": [
+    "post-punk revival",
+    "new rock",
+    "indian rock"
+   ]
+  },
+  {
+   "id": "alt.gothic-metal",
+   "family": "alt",
+   "caption": "gothic, dark romantic, deep baritone or ethereal soprano",
+   "aliases": [
+    "gothic metal",
+    "gothic",
+    "gothic/alternativo",
+    "gothic rock/alternativo"
+   ]
+  },
+  {
+   "id": "alt.dark-cabaret",
+   "family": "alt",
+   "caption": "dark cabaret, waltz minor-key, breathy dramatic vocal",
+   "aliases": [
+    "dark cabaret",
+    "cabaret gothic"
+   ]
+  },
+  {
+   "id": "alt.ethereal-wave",
+   "family": "alt",
+   "caption": "ethereal wave, reverb vocal over slow synth, mournful beauty",
+   "aliases": [
+    "ethereal wave",
+    "4ad"
+   ]
+  },
+  {
+   "id": "alt.indie-electronic",
+   "family": "alt",
+   "caption": "indie electronic, laptop texture and guitar, hip-hop beat",
+   "aliases": [
+    "indie electronic",
+    "electropunk",
+    "indietronica"
+   ]
+  },
+  {
+   "id": "punk.punk-rock",
+   "family": "punk",
+   "caption": "punk rock, fast power chords, raw shouted vocals, urgent energy",
+   "aliases": [
+    "punk rock",
+    "punk",
+    "general punk",
+    "punk/alt"
+   ]
+  },
+  {
+   "id": "punk.pop-punk",
+   "family": "punk",
+   "caption": "pop punk, bright fast power chords, singalong gang vocals",
+   "aliases": [
+    "pop punk",
+    "pop-punk"
+   ]
+  },
+  {
+   "id": "punk.hardcore-punk",
+   "family": "punk",
+   "caption": "hardcore punk, blast beats, short aggressive shouts",
+   "aliases": [
+    "hardcore punk",
+    "hardcore",
+    "hc punk"
+   ]
+  },
+  {
+   "id": "punk.skate-punk",
+   "family": "punk",
+   "caption": "skate punk, fast melodic chords, whiny fun vocals",
+   "aliases": [
+    "skate punk",
+    "melodic hardcore"
+   ]
+  },
+  {
+   "id": "punk.anarcho-punk",
+   "family": "punk",
+   "caption": "anarcho punk, d-beat drums, angry political shouts",
+   "aliases": [
+    "anarcho punk"
+   ]
+  },
+  {
+   "id": "punk.folk-punk",
+   "family": "punk",
+   "caption": "folk punk, acoustic fast strum, communal singalong",
+   "aliases": [
+    "folk punk"
+   ]
+  },
+  {
+   "id": "punk.punk-blues",
+   "family": "punk",
+   "caption": "punk blues, fast slide guitar, snotty garage attitude",
+   "aliases": [
+    "punk blues"
+   ]
+  },
+  {
+   "id": "punk.riot-grrrl",
+   "family": "punk",
+   "caption": "riot grrrl, raw fierce guitars, shouted feminism",
+   "aliases": [
+    "riot grrrl"
+   ]
+  },
+  {
+   "id": "punk.horror-punk",
+   "family": "punk",
+   "caption": "horror punk, monster-mash singalong, fast minor riff",
+   "aliases": [
+    "horror punk",
+    "horror punk"
+   ]
+  },
+  {
+   "id": "punk.psychobilly",
+   "family": "punk",
+   "caption": "psychobilly, upright slap bass, surf-abilly riff, punk scream",
+   "aliases": [
+    "psychobilly",
+    "psychobilly"
+   ]
+  },
+  {
+   "id": "punk.street-punk",
+   "family": "punk",
+   "caption": "street punk, oi beat, gang chant, pub singalong",
+   "aliases": [
+    "street punk",
+    "oi",
+    "oi!"
+   ]
+  },
+  {
+   "id": "punk.crust-punk",
+   "family": "punk",
+   "caption": "crust punk, d-beat thrash punk discharge, harsh politics",
+   "aliases": [
+    "crust punk",
+    "crust",
+    "crust punk"
+   ]
+  },
+  {
+   "id": "punk.d-beat",
+   "family": "punk",
+   "caption": "d-beat, discharge drum pattern, bleak metallic bark",
+   "aliases": [
+    "d-beat",
+    "d beat"
+   ]
+  },
+  {
+   "id": "punk.powerviolence",
+   "family": "punk",
+   "caption": "powerviolence, blast micro-songs, shouted fragment",
+   "aliases": [
+    "powerviolence",
+    "pv"
+   ]
+  },
+  {
+   "id": "punk.dance-punk",
+   "family": "punk",
+   "caption": "dance punk, angular funk guitar, disco beat, shout",
+   "aliases": [
+    "dance-punk",
+    "disko punk"
+   ]
+  },
+  {
+   "id": "punk.queercore",
+   "family": "punk",
+   "caption": "queercore, art punk irony, political shout",
+   "aliases": [
+    "queercore"
+   ]
+  },
+  {
+   "id": "metal.heavy-metal",
+   "family": "metal",
+   "caption": "heavy metal, galloping riffs, twin harmony leads, powerful clean vocals",
+   "aliases": [
+    "heavy metal",
+    "metal",
+    "classic metal",
+    "general metal"
+   ]
+  },
+  {
+   "id": "metal.thrash-metal",
+   "family": "metal",
+   "caption": "thrash metal, palm-muted chugging riffs, shredding solos, aggressive bark",
+   "aliases": [
+    "thrash metal",
+    "thrash"
+   ]
+  },
+  {
+   "id": "metal.death-metal",
+   "family": "metal",
+   "caption": "death metal, blast beats, low growls, dissonant riffing",
+   "aliases": [
+    "death metal",
+    "death"
+   ]
+  },
+  {
+   "id": "metal.black-metal",
+   "family": "metal",
+   "caption": "black metal, tremolo-picked guitars, shrieked vocals, cold atmosphere",
+   "aliases": [
+    "black metal",
+    "black"
+   ]
+  },
+  {
+   "id": "metal.doom-metal",
+   "family": "metal",
+   "caption": "doom metal, slow heavy riff, downcast haze",
+   "aliases": [
+    "doom metal",
+    "doom"
+   ]
+  },
+  {
+   "id": "metal.power-metal",
+   "family": "metal",
+   "caption": "power metal, neoclassical leads, soaring heroic vocals, fast double bass",
+   "aliases": [
+    "power metal",
+    "power"
+   ]
+  },
+  {
+   "id": "metal.speed-metal",
+   "family": "metal",
+   "caption": "speed metal, relentless riff gallops, high screams",
+   "aliases": [
+    "speed metal"
+   ]
+  },
+  {
+   "id": "metal.progressive-metal",
+   "family": "metal",
+   "caption": "progressive metal, technical odd-meter riffing, conceptual scope",
+   "aliases": [
+    "progressive metal",
+    "prog metal",
+    "progressive"
+   ]
+  },
+  {
+   "id": "metal.nu-metal",
+   "family": "metal",
+   "caption": "nu metal, down-tuned groove riffs, hip-hop cadence vocals, chorused angst",
+   "aliases": [
+    "nu metal",
+    "nu-metal"
+   ]
+  },
+  {
+   "id": "metal.metalcore",
+   "family": "metal",
+   "caption": "metalcore, breakdown riffs, screamed-and-clean trading",
+   "aliases": [
+    "metalcore",
+    "metal-core"
+   ]
+  },
+  {
+   "id": "metal.deathcore",
+   "family": "metal",
+   "caption": "deathcore, brutal breakdowns, growls, electronic grit",
+   "aliases": [
+    "deathcore"
+   ]
+  },
+  {
+   "id": "metal.gothic-metal",
+   "family": "metal",
+   "caption": "gothic metal, dark lush riffing, beautiful mournful vocals",
+   "aliases": [
+    "gothic metal",
+    "gothic"
+   ]
+  },
+  {
+   "id": "metal.symphonic-metal",
+   "family": "metal",
+   "caption": "symphonic metal, orchestral layers, operatic soprano, heavy guitars",
+   "aliases": [
+    "symphonic metal",
+    "symphonic"
+   ]
+  },
+  {
+   "id": "metal.folk-metal",
+   "family": "metal",
+   "caption": "folk metal, fiddle and flute over heavy riff",
+   "aliases": [
+    "folk metal",
+    "celtic metal"
+   ]
+  },
+  {
+   "id": "metal.sludge-metal",
+   "family": "metal",
+   "caption": "sludge metal, thick slow distorted aggression",
+   "aliases": [
+    "sludge metal",
+    "sludge"
+   ]
+  },
+  {
+   "id": "metal.stoner-metal",
+   "family": "metal",
+   "caption": "stoner metal, fuzz-drenched mid-tempo riff",
+   "aliases": [
+    "stoner metal"
+   ]
+  },
+  {
+   "id": "metal.groove-metal",
+   "family": "metal",
+   "caption": "groove metal, punchy mid-tempo pocket riff, barked vocals",
+   "aliases": [
+    "groove metal",
+    "groove"
+   ]
+  },
+  {
+   "id": "metal.djent",
+   "family": "metal",
+   "caption": "djent, tight polyrhythmic palm chugs, clean modern production",
+   "aliases": [
+    "djent"
+   ]
+  },
+  {
+   "id": "metal.hair-metal",
+   "family": "metal",
+   "caption": "hair metal, glossy riff, high scream chorus, big drums",
+   "aliases": [
+    "hair metal",
+    "glam metal"
+   ]
+  },
+  {
+   "id": "metal.extreme-metal",
+   "family": "metal",
+   "caption": "extreme metal, fast aggressive, growled and screamed",
+   "aliases": [
+    "extreme metal"
+   ]
+  },
+  {
+   "id": "metal.thrash",
+   "family": "metal",
+   "caption": "thrash metal, palm-muted chugs, fast solo, angry bark",
+   "aliases": [
+    "thrash",
+    "thrash metal"
+   ]
+  },
+  {
+   "id": "metal.viking-metal",
+   "family": "metal",
+   "caption": "viking metal, epic chant, folk melody, mid-tempo heavy",
+   "aliases": [
+    "viking metal",
+    "viking"
+   ]
+  },
+  {
+   "id": "metal.pagan-metal",
+   "family": "metal",
+   "caption": "pagan metal, ancient folk tune over heavy riff",
+   "aliases": [
+    "pagan metal",
+    "pagan"
+   ]
+  },
+  {
+   "id": "metal.unblack-metal",
+   "family": "metal",
+   "caption": "unblack metal, tremolo cold riff, positive message",
+   "aliases": [
+    "unblack metal"
+   ]
+  },
+  {
+   "id": "metal.depressive-black-metal",
+   "family": "metal",
+   "caption": "depressive black, slow mourn trem line, despairing cry",
+   "aliases": [
+    "depressive black metal",
+    "dsbm"
+   ]
+  },
+  {
+   "id": "metal.atmospheric-black-metal",
+   "family": "metal",
+   "caption": "atmospheric black, post-rock shoegaze into cold tremolo",
+   "aliases": [
+    "atmospheric black metal",
+    "atmospheric black",
+    "post-metal",
+    "blackgaze"
+   ]
+  },
+  {
+   "id": "metal.technical-death-metal",
+   "family": "metal",
+   "caption": "tech death, odd meter riff, surgical precision",
+   "aliases": [
+    "technical death metal",
+    "tech death",
+    "progressive death"
+   ]
+  },
+  {
+   "id": "metal.melodic-death-metal",
+   "family": "metal",
+   "caption": "melodic death, gothenburg harmony riff, harsh vocal",
+   "aliases": [
+    "melodic death metal",
+    "melodeath",
+    "gothenburg"
+   ]
+  },
+  {
+   "id": "metal.symphonic-black",
+   "family": "metal",
+   "caption": "symphonic black, keyboard orchestra over tremolo blast",
+   "aliases": [
+    "symphonic black"
+   ]
+  },
+  {
+   "id": "metal.mathcore",
+   "family": "metal",
+   "caption": "mathcore, grind blast with math noise chord",
+   "aliases": [
+    "mathcore",
+    "noisegrind",
+    "grindcore"
+   ]
+  },
+  {
+   "id": "metal.crossover-thrash",
+   "family": "metal",
+   "caption": "crossover, hardcore punk beat with metal riff",
+   "aliases": [
+    "crossover thrash",
+    "crossover"
+   ]
+  },
+  {
+   "id": "metal.war-metal",
+   "family": "metal",
+   "caption": "war metal, blast wall of sound, raw",
+   "aliases": [
+    "war metal"
+   ]
+  },
+  {
+   "id": "metal.epic-metal",
+   "family": "metal",
+   "caption": "epic metal, hymn chorus, fantasy concept",
+   "aliases": [
+    "epic metal"
+   ]
+  },
+  {
+   "id": "hiphop.hip-hop",
+   "family": "hiphop",
+   "caption": "hip hop, boom-bap drums, sample-based loops, rhythmic spoken flow",
+   "aliases": [
+    "hip hop",
+    "rap",
+    "hip-hop",
+    "hip hop & rap",
+    "rap & hip-hop",
+    "rap & hip hop",
+    "hip hop/rap",
+    "rap/hip hop",
+    "general hip-hop",
+    "hip - hop",
+    "rap hip hop",
+    "alternative hip hop",
+    "underground hip-hop",
+    "rap alternativo"
+   ]
+  },
+  {
+   "id": "hiphop.trap",
+   "family": "hiphop",
+   "caption": "trap, rolling 808 hi-hats, sub bass, modern autotune flow",
+   "aliases": [
+    "trap",
+    "trap rap",
+    "southern trap"
+   ]
+  },
+  {
+   "id": "hiphop.gangsta-rap",
+   "family": "hiphop",
+   "caption": "gangsta rap, menacing synth-funk, hard street talk",
+   "aliases": [
+    "gangsta rap",
+    "gangsta",
+    "reality rap"
+   ]
+  },
+  {
+   "id": "hiphop.g-funk",
+   "family": "hiphop",
+   "caption": "g-funk, whine lead synth, slow west coast groove",
+   "aliases": [
+    "g-funk",
+    "west coast",
+    "westcoast"
+   ]
+  },
+  {
+   "id": "hiphop.boom-bap",
+   "family": "hiphop",
+   "caption": "boom bap, dusty breaks, jazzy loops, lyrical focus",
+   "aliases": [
+    "boom bap",
+    "east coast rap",
+    "eastcoast"
+   ]
+  },
+  {
+   "id": "hiphop.conscious-hip-hop",
+   "family": "hiphop",
+   "caption": "conscious hip hop, jazzy warm loop, socially aware flow",
+   "aliases": [
+    "conscious hip hop",
+    "political hip hop",
+    "conscious rap"
+   ]
+  },
+  {
+   "id": "hiphop.southern-hip-hop",
+   "family": "hiphop",
+   "caption": "southern hip hop, bouncy brass and cowbell, chant hooks",
+   "aliases": [
+    "southern hip hop",
+    "dirty south",
+    "south rap"
+   ]
+  },
+  {
+   "id": "hiphop.crunk",
+   "family": "hiphop",
+   "caption": "crunk, hypnotic chants, synth horns, club energy",
+   "aliases": [
+    "crunk"
+   ]
+  },
+  {
+   "id": "hiphop.miami-bass",
+   "family": "hiphop",
+   "caption": "miami bass, bouncing sub, rapid electro-clave",
+   "aliases": [
+    "miami bass"
+   ]
+  },
+  {
+   "id": "hiphop.horrorcore",
+   "family": "hiphop",
+   "caption": "horrorcore, dark eerie sample, aggressive macabre tales",
+   "aliases": [
+    "horrorcore"
+   ]
+  },
+  {
+   "id": "hiphop.old-school-hip-hop",
+   "family": "hiphop",
+   "caption": "old school hip hop, breakbeat funk loops, party flow",
+   "aliases": [
+    "old school hip hop",
+    "old school",
+    "80s rap"
+   ]
+  },
+  {
+   "id": "hiphop.cloud-rap",
+   "family": "hiphop",
+   "caption": "cloud rap, hazy synth pads, laid-back autotune",
+   "aliases": [
+    "cloud rap",
+    "cloud"
+   ]
+  },
+  {
+   "id": "hiphop.phonk",
+   "family": "hiphop",
+   "caption": "phonk, memphis vocal samples, cowbell, heavy distorted bass",
+   "aliases": [
+    "phonk"
+   ]
+  },
+  {
+   "id": "hiphop.pop-rap",
+   "family": "hiphop",
+   "caption": "pop rap, melodic hooks, radio sheen",
+   "aliases": [
+    "pop rap",
+    "rap/pop",
+    "rap/pop & hip-hop"
+   ]
+  },
+  {
+   "id": "hiphop.experimental-hip-hop",
+   "family": "hiphop",
+   "caption": "experimental hip hop, abstract beat structures, unusual sound design",
+   "aliases": [
+    "experimental hip hop",
+    "abstract hip hop"
+   ]
+  },
+  {
+   "id": "hiphop.instrumental-hip-hop",
+   "family": "hiphop",
+   "caption": "instrumental hip hop, beat-tape loops, groove without vocals",
+   "aliases": [
+    "instrumental hip hop",
+    "beats"
+   ]
+  },
+  {
+   "id": "hiphop.chicano-rap",
+   "family": "hiphop",
+   "caption": "chicano rap, lowrider funk, spanish inflection",
+   "aliases": [
+    "chicano rap"
+   ]
+  },
+  {
+   "id": "hiphop.jazz-rap",
+   "family": "hiphop",
+   "caption": "jazz rap, live jazz sample, smooth flow",
+   "aliases": [
+    "jazz rap",
+    "jazz hop"
+   ]
+  },
+  {
+   "id": "hiphop.grime",
+   "family": "hiphop",
+   "caption": "grime, 140bpm sub and skittering hi-hat, uk slang shout",
+   "aliases": [
+    "grime",
+    "uk grime",
+    "eskers"
+   ]
+  },
+  {
+   "id": "hiphop.drill",
+   "family": "hiphop",
+   "caption": "drill, sliding dark 808, eerie piano, cold flow",
+   "aliases": [
+    "drill",
+    "uk drill",
+    "brooklyn drill",
+    "chicago drill"
+   ]
+  },
+  {
+   "id": "hiphop.hyphy",
+   "family": "hiphop",
+   "caption": "hyphy, fast synth fanfare, airhorn, bay Area bounce",
+   "aliases": [
+    "hyphy",
+    "bay area rap"
+   ]
+  },
+  {
+   "id": "hiphop.crunkcore",
+   "family": "hiphop",
+   "caption": "crunkcore, rave synth with screamo rap",
+   "aliases": [
+    "crunkcore",
+    "rage music"
+   ]
+  },
+  {
+   "id": "hiphop.snap-music",
+   "family": "hiphop",
+   "caption": "snap, minimal finger-snap beat, chant",
+   "aliases": [
+    "snap music",
+    "crank that"
+   ]
+  },
+  {
+   "id": "hiphop.Memphis-rap",
+   "family": "hiphop",
+   "caption": "memphis rap, lo-fi cowbell triplet, triplet flow, dark",
+   "aliases": [
+    "Memphis rap",
+    "Memphis",
+    "phonk raw"
+   ]
+  },
+  {
+   "id": "hiphop.bounce",
+   "family": "hiphop",
+   "caption": "bounce, New Orleans call-and-response, bouncy beat",
+   "aliases": [
+    "bounce",
+    "bouncing",
+    "sissy bounce"
+   ]
+  },
+  {
+   "id": "hiphop.turntablism",
+   "family": "hiphop",
+   "caption": "turntablism, beat juggling and scratches, instrumental focus",
+   "aliases": [
+    "turntablism",
+    "dj battle",
+    "instrumental rap"
+   ]
+  },
+  {
+   "id": "hiphop.country-rap",
+   "family": "hiphop",
+   "caption": "country rap, banjo and fiddle sample, twang flow",
+   "aliases": [
+    "country rap",
+    "hick hop",
+    "country rap"
+   ]
+  },
+  {
+   "id": "hiphop.underground-rap",
+   "family": "hiphop",
+   "caption": "underground hip hop, boom bap grit, independent spirit",
+   "aliases": [
+    "underground rap",
+    "indie rap",
+    "conscious",
+    "hip hop rap",
+    "rap hip hop"
+   ]
+  },
+  {
+   "id": "rnb_soul.r&b",
+   "family": "rnb_soul",
+   "caption": "contemporary r&b, sleek programmed groove, lush vocal runs",
+   "aliases": [
+    "r&b",
+    "rnb",
+    "r & b",
+    "rhythm and blues",
+    "urban",
+    "r&b/rap",
+    "rap/r&b",
+    "urban contemporary"
+   ]
+  },
+  {
+   "id": "rnb_soul.soul",
+   "family": "rnb_soul",
+   "caption": "soul, warm analog band groove, passionate raw lead vocal",
+   "aliases": [
+    "soul",
+    "motown",
+    "northern soul",
+    "southern soul",
+    "deep soul"
+   ]
+  },
+  {
+   "id": "rnb_soul.funk",
+   "family": "rnb_soul",
+   "caption": "funk, slap bass pocket, tight horns, percussive guitar chop",
+   "aliases": [
+    "funk",
+    "p-funk"
+   ]
+  },
+  {
+   "id": "rnb_soul.neo-soul",
+   "family": "rnb_soul",
+   "caption": "neo soul, jazzy Rhodes chords, mellow hip-hop drums, smoky vocal",
+   "aliases": [
+    "neo soul",
+    "neo-soul"
+   ]
+  },
+  {
+   "id": "rnb_soul.smooth-soul",
+   "family": "rnb_soul",
+   "caption": "smooth soul, silky strings, gentle groove, romantic tenor",
+   "aliases": [
+    "smooth soul"
+   ]
+  },
+  {
+   "id": "rnb_soul.disco-soul",
+   "family": "rnb_soul",
+   "caption": "disco soul, four-on-floor pulse, orchestral hook",
+   "aliases": [
+    "disco soul",
+    "philly soul"
+   ]
+  },
+  {
+   "id": "rnb_soul.quiet-storm",
+   "family": "rnb_soul",
+   "caption": "quiet storm, soft electric piano, late-night seductive groove",
+   "aliases": [
+    "quiet storm"
+   ]
+  },
+  {
+   "id": "rnb_soul.new-jack-swing",
+   "family": "rnb_soul",
+   "caption": "new jack swing, swing-bag beat, layered harmonies, 90s r&b",
+   "aliases": [
+    "new jack swing",
+    "jack swing"
+   ]
+  },
+  {
+   "id": "rnb_soul.blues-soul",
+   "family": "rnb_soul",
+   "caption": "blues soul, gospel ache, gritty vocal over organ",
+   "aliases": [
+    "blues soul"
+   ]
+  },
+  {
+   "id": "rnb_soul.modern-r&b",
+   "family": "rnb_soul",
+   "caption": "modern r&b, trap-influenced hi-hats, atmospheric synth, breathy vocal",
+   "aliases": [
+    "modern r&b",
+    "alternative r&b",
+    "alt r&b"
+   ]
+  },
+  {
+   "id": "rnb_soul.boogie",
+   "family": "rnb_soul",
+   "caption": "boogie, post-disco synth funk, 80s groove",
+   "aliases": [
+    "boogie",
+    "post-disco",
+    "flex"
+   ]
+  },
+  {
+   "id": "rnb_soul.go-go",
+   "family": "rnb_soul",
+   "caption": "go-go, percussive live funk groove, call to crowd",
+   "aliases": [
+    "go-go",
+    "go go",
+    "go-go"
+   ]
+  },
+  {
+   "id": "rnb_soul.funk-rock",
+   "family": "rnb_soul",
+   "caption": "funk rock, horn punctures and guitar chop, dance",
+   "aliases": [
+    "funk rock",
+    "funk metal",
+    "funk/rap"
+   ]
+  },
+  {
+   "id": "rnb_soul.Northern-soul",
+   "family": "rnb_soul",
+   "caption": "northern soul, fast stomping beat, rare 60s mod groove",
+   "aliases": [
+    "Northern soul"
+   ]
+  },
+  {
+   "id": "rnb_soul.blues-rock",
+   "family": "rnb_soul",
+   "caption": "blues rock, hot guitar over shuffle band",
+   "aliases": [
+    "blues rock"
+   ]
+  },
+  {
+   "id": "rnb_soul.modern-soul",
+   "family": "rnb_soul",
+   "caption": "modern soul, retro analog vocal runs over hip hop drums",
+   "aliases": [
+    "modern soul",
+    "retro soul",
+    "indie soul"
+   ]
+  },
+  {
+   "id": "rnb_soul.Motown",
+   "family": "rnb_soul",
+   "caption": "motown pop soul, tambourine, melodic bass and chorus string",
+   "aliases": [
+    "Motown",
+    "motown soul"
+   ]
+  },
+  {
+   "id": "rnb_soul.soul-blues",
+   "family": "rnb_soul",
+   "caption": "soul blues, slow gospel ache and electric lead",
+   "aliases": [
+    "soul blues"
+   ]
+  },
+  {
+   "id": "pop.pop",
+   "family": "pop",
+   "caption": "polished pop, catchy hook, bright production, danceable groove",
+   "aliases": [
+    "pop",
+    "general pop",
+    "pop/pop",
+    "top 40",
+    "chart",
+    "j-pop",
+    "k-pop",
+    "korean pop",
+    "japanese pop",
+    "latin pop",
+    "francophone pop",
+    "autre"
+   ]
+  },
+  {
+   "id": "pop.synthpop",
+   "family": "pop",
+   "caption": "synthpop, sequenced synths, glossy drums",
+   "aliases": [
+    "synthpop",
+    "synth-pop"
+   ]
+  },
+  {
+   "id": "pop.dance-pop",
+   "family": "pop",
+   "caption": "dance-pop, pulsing four-on-floor, glossy chorus",
+   "aliases": [
+    "dance-pop",
+    "disco-pop"
+   ]
+  },
+  {
+   "id": "pop.teen-pop",
+   "family": "pop",
+   "caption": "teen pop, crisp bubblegum hook, light rap-inflected beat",
+   "aliases": [
+    "teen pop"
+   ]
+  },
+  {
+   "id": "pop.bubblegum",
+   "family": "pop",
+   "caption": "bubblegum pop, sugary hook, handclaps, cheeky chant",
+   "aliases": [
+    "bubblegum",
+    "bubblegum"
+   ]
+  },
+  {
+   "id": "pop.adult-contemporary",
+   "family": "pop",
+   "caption": "adult contemporary, soft piano bed, smooth reassuring vocal, radio polish",
+   "aliases": [
+    "adult contemporary",
+    "easy listening",
+    "aci",
+    "contemporary",
+    "mood music",
+    "lite"
+   ]
+  },
+  {
+   "id": "pop.art-pop",
+   "family": "pop",
+   "caption": "art pop, adventurous structures, stylized atmosphere",
+   "aliases": [
+    "art pop"
+   ]
+  },
+  {
+   "id": "pop.baroque-pop",
+   "family": "pop",
+   "caption": "baroque pop, harpsichord and strings, ornate melody",
+   "aliases": [
+    "baroque pop"
+   ]
+  },
+  {
+   "id": "pop.sunshine-pop",
+   "family": "pop",
+   "caption": "sunshine pop, breezy orchestration, warm harmonies",
+   "aliases": [
+    "sunshine pop"
+   ]
+  },
+  {
+   "id": "pop.bedroom-pop",
+   "family": "pop",
+   "caption": "bedroom pop, lo-fi haze, confessional soft vocal",
+   "aliases": [
+    "bedroom pop"
+   ]
+  },
+  {
+   "id": "pop.country-pop",
+   "family": "pop",
+   "caption": "country pop, twang polished for radio, singalong chorus",
+   "aliases": [
+    "country pop",
+    "pop/country",
+    "country/pop"
+   ]
+  },
+  {
+   "id": "pop.electropop",
+   "family": "pop",
+   "caption": "electropop, bright synth lead, club-ready drop",
+   "aliases": [
+    "electropop",
+    "electro-pop"
+   ]
+  },
+  {
+   "id": "pop.folk-pop",
+   "family": "pop",
+   "caption": "folk pop, gentle acoustic guitar and soft vocal, breezy hook",
+   "aliases": [
+    "folk pop",
+    "pop folk",
+    "folk-pop",
+    "indie folk pop"
+   ]
+  },
+  {
+   "id": "pop.vocal",
+   "family": "pop",
+   "caption": "vocal pop, showcase lead, clean arrangement",
+   "aliases": [
+    "vocal",
+    "vocal",
+    "vocal jazz"
+   ]
+  },
+  {
+   "id": "pop.oldies",
+   "family": "pop",
+   "caption": "oldies, 50s-60s doo-wop and rock'n'roll warmth",
+   "aliases": [
+    "oldies",
+    "oldies",
+    "golden oldies"
+   ]
+  },
+  {
+   "id": "pop.doo-wop",
+   "family": "pop",
+   "caption": "doo wop, smooth backing-group harmonies, slow dance groove",
+   "aliases": [
+    "doo-wop"
+   ]
+  },
+  {
+   "id": "pop.euro-pop",
+   "family": "pop",
+   "caption": "euro-pop, bright synth stabs, four-on-floor, festival singalong",
+   "aliases": [
+    "euro pop",
+    "eurodance",
+    "euro-dance",
+    "euro",
+    "euro house"
+   ]
+  },
+  {
+   "id": "pop.power-ballad",
+   "family": "pop",
+   "caption": "power ballad, quiet-loud structure, soaring chorus, big drums",
+   "aliases": [
+    "power ballad",
+    "ballad"
+   ]
+  },
+  {
+   "id": "pop.show-pop",
+   "family": "pop",
+   "caption": "show-tune pop, theatrical build, orchestral backing",
+   "aliases": [
+    "show pop",
+    "show pop"
+   ]
+  },
+  {
+   "id": "pop.city-pop",
+   "family": "pop",
+   "caption": "city pop, 80s japanese funk gloss, bright synth brass",
+   "aliases": [
+    "city pop",
+    "japanese pop funk"
+   ]
+  },
+  {
+   "id": "pop.sophisti-pop",
+   "family": "pop",
+   "caption": "sophisti-pop, horn and harpsichord, elegant new-romance polish",
+   "aliases": [
+    "sophisti-pop"
+   ]
+  },
+  {
+   "id": "pop.hyperpop",
+   "family": "pop",
+   "caption": "hyperpop, distorted bass, pitched vocal, glitch candy",
+   "aliases": [
+    "hyperpop",
+    "future pop",
+    "digicore"
+   ]
+  },
+  {
+   "id": "pop.y\u00e9-y\u00e9",
+   "family": "pop",
+   "caption": "y\u00e9 y\u00e9, french y\u00e9-y\u00e9 pop, breathy vocal, simple groove",
+   "aliases": [
+    "y\u00e9-y\u00e9",
+    "ye ye",
+    "francophone"
+   ]
+  },
+  {
+   "id": "pop.sunshine",
+   "family": "pop",
+   "caption": "sunshine pop, breezy vocal choir and string hook",
+   "aliases": [
+    "sunshine"
+   ]
+  },
+  {
+   "id": "pop.space-age-pop",
+   "family": "pop",
+   "caption": "space age pop, exotica lounge bachelor-pad sci-fi swing",
+   "aliases": [
+    "space age pop",
+    "exotica"
+   ]
+  },
+  {
+   "id": "pop.protest-pop",
+   "family": "pop",
+   "caption": "protest pop, earnest folk-pop with message",
+   "aliases": [
+    "protest pop",
+    "activist pop"
+   ]
+  },
+  {
+   "id": "pop.new-romance",
+   "family": "pop",
+   "caption": "new romantic, synth brass and dance groove, theatrical",
+   "aliases": [
+    "new romance",
+    "new romantic",
+    "romantic"
+   ]
+  },
+  {
+   "id": "pop.synthwave-pop",
+   "family": "pop",
+   "caption": "synthwave pop, gated drum and neon arpeggio",
+   "aliases": [
+    "synthwave pop",
+    "retropop"
+   ]
+  },
+  {
+   "id": "country.country",
+   "family": "country",
+   "caption": "modern country, telecaster twang, storytelling lead vocal, radio groove",
+   "aliases": [
+    "country",
+    "general country",
+    "country/general"
+   ]
+  },
+  {
+   "id": "country.contemporary-country",
+   "family": "country",
+   "caption": "contemporary country, polished sheen, rock-tinged groove, hook-forward vocal",
+   "aliases": [
+    "contemporary country",
+    "pop country",
+    "bro country"
+   ]
+  },
+  {
+   "id": "country.classic-country",
+   "family": "country",
+   "caption": "classic country, fiddle and steel guitar, plain-spoken honky-tonk vocal",
+   "aliases": [
+    "classic country",
+    "traditional country",
+    "hillbilly"
+   ]
+  },
+  {
+   "id": "country.outlaw-country",
+   "family": "country",
+   "caption": "outlaw country, raw grit, backroads lyric, stripped band",
+   "aliases": [
+    "outlaw country",
+    "outlaw"
+   ]
+  },
+  {
+   "id": "country.honky-tonk",
+   "family": "country",
+   "caption": "honky tonk, upright piano, weeping steel, barroom vocal",
+   "aliases": [
+    "honky tonk",
+    "honky-tonk"
+   ]
+  },
+  {
+   "id": "country.country-rock",
+   "family": "country",
+   "caption": "country rock, jangly telecasters, rock backbeat, country phrasing",
+   "aliases": [
+    "country rock",
+    "country-rock",
+    "southern country rock",
+    "red dirt",
+    "texas country",
+    "americana"
+   ]
+  },
+  {
+   "id": "country.bluegrass",
+   "family": "country",
+   "caption": "bluegrass, high lonesome harmony, banjo roll, fiddle break, acoustic drive",
+   "aliases": [
+    "bluegrass",
+    "grass",
+    "newgrass",
+    "progressive bluegrass",
+    "mtn jam"
+   ]
+  },
+  {
+   "id": "country.alt-country",
+   "family": "country",
+   "caption": "alternative country, indie sensibility, dusty twang, introspective vocal",
+   "aliases": [
+    "alt country",
+    "alt-country",
+    "alternative country",
+    "cowpunk"
+   ]
+  },
+  {
+   "id": "country.western-swing",
+   "family": "country",
+   "caption": "western swing, fiddle and electric guitar, dancehall two-beat",
+   "aliases": [
+    "western swing",
+    "western"
+   ]
+  },
+  {
+   "id": "country.country-gospel",
+   "family": "country",
+   "caption": "country gospel, warm acoustic, hymn chorus, reverent storytelling",
+   "aliases": [
+    "country gospel",
+    "christian country",
+    "country/spiritual"
+   ]
+  },
+  {
+   "id": "country.cowball",
+   "family": "country",
+   "caption": "cowboy/western, campfire strum, trail-ballad phrasing",
+   "aliases": [
+    "cowball",
+    "singing cowboy",
+    "western/country"
+   ]
+  },
+  {
+   "id": "country.countrypolitan",
+   "family": "country",
+   "caption": "countrypolitan, lush strings, smooth backing choir, Nashville polish",
+   "aliases": [
+    "countrypolitan",
+    "polished country"
+   ]
+  },
+  {
+   "id": "country.bakersfield-sound",
+   "family": "country",
+   "caption": "bakersfield sound, driving beat, telecaster bite, bare honky-tonk vocal",
+   "aliases": [
+    "bakersfield sound"
+   ]
+  },
+  {
+   "id": "country.rockabilly",
+   "family": "country",
+   "caption": "rockabilly, slap bass and fast picking, country swing vocal",
+   "aliases": [
+    "rockabilly",
+    "rocka billy",
+    "neo-rockabilly",
+    "psychobilly country"
+   ]
+  },
+  {
+   "id": "country.nashville-sound",
+   "family": "country",
+   "caption": "nashville sound, smooth backing choir and string, countrypolitan cousin",
+   "aliases": [
+    "nashville sound",
+    "countrypolitan classic"
+   ]
+  },
+  {
+   "id": "country.cowgirl",
+   "family": "country",
+   "caption": "cowgirl country, independent heart lyric, twang",
+   "aliases": [
+    "cowgirl"
+   ]
+  },
+  {
+   "id": "country.country-boogie",
+   "family": "country",
+   "caption": "country boogie, piano shuffle two beat, dance hall",
+   "aliases": [
+    "country boogie",
+    "two bit country",
+    "western swing two beat"
+   ]
+  },
+  {
+   "id": "country.appalachian",
+   "family": "country",
+   "caption": "appalachian, dulcimer and old ballad, mountain high lonesome",
+   "aliases": [
+    "appalachian",
+    "mountain",
+    "hillbilly",
+    "old time"
+   ]
+  },
+  {
+   "id": "country.progressive-country",
+   "family": "country",
+   "caption": "progressive country, indie lyricism over country groove",
+   "aliases": [
+    "progressive country",
+    "red dirt",
+    "texas country",
+    "texas/red dirt",
+    "okie",
+    "ouija"
+   ]
+  },
+  {
+   "id": "country.outlaw",
+   "family": "country",
+   "caption": "outlaw country, back-road grit, stripped honky-tonk",
+   "aliases": [
+    "outlaw",
+    "redneck",
+    "rebel",
+    "outlaw"
+   ]
+  },
+  {
+   "id": "folk.folk",
+   "family": "folk",
+   "caption": "folk, fingerpicked acoustic guitar, earnest unadorned vocal",
+   "aliases": [
+    "folk",
+    "contemporary folk",
+    "general folk",
+    "modern folk",
+    "protest folk"
+   ]
+  },
+  {
+   "id": "folk.acoustic",
+   "family": "folk",
+   "caption": "acoustic, bare guitar and voice, intimate room",
+   "aliases": [
+    "acoustic",
+    "acoustic"
+   ]
+  },
+  {
+   "id": "folk.singer-songwriter",
+   "family": "folk",
+   "caption": "singer-songwriter, personal lyrics, gentle acoustic nuance",
+   "aliases": [
+    "singer-songwriter",
+    "songwriter"
+   ]
+  },
+  {
+   "id": "folk.americana",
+   "family": "folk",
+   "caption": "americana, worn acoustic blend of folk country and blues, dusty vocal",
+   "aliases": [
+    "americana",
+    "rootworks",
+    "no amplicana"
+   ]
+  },
+  {
+   "id": "folk.indie-folk",
+   "family": "folk",
+   "caption": "indie folk, layered acoustic textures, soft communal harmonies",
+   "aliases": [
+    "indie folk",
+    "folk indie"
+   ]
+  },
+  {
+   "id": "folk.folk-rock",
+   "family": "folk",
+   "caption": "folk rock, jangly acoustic-electric blend, thoughtful vocal",
+   "aliases": [
+    "folk rock",
+    "folk-rock"
+   ]
+  },
+  {
+   "id": "folk.celtic-folk",
+   "family": "folk",
+   "caption": "celtic folk, fiddle and flute, bodhr\u00e1n pulse, lilting Gaelic lilt",
+   "aliases": [
+    "celtic folk",
+    "celtic",
+    "irish",
+    "scottish",
+    "celtic/new age",
+    "celtic punk"
+   ]
+  },
+  {
+   "id": "folk.celtic",
+   "family": "folk",
+   "caption": "celtic, fiddle reel, harp and pipe, green hill air",
+   "aliases": [
+    "celtic",
+    "celtic"
+   ]
+  },
+  {
+   "id": "folk.world-folk",
+   "family": "folk",
+   "caption": "world folk, regional acoustic traditions, native-language vocal",
+   "aliases": [
+    "world folk",
+    "international folk",
+    "native americana"
+   ]
+  },
+  {
+   "id": "folk.folk-metal",
+   "family": "folk",
+   "caption": "folk metal, traditional melodies over heavy riff",
+   "aliases": [
+    "folk metal"
+   ]
+  },
+  {
+   "id": "folk.progressive-folk",
+   "family": "folk",
+   "caption": "progressive folk, unusual tunings, art-song structure",
+   "aliases": [
+    "progressive folk",
+    "folk prog"
+   ]
+  },
+  {
+   "id": "folk.old-time",
+   "family": "folk",
+   "caption": "old time, fiddle and banjo string band modal",
+   "aliases": [
+    "old-time",
+    "oldtime",
+    "string band",
+    "mountain string"
+   ]
+  },
+  {
+   "id": "folk.anti-folk",
+   "family": "folk",
+   "caption": "anti folk, lo-fi ironic acoustics",
+   "aliases": [
+    "anti-folk",
+    "anar-folk",
+    "unfolk"
+   ]
+  },
+  {
+   "id": "folk.freak-folk",
+   "family": "folk",
+   "caption": "freak folk, psych acoustic clutter, communal weird harmony",
+   "aliases": [
+    "freak folk",
+    "freakfolk",
+    "new weird america"
+   ]
+  },
+  {
+   "id": "folk.british-folk",
+   "family": "folk",
+   "caption": "british folk, electric folk-rock with accordion, modal tune",
+   "aliases": [
+    "british folk",
+    "electric folk",
+    "folk punk? no",
+    "folk baroque"
+   ]
+  },
+  {
+   "id": "folk.murder-ballad",
+   "family": "folk",
+   "caption": "dark folk ballad, slow story, minor key",
+   "aliases": [
+    "murder ballad",
+    "dark folk",
+    "apocalyptic folk",
+    "neofolk"
+   ]
+  },
+  {
+   "id": "folk.sea-shanty",
+   "family": "folk",
+   "caption": "sea shanty, rowing cadence chant, call and response",
+   "aliases": [
+    "sea shanty",
+    "shanty",
+    "folk chant"
+   ]
+  },
+  {
+   "id": "folk.protest-song",
+   "family": "folk",
+   "caption": "protest song, plain acoustic message",
+   "aliases": [
+    "protest song",
+    "activist",
+    "worker song"
+   ]
+  },
+  {
+   "id": "folk.new-acoustic",
+   "family": "folk",
+   "caption": "new acoustic, percussive guitar, instrumental fingerstyle",
+   "aliases": [
+    "new acoustic",
+    "acoustic shred",
+    "percussive acoustic"
+   ]
+  },
+  {
+   "id": "blues.blues",
+   "family": "blues",
+   "caption": "blues, warm tube amp guitar, 12-bar form, aching vocal",
+   "aliases": [
+    "blues",
+    "general blues",
+    "contemporary blues",
+    "modern blues",
+    "electric blues",
+    "urban blues"
+   ]
+  },
+  {
+   "id": "blues.delta-blues",
+   "family": "blues",
+   "caption": "delta blues, solo slide guitar, raw field holler",
+   "aliases": [
+    "delta blues",
+    "country blues",
+    "acoustic blues",
+    "pre-war blues"
+   ]
+  },
+  {
+   "id": "blues.chicago-blues",
+   "family": "blues",
+   "caption": "chicago blues, amplified band, harp stabs, driving shuffle",
+   "aliases": [
+    "chicago blues",
+    "city blues"
+   ]
+  },
+  {
+   "id": "blues.texas-blues",
+   "family": "blues",
+   "caption": "texas blues, twin lead guitars, shuffling swing",
+   "aliases": [
+    "texas blues",
+    "swamp blues"
+   ]
+  },
+  {
+   "id": "blues.blues-rock",
+   "family": "blues",
+   "caption": "blues rock, hot overdriven guitar riff, rock backbeat",
+   "aliases": [
+    "blues rock",
+    "blues-rock",
+    "blues/rock"
+   ]
+  },
+  {
+   "id": "blues.gospel-blues",
+   "family": "blues",
+   "caption": "gospel blues, church organ, testify vocal",
+   "aliases": [
+    "gospel blues"
+   ]
+  },
+  {
+   "id": "blues.jump-blues",
+   "family": "blues",
+   "caption": "jump blues, horn stabs, boogie shuffle, shout vocal",
+   "aliases": [
+    "jump blues",
+    "boogie",
+    "jump"
+   ]
+  },
+  {
+   "id": "blues.british-blues",
+   "family": "blues",
+   "caption": "british blues, crunchy guitar, melanchonic phrasing",
+   "aliases": [
+    "british blues"
+   ]
+  },
+  {
+   "id": "blues.harmonica-blues",
+   "family": "blues",
+   "caption": "harmonica blues, rambling blown harp lead and train beat",
+   "aliases": [
+    "harmonica blues",
+    "harp blues",
+    "blues harp"
+   ]
+  },
+  {
+   "id": "blues.acid-blues",
+   "family": "blues",
+   "caption": "acid blues, guitar effects and psych guitar, modern studio",
+   "aliases": [
+    "acid blues",
+    "psych blues",
+    "blues rock revival"
+   ]
+  },
+  {
+   "id": "blues.country-blues",
+   "family": "blues",
+   "caption": "country blues, solo acoustic slide and stomp foot",
+   "aliases": [
+    "country blues",
+    "acoustic blues",
+    "prewar blues",
+    "pedlers"
+   ]
+  },
+  {
+   "id": "blues.soul-blues",
+   "family": "blues",
+   "caption": "soul blues, slow grinding gospel ache",
+   "aliases": [
+    "soul blues"
+   ]
+  },
+  {
+   "id": "blues.boogie-blues",
+   "family": "blues",
+   "caption": "boogie blues, walking piano and shuffle train feel",
+   "aliases": [
+    "boogie blues",
+    "boogie",
+    "jump"
+   ]
+  },
+  {
+   "id": "blues.desert-blues",
+   "family": "blues",
+   "caption": "desert blues, hypnotic tuareg guitar, desert pulse",
+   "aliases": [
+    "desert blues",
+    "tuareg",
+    "assouf",
+    "sahara blues",
+    "world blues"
+   ]
+  },
+  {
+   "id": "blues.frat-rock",
+   "family": "blues",
+   "caption": "frat rock blues rock party boogie",
+   "aliases": [
+    "frat rock",
+    "college rock blues"
+   ]
+  },
+  {
+   "id": "blues.punk-blues",
+   "family": "blues",
+   "caption": "punk blues, fast slide and snotty bark",
+   "aliases": [
+    "punk blues"
+   ]
+  },
+  {
+   "id": "jazz.jazz",
+   "family": "jazz",
+   "caption": "jazz, swing ride cymbal, walking bass, brass and reed solo",
+   "aliases": [
+    "jazz",
+    "general jazz",
+    "modern jazz",
+    "jazz & blues",
+    "jazz/vocal",
+    "jazz/funk",
+    "jazz/folk",
+    "smooth jazz",
+    "contemporary jazz",
+    "modern creative jazz",
+    "jazz instrumental",
+    "jazz & instrumental",
+    "jazz instrumental",
+    "jazz vocal"
+   ]
+  },
+  {
+   "id": "jazz.cool-jazz",
+   "family": "jazz",
+   "caption": "cool jazz, relaxed swing, light vibrato, understated solo",
+   "aliases": [
+    "cool jazz",
+    "west coast jazz",
+    "cool"
+   ]
+  },
+  {
+   "id": "jazz.bebop",
+   "family": "jazz",
+   "caption": "bebop, fast tempo complex head lines, virtuosic solo",
+   "aliases": [
+    "bebop",
+    "bop"
+   ]
+  },
+  {
+   "id": "jazz.hard-bop",
+   "family": "jazz",
+   "caption": "hard bop, soulful groove, driving rhythm section, tenor lead",
+   "aliases": [
+    "hard bop"
+   ]
+  },
+  {
+   "id": "jazz.free-jazz",
+   "family": "jazz",
+   "caption": "free jazz, collective improv, energy over form",
+   "aliases": [
+    "free jazz",
+    "avant-garde jazz",
+    "creative music"
+   ]
+  },
+  {
+   "id": "jazz.jazz-fusion",
+   "family": "jazz",
+   "caption": "jazz fusion, electric piano and synth, rock groove, improvisation",
+   "aliases": [
+    "jazz fusion",
+    "fusion",
+    "jazz rock",
+    "jazz/funk"
+   ]
+  },
+  {
+   "id": "jazz.smooth-jazz",
+   "family": "jazz",
+   "caption": "smooth jazz, polished tenor sax, soft backbeat, lounge warmth",
+   "aliases": [
+    "smooth jazz",
+    "quiet storm jazz"
+   ]
+  },
+  {
+   "id": "jazz.big-band",
+   "family": "jazz",
+   "caption": "big band, brass section riffs, swinging rhythm, dance hall energy",
+   "aliases": [
+    "big band",
+    "swing",
+    "swing jazz",
+    "dance band",
+    "jazz/big band",
+    "lindy",
+    "swing"
+   ]
+  },
+  {
+   "id": "jazz.vocal-jazz",
+   "family": "jazz",
+   "caption": "vocal jazz, intimate phrasing over brush drums, standard tune",
+   "aliases": [
+    "vocal jazz",
+    "torch songs"
+   ]
+  },
+  {
+   "id": "jazz.latin-jazz",
+   "family": "jazz",
+   "caption": "latin jazz, clave groove, montuno piano, brass",
+   "aliases": [
+    "latin jazz",
+    "cuban jazz",
+    "afro-cuban jazz",
+    "jazz/latin"
+   ]
+  },
+  {
+   "id": "jazz.gypsy-jazz",
+   "family": "jazz",
+   "caption": "gypsy jazz, nylon-string swing, violin, hot club energy",
+   "aliases": [
+    "gypsy jazz",
+    "django",
+    "jazz manouche",
+    "manouche"
+   ]
+  },
+  {
+   "id": "jazz.ragtime",
+   "family": "jazz",
+   "caption": "ragtime, syncopated piano, music hall bounce",
+   "aliases": [
+    "ragtime"
+   ]
+  },
+  {
+   "id": "jazz.trad-jazz",
+   "family": "jazz",
+   "caption": "traditional jazz, dixieland front line, banjo and clarinet",
+   "aliases": [
+    "trad jazz",
+    "dixieland",
+    "new orleans jazz"
+   ]
+  },
+  {
+   "id": "jazz.soul-jazz",
+   "family": "jazz",
+   "caption": "soul jazz, organ combo, bluesy, gritty gospel-jazz",
+   "aliases": [
+    "soul jazz",
+    "jazz-funk? no"
+   ]
+  },
+  {
+   "id": "jazz.third-stream",
+   "family": "jazz",
+   "caption": "third stream, classical orchestral and jazz combined",
+   "aliases": [
+    "third stream",
+    "jazz classical",
+    "symphonic jazz"
+   ]
+  },
+  {
+   "id": "jazz.post-bop",
+   "family": "jazz",
+   "caption": "post-bop, modal acoustic, 60s blue note",
+   "aliases": [
+    "post-bop",
+    "hard bop modern"
+   ]
+  },
+  {
+   "id": "jazz.straight-ahead",
+   "family": "jazz",
+   "caption": "straight ahead, acoustic swing, no fusion, mainstream",
+   "aliases": [
+    "straight-ahead",
+    "mainstream jazz",
+    "trad?"
+   ]
+  },
+  {
+   "id": "jazz.avant-garde-jazz",
+   "family": "jazz",
+   "caption": "avant-garde, free energy, prepared piano and skronk",
+   "aliases": [
+    "avant-garde jazz",
+    "free jazz? already",
+    "creative?"
+   ]
+  },
+  {
+   "id": "jazz.stride",
+   "family": "jazz",
+   "caption": "stride, solo piano left-hand boogie and right-hand trick",
+   "aliases": [
+    "stride",
+    "piano stride",
+    "honky tonk piano"
+   ]
+  },
+  {
+   "id": "jazz.nu-jazz",
+   "family": "jazz",
+   "caption": "nu jazz, electronic beat and sample over jazz chord",
+   "aliases": [
+    "nu jazz",
+    "jazztronica",
+    "club jazz"
+   ]
+  },
+  {
+   "id": "jazz.jazz-vocal",
+   "family": "jazz",
+   "caption": "vocal jazz, smoky or bright phrasing over combo",
+   "aliases": [
+    "jazz vocal",
+    "vocal jazz",
+    "torch"
+   ]
+  },
+  {
+   "id": "jazz.jazz-metal",
+   "family": "jazz",
+   "caption": "jazz metal, math jazz chord and metal tone, sax shred",
+   "aliases": [
+    "jazz metal",
+    "jazzcore"
+   ]
+  },
+  {
+   "id": "jazz.free-improvisation",
+   "family": "jazz",
+   "caption": "free improv, atonal energy, extended technique",
+   "aliases": [
+    "free improvisation",
+    "no new music",
+    "atmospheric free"
+   ]
+  },
+  {
+   "id": "gospel.gospel",
+   "family": "gospel",
+   "caption": "gospel, passionate lead vocal, choir and handclaps, organ drive",
+   "aliases": [
+    "gospel",
+    "religious",
+    "black gospel",
+    "southern gospel",
+    "praise",
+    "worship",
+    "spiritual",
+    "gospel & christian",
+    "gospel/religious",
+    "traditional gospel",
+    "gospel reggae"
+   ]
+  },
+  {
+   "id": "gospel.christian",
+   "family": "gospel",
+   "caption": "christian, gentle contemporary hymn, hopeful clean vocal",
+   "aliases": [
+    "christian",
+    "ccm",
+    "contemporary christian",
+    "christian contemporary",
+    "christian"
+   ]
+  },
+  {
+   "id": "gospel.christian-rock",
+   "family": "gospel",
+   "caption": "christian rock, full band drive, faith-forward lyric",
+   "aliases": [
+    "christian rock"
+   ]
+  },
+  {
+   "id": "gospel.christian-metal",
+   "family": "gospel",
+   "caption": "christian metal, heavy riff, testimony vocal",
+   "aliases": [
+    "christian metal"
+   ]
+  },
+  {
+   "id": "gospel.christian-punk",
+   "family": "gospel",
+   "caption": "christian punk, fast and faithful, urgent singalong",
+   "aliases": [
+    "christian punk"
+   ]
+  },
+  {
+   "id": "gospel.worship",
+   "family": "gospel",
+   "caption": "worship, building dynamic, reverent congregation sing",
+   "aliases": [
+    "worship",
+    "praise & worship"
+   ]
+  },
+  {
+   "id": "gospel.spiritual",
+   "family": "gospel",
+   "caption": "spiritual, a cappella harmony, slow sorrow and hope",
+   "aliases": [
+    "spiritual",
+    "negro spiritual"
+   ]
+  },
+  {
+   "id": "gospel.inspirational",
+   "family": "gospel",
+   "caption": "inspirational spoken-sung reading, warm bed of strings",
+   "aliases": [
+    "inspirational",
+    "spoken",
+    "religous"
+   ]
+  },
+  {
+   "id": "gospel.urban-gospel",
+   "family": "gospel",
+   "caption": "urban gospel, choir and hip-hop beat, contemporary praise",
+   "aliases": [
+    "urban gospel",
+    "black urban gospel",
+    "gospel rap",
+    "praise and worship rap"
+   ]
+  },
+  {
+   "id": "gospel.praise",
+   "family": "gospel",
+   "caption": "praise worship, joyful clapping midtempo, repeat hook",
+   "aliases": [
+    "praise",
+    "praise and worship",
+    "praise/worship",
+    "ccm worship",
+    "christian alternative worship",
+    "gospel choir",
+    "choir"
+   ]
+  },
+  {
+   "id": "gospel.redemption",
+   "family": "gospel",
+   "caption": "redemption, soul testimony over modern band",
+   "aliases": [
+    "redemption",
+    "christian rap",
+    "christian metal? already",
+    "gospel r&b"
+   ]
+  },
+  {
+   "id": "gospel.psalm",
+   "family": "gospel",
+   "caption": "psalm chant, plain song, sacred classical",
+   "aliases": [
+    "psalm",
+    "chant",
+    "gregorian",
+    "sacred choral",
+    "orthodox chant",
+    "byzantine"
+   ]
+  },
+  {
+   "id": "electronic.electronica",
+   "family": "electronic",
+   "caption": "electronica, synth textures, glitchy programmed drums, atmospheric",
+   "aliases": [
+    "electronica",
+    "electronic",
+    "electro",
+    "electronica/dance",
+    "electronica & dance",
+    "general electro",
+    "techno/electronica",
+    "dub/electronica",
+    "idm"
+   ]
+  },
+  {
+   "id": "electronic.house",
+   "family": "electronic",
+   "caption": "house, four-on-the-floor kick, soulful filtered loops, groove",
+   "aliases": [
+    "house",
+    "deep house",
+    "tech house",
+    "garage house",
+    "classic house",
+    "funky house",
+    "jazz house",
+    "hard house",
+    "acid house",
+    "general house",
+    "dj house"
+   ]
+  },
+  {
+   "id": "electronic.techno",
+   "family": "electronic",
+   "caption": "techno, relentless machine beat, dark futuristic loops",
+   "aliases": [
+    "techno",
+    "detroit techno",
+    "minimal techno",
+    "euro-techno",
+    "eu techno"
+   ]
+  },
+  {
+   "id": "electronic.trance",
+   "family": "electronic",
+   "caption": "trance, rolling bassline, euphoric synth builds",
+   "aliases": [
+    "trance",
+    "uplifting trance",
+    "vocal trance",
+    "goa",
+    "progressive trance"
+   ]
+  },
+  {
+   "id": "electronic.synthwave",
+   "family": "electronic",
+   "caption": "synthwave, retro analog arps, gated drum reverb, neon mood",
+   "aliases": [
+    "synthwave",
+    "retrowave",
+    "outrun"
+   ]
+  },
+  {
+   "id": "electronic.ambient-electronic",
+   "family": "electronic",
+   "caption": "ambient electronic, slowly drifting synth pads, minimal pulse",
+   "aliases": [
+    "ambient electronic",
+    "ambient",
+    "atmospheric",
+    "space music",
+    "new age",
+    "newage",
+    "meditation",
+    "relaxation",
+    "healing",
+    "nature",
+    "solo new age piano",
+    "solo instrumental new age piano",
+    "instrumental"
+   ]
+  },
+  {
+   "id": "electronic.drum-and-bass",
+   "family": "electronic",
+   "caption": "drum and bass, fast chopped break, heavy sub",
+   "aliases": [
+    "drum and bass",
+    "dnb",
+    "jungle",
+    "intelligent dnb"
+   ]
+  },
+  {
+   "id": "electronic.dubstep",
+   "family": "electronic",
+   "caption": "dubstep, half-time wobble bass, dark build",
+   "aliases": [
+    "dubstep",
+    "dub",
+    "dub/reggae",
+    "trance/dub"
+   ]
+  },
+  {
+   "id": "electronic.industrial",
+   "family": "electronic",
+   "caption": "industrial, metallic clang beat, distorted shout",
+   "aliases": [
+    "industrial",
+    "industrial/rock",
+    "industrial/electronic",
+    "ebm",
+    "industrial metal",
+    "aggrotech"
+   ]
+  },
+  {
+   "id": "electronic.breakbeat",
+   "family": "electronic",
+   "caption": "breakbeat, syncopated amen breaks, rave synth",
+   "aliases": [
+    "breakbeat",
+    "big beat",
+    "nu skool"
+   ]
+  },
+  {
+   "id": "electronic.hardstyle",
+   "family": "electronic",
+   "caption": "hardstyle, pounding distorted kick, euphoric breakdown",
+   "aliases": [
+    "hardstyle",
+    "raw style"
+   ]
+  },
+  {
+   "id": "electronic.italo-disco",
+   "family": "electronic",
+   "caption": "italo disco, sequenced bass, robotic vocal charm",
+   "aliases": [
+    "italo disco",
+    "disco",
+    "nu disco",
+    "french house",
+    "disco/pop",
+    "reggaeton",
+    "latin",
+    "latin jazz",
+    "latin/electronica"
+   ]
+  },
+  {
+   "id": "electronic.electro",
+   "family": "electronic",
+   "caption": "electro, funky robot beat, digital bass stab",
+   "aliases": [
+    "electro",
+    "electroclash",
+    "electroidm"
+   ]
+  },
+  {
+   "id": "electronic.chipwave",
+   "family": "electronic",
+   "caption": "chipwave, 8-bit arps, chiptune bleeps",
+   "aliases": [
+    "chipwave",
+    "8-bit",
+    "chiptune"
+   ]
+  },
+  {
+   "id": "electronic.future-funk",
+   "family": "electronic",
+   "caption": "future funk, sped soul chop, four-on-floor",
+   "aliases": [
+    "future funk",
+    "vaporwave",
+    "tropical"
+   ]
+  },
+  {
+   "id": "electronic.lounge",
+   "family": "electronic",
+   "caption": "lounge, retro bachelor pad kitsch, vibraphone and organ",
+   "aliases": [
+    "lounge",
+    "exotica",
+    "space age pop",
+    "easy listening",
+    "lounge electronic",
+    "easy listening"
+   ]
+  },
+  {
+   "id": "electronic.vapor",
+   "family": "electronic",
+   "caption": "vaporwave, slowed soul sample, glassy reverb",
+   "aliases": [
+    "vapor",
+    "vapor soul",
+    "fucked-up"
+   ]
+  },
+  {
+   "id": "electronic.new-age",
+   "family": "electronic",
+   "caption": "new age, serene synth pads, acoustic piano wash, meditational",
+   "aliases": [
+    "new age",
+    "relaxation",
+    "spa",
+    "healing",
+    "solo piano new age"
+   ]
+  },
+  {
+   "id": "electronic.electro-industrial",
+   "family": "electronic",
+   "caption": "electro-industrial, distorted synth loop, mechanical beat",
+   "aliases": [
+    "electro-industrial",
+    "industrial techno"
+   ]
+  },
+  {
+   "id": "electronic.uk-garage",
+   "family": "electronic",
+   "caption": "uk garage, shuffled 2-step skip, sub and diva chop",
+   "aliases": [
+    "uk garage",
+    "2-step",
+    "two-step",
+    "garage",
+    "speed garage",
+    "ukf"
+   ]
+  },
+  {
+   "id": "electronic.grime-instrumental",
+   "family": "electronic",
+   "caption": "instrumental grime, 140 sub skitter",
+   "aliases": [
+    "grime instrumental",
+    "grimetime"
+   ]
+  },
+  {
+   "id": "electronic.gabber",
+   "family": "electronic",
+   "caption": "gabber, distorted 180 kick, hardcore rave",
+   "aliases": [
+    "gabber",
+    "happy hardcore",
+    "hands up"
+   ]
+  },
+  {
+   "id": "electronic.dub-techno",
+   "family": "electronic",
+   "caption": "dub techno, echo chamber percussion, minimal deep",
+   "aliases": [
+    "dub techno",
+    "dubhouse"
+   ]
+  },
+  {
+   "id": "electronic.acid-techno",
+   "family": "electronic",
+   "caption": "acid techno, 303 squelch loop on 4/4",
+   "aliases": [
+    "acid techno",
+    "acid"
+   ]
+  },
+  {
+   "id": "electronic.tech-trance",
+   "family": "electronic",
+   "caption": "tech trance, minimal groove and melodic build",
+   "aliases": [
+    "tech trance",
+    "tech trance",
+    "progressive"
+   ]
+  },
+  {
+   "id": "electronic.psytrance",
+   "family": "electronic",
+   "caption": "psytrance, rolling bassline and 303 acid lead",
+   "aliases": [
+    "psytrance",
+    "psy",
+    "goa trance",
+    "full on",
+    "darkpsy",
+    "hi-tech"
+   ]
+  },
+  {
+   "id": "electronic.dream-trance",
+   "family": "electronic",
+   "caption": "dream trance, euphoric vocal pad build",
+   "aliases": [
+    "dream trance",
+    "vocal trance"
+   ]
+  },
+  {
+   "id": "electronic.future-bass",
+   "family": "electronic",
+   "caption": "future bass, supersaw pitchy chord, half-time trap drop",
+   "aliases": [
+    "future bass",
+    "melodic bass"
+   ]
+  },
+  {
+   "id": "electronic.witch-house",
+   "family": "electronic",
+   "caption": "witch house, chopped slow soul sample and trap and reverb",
+   "aliases": [
+    "witch house",
+    "trauma wave"
+   ]
+  },
+  {
+   "id": "electronic.dark-ambient",
+   "family": "electronic",
+   "caption": "dark ambient, cold drone, field dread",
+   "aliases": [
+    "dark ambient",
+    "drone",
+    "isolationist drone",
+    "power electronics",
+    "death industrial"
+   ]
+  },
+  {
+   "id": "electronic.minimal",
+   "family": "electronic",
+   "caption": "minimal, micro edit deep groove and glitch",
+   "aliases": [
+    "minimal",
+    "minimal tech"
+   ]
+  },
+  {
+   "id": "electronic.electro-funk",
+   "family": "electronic",
+   "caption": "electro funk, talkbox synth bass and breakbeat",
+   "aliases": [
+    "electro funk",
+    "bootleg",
+    "bmore"
+   ]
+  },
+  {
+   "id": "electronic.nortec",
+   "family": "electronic",
+   "caption": "nortec, cumbia percussion and electro synth",
+   "aliases": [
+    "nortec",
+    "norte\u00f1o electronic",
+    "corridos tumbados? no that latin"
+   ]
+  },
+  {
+   "id": "electronic.moombahton",
+   "family": "electronic",
+   "caption": "moombahton, reggaeton dembow at half-time trap",
+   "aliases": [
+    "moombahton",
+    "reggaeton? no"
+   ]
+  },
+  {
+   "id": "electronic.chillstep",
+   "family": "electronic",
+   "caption": "chillstep, soft lead and liquid drum pattern",
+   "aliases": [
+    "chillstep",
+    "liquid"
+   ]
+  },
+  {
+   "id": "world.reggae",
+   "family": "world",
+   "caption": "reggae, offbeat guitar skank, deep one-drop bass",
+   "aliases": [
+    "reggae",
+    "reggae & dub",
+    "dancehall",
+    "ska",
+    "roots reggae",
+    "lovers rock",
+    "soul reggae",
+    "reggaeton",
+    "latin",
+    "caribbean",
+    "ska punk",
+    "ska/jazz",
+    "jamaican"
+   ]
+  },
+  {
+   "id": "world.afrobeat",
+   "family": "world",
+   "caption": "afrobeat, polyrhythmic percussion, horn ostinato, chanting lead",
+   "aliases": [
+    "afrobeat",
+    "african",
+    "west african",
+    "african/latin",
+    "afro-funk",
+    "juju",
+    "highlife"
+   ]
+  },
+  {
+   "id": "world.latin",
+   "family": "world",
+   "caption": "latin, clave and congas, brass montuno, spanish vocal",
+   "aliases": [
+    "latin",
+    "salsa",
+    "merengue",
+    "bachata",
+    "cumbia",
+    "bossa nova",
+    "samba",
+    "tropical",
+    "latin jazz",
+    "latin pop",
+    "latin/mexican",
+    "mexican",
+    "mariachi",
+    "norte\u00f1o",
+    "tejano",
+    "banda",
+    "ranchera",
+    "corrido",
+    "cuban",
+    "caribbean"
+   ]
+  },
+  {
+   "id": "world.celtic",
+   "family": "world",
+   "caption": "celtic, fiddle and uilleann pipes, bodhr\u00e1n pulse, Gaelic song",
+   "aliases": [
+    "celtic",
+    "irish",
+    "scottish",
+    "breton",
+    "galician",
+    "world/celtic"
+   ]
+  },
+  {
+   "id": "world.middle-eastern",
+   "family": "world",
+   "caption": "middle eastern, maqam melody, darbuka groove, oud",
+   "aliases": [
+    "middle eastern",
+    "arabic",
+    "turkish",
+    "persian",
+    "balkan",
+    "greek",
+    "klezmer",
+    "hasidic",
+    "jewish"
+   ]
+  },
+  {
+   "id": "world.east-asian",
+   "family": "world",
+   "caption": "east asian, traditional instruments, pentatonic melody",
+   "aliases": [
+    "east asian",
+    "japanese",
+    "koto",
+    "shakuhachi",
+    "enka",
+    "guo yu",
+    "asian",
+    "bollywood",
+    "indian",
+    "classical indian",
+    "bhangra",
+    "filipino",
+    "thai",
+    "vietnamese"
+   ]
+  },
+  {
+   "id": "world.nordic",
+   "family": "world",
+   "caption": "nordic, hardingfele fiddle, sparse landscape",
+   "aliases": [
+    "nordic",
+    "scandinavian",
+    "nordic folk"
+   ]
+  },
+  {
+   "id": "world.hawaiian",
+   "family": "world",
+   "caption": "hawaiian, slack-key guitar, gentle island lilt",
+   "aliases": [
+    "hawaiian",
+    "island",
+    "polynesian",
+    "pacifika",
+    "maori",
+    "new zealand",
+    "aussie",
+    "australian",
+    "outback"
+   ]
+  },
+  {
+   "id": "world.tango",
+   "family": "world",
+   "caption": "tango, bandoneon sigh, dramatic strings, ballroom pulse",
+   "aliases": [
+    "tango",
+    "fado"
+   ]
+  },
+  {
+   "id": "world.flamenco",
+   "family": "world",
+   "caption": "flamenco, fast palmas, passionate cante, guitar",
+   "aliases": [
+    "flamenco",
+    "cante"
+   ]
+  },
+  {
+   "id": "world.polka",
+   "family": "world",
+   "caption": "polka, accordion and tuba, oom-pa dance beat",
+   "aliases": [
+    "polka",
+    "german",
+    "accordion",
+    "zydeco",
+    "cajun",
+    "creole",
+    "french"
+   ]
+  },
+  {
+   "id": "world.blues-world",
+   "family": "world",
+   "caption": "world blues, desert guitar, call-and-response, hypnotic groove",
+   "aliases": [
+    "blues world",
+    "world",
+    "international",
+    "worldbeats",
+    "world/funk"
+   ]
+  },
+  {
+   "id": "world.native-american",
+   "family": "world",
+   "caption": "native american, hand drum, breathy flute, ceremony song",
+   "aliases": [
+    "native american",
+    "indigenous",
+    "native americana"
+   ]
+  },
+  {
+   "id": "world.qawwali",
+   "family": "world",
+   "caption": "qawwali, sufi devotional building and claps",
+   "aliases": [
+    "qawwali",
+    "sufi",
+    "sufi rock"
+   ]
+  },
+  {
+   "id": "world.gamelan",
+   "family": "world",
+   "caption": "gamelan, interlocking tuned bronze and gong cycle",
+   "aliases": [
+    "gamelan",
+    "indonesian"
+   ]
+  },
+  {
+   "id": "world.kwaito",
+   "family": "world",
+   "caption": "kwaito, slowed house and township vocal",
+   "aliases": [
+    "kwaito",
+    "mbaqanga",
+    "mariachi? no",
+    "afrohouse"
+   ]
+  },
+  {
+   "id": "world.afro-house",
+   "family": "world",
+   "caption": "afro house, tribal drum and vocal chant over deep house",
+   "aliases": [
+    "afro-house",
+    "tribal",
+    "desert blues? already",
+    "tuareg? already"
+   ]
+  },
+  {
+   "id": "world.mbalax",
+   "family": "world",
+   "caption": "mbalax, sabar percussion and griot",
+   "aliases": [
+    "mbalax",
+    "griot",
+    "jali",
+    "highlife",
+    "juju",
+    "afrobeat"
+   ]
+  },
+  {
+   "id": "world.celtic-punk",
+   "family": "world",
+   "caption": "celtic punk, fiddle and punk stomp",
+   "aliases": [
+    "celtic punk",
+    "irish punk",
+    "dropkick"
+   ]
+  },
+  {
+   "id": "world.chutney",
+   "family": "world",
+   "caption": "chutney, dholak and syncopated soca",
+   "aliases": [
+    "chutney",
+    "bhangra",
+    "soca",
+    "calypso",
+    "dancehall",
+    "reggaeton",
+    "moombahton"
+   ]
+  },
+  {
+   "id": "world.klezmer",
+   "family": "world",
+   "caption": "klezmer, freilach bulgar, clarinet and violin",
+   "aliases": [
+    "klezmer",
+    "jewish? fam"
+   ]
+  },
+  {
+   "id": "world.fado",
+   "family": "world",
+   "caption": "fado, saudade and mournful guitar and voice",
+   "aliases": [
+    "fado",
+    "portuguese"
+   ]
+  },
+  {
+   "id": "world.rebetiko",
+   "family": "world",
+   "caption": "rebetiko, bouzouki and blue collar smoky",
+   "aliases": [
+    "rebetiko",
+    "greek",
+    "balkan?"
+   ]
+  },
+  {
+   "id": "world.tuvan",
+   "family": "world",
+   "caption": "tuvan throat singing, drone overtone",
+   "aliases": [
+    "tuvan",
+    "mongolian",
+    "nomad"
+   ]
+  },
+  {
+   "id": "world.celtic-new-age",
+   "family": "world",
+   "caption": "celtic new age, harp whistle and gentle synth and ritual",
+   "aliases": [
+    "celtic new age",
+    "harp",
+    "bard",
+    "medieval",
+    "renaissance",
+    "early music"
+   ]
+  },
+  {
+   "id": "world.norte\u00f1o",
+   "family": "world",
+   "caption": "norteno, accordion and bajo sexto and corrido",
+   "aliases": [
+    "norte\u00f1o",
+    "tejano",
+    "conjunto",
+    "mexican",
+    "banda",
+    "cumbia",
+    "ranchera",
+    "corrido",
+    "sierre\u00f1o"
+   ]
+  },
+  {
+   "id": "world.bossa-nova",
+   "family": "world",
+   "caption": "bossa nova, soft cool samba jazz and gentle guitar",
+   "aliases": [
+    "bossa nova",
+    "samba",
+    "mpb",
+    "brazilian",
+    "forro",
+    "ax\u00e9",
+    "tropic\u00e1lia",
+    "tropicalia"
+   ]
+  },
+  {
+   "id": "score.classical",
+   "family": "score",
+   "caption": "classical, full orchestra, sonata form, concert hall",
+   "aliases": [
+    "classical",
+    "general classical",
+    "classicical",
+    "orchestral",
+    "chamber",
+    "baroque",
+    "romantic",
+    "impressionist",
+    "modern classical",
+    "contemporary classical",
+    "classical/avant-garde",
+    "opera",
+    "vocal",
+    "choral",
+    "sacred",
+    "instrumental",
+    "classical guitar",
+    "piano",
+    "solo instrumental",
+    "solo piano"
+   ]
+  },
+  {
+   "id": "score.film-score",
+   "family": "score",
+   "caption": "film score, sweeping orchestral, leitmotif, cinematic scope",
+   "aliases": [
+    "film score",
+    "soundtrack",
+    "score",
+    "epic",
+    "cinematic",
+    "trailer",
+    "score & soundtrack",
+    "music/film score",
+    "film music"
+   ]
+  },
+  {
+   "id": "score.musical",
+   "family": "score",
+   "caption": "musical theatre, show-tune lyric, dramatic orchestration",
+   "aliases": [
+    "musical",
+    "broadway",
+    "show tunes",
+    "theatre"
+   ]
+  },
+  {
+   "id": "score.neoclassical",
+   "family": "score",
+   "caption": "neoclassical, minimalist piano and strings, reflective mood",
+   "aliases": [
+    "neoclassical",
+    "modern drone",
+    "piano",
+    "solo piano",
+    "contemporary instrumental"
+   ]
+  },
+  {
+   "id": "score.opera",
+   "family": "score",
+   "caption": "opera, dramatic bel canto lead, full orchestra and chorus",
+   "aliases": [
+    "opera",
+    "vocal/classical",
+    "classical vocal",
+    "choral",
+    "sacred",
+    "religious/classical"
+   ]
+  },
+  {
+   "id": "score.instrumental",
+   "family": "score",
+   "caption": "instrumental, showcase without vocal, focused arrangement",
+   "aliases": [
+    "instrumental",
+    "instrumental",
+    "instrumental pop",
+    "instrumental jazz",
+    "instrumental folk",
+    "solo",
+    "no vocal"
+   ]
+  },
+  {
+   "id": "score.concert-band",
+   "family": "score",
+   "caption": "concert band, winds and percussion, ceremonial march",
+   "aliases": [
+    "concert band",
+    "military",
+    "brass band",
+    "ceremonial"
+   ]
+  },
+  {
+   "id": "score.waltz",
+   "family": "score",
+   "caption": "waltz, three-time lilt, ballroom strings",
+   "aliases": [
+    "waltz",
+    "viennese",
+    "classical dance"
+   ]
+  },
+  {
+   "id": "score.minimalism",
+   "family": "score",
+   "caption": "minimalism, repeating pulse phase shift, piano and strings",
+   "aliases": [
+    "minimalism",
+    "phasic",
+    "post-minimal",
+    "contemporary classical"
+   ]
+  },
+  {
+   "id": "score.neoclassical-dark",
+   "family": "score",
+   "caption": "neoclassical dark, piano and cello with ambient haze",
+   "aliases": [
+    "neoclassical dark",
+    "darkwave classical",
+    "modern classical"
+   ]
+  },
+  {
+   "id": "score.epic-score",
+   "family": "score",
+   "caption": "epic score, hybrid orchestra and choir and synth",
+   "aliases": [
+    "epic score",
+    "trailer music",
+    "two steps",
+    "imminent",
+    "extensive trailer"
+   ]
+  },
+  {
+   "id": "score.video-game-music",
+   "family": "score",
+   "caption": "video game music, chiptune and orchestral, adventure",
+   "aliases": [
+    "video game music",
+    "chiptune",
+    "8-bit",
+    "game"
+   ]
+  },
+  {
+   "id": "score.orchestral",
+   "family": "score",
+   "caption": "orchestral, full symphony, dynamic arc",
+   "aliases": [
+    "orchestral",
+    "symphonic",
+    "concert",
+    "score classical"
+   ]
+  },
+  {
+   "id": "score.chamber",
+   "family": "score",
+   "caption": "chamber, intimate strings quartet, small ensemble",
+   "aliases": [
+    "chamber",
+    "string quartet",
+    "baroque?"
+   ]
+  },
+  {
+   "id": "score.solo-piano",
+   "family": "score",
+   "caption": "solo piano, unadorned piano, reflective",
+   "aliases": [
+    "solo piano",
+    "new age piano",
+    "modern piano",
+    "contemporary piano",
+    "neo classical piano",
+    "piano instrumental"
+   ]
+  },
+  {
+   "id": "score.opera-aria",
+   "family": "score",
+   "caption": "opera, dramatic vocal and orchestra, aria",
+   "aliases": [
+    "opera aria",
+    "vocal classical",
+    "classical vocal",
+    "coloratura",
+    "bel canto"
+   ]
+  },
+  {
+   "id": "score.march",
+   "family": "score",
+   "caption": "march, brass and snare, ceremonial",
+   "aliases": [
+    "march",
+    "military",
+    "parade",
+    "concert band",
+    " Sousa"
+   ]
+  },
+  {
+   "id": "score.concerto",
+   "family": "score",
+   "caption": "concerto, solo instrument and orchestra, virtuosic",
+   "aliases": [
+    "concerto",
+    "romantic classical",
+    "baroque classical",
+    "classical era"
+   ]
+  },
+  {
+   "id": "special.holiday",
+   "family": "special",
+   "caption": "holiday, sleigh bells and choir, festive warmth",
+   "aliases": [
+    "holiday",
+    "christmas",
+    "xmas",
+    "holiday",
+    "seasonal",
+    "valentine",
+    "easter",
+    "thanksgiving"
+   ]
+  },
+  {
+   "id": "special.children",
+   "family": "special",
+   "caption": "children's music, simple repetitive singalong, playful sound",
+   "aliases": [
+    "children",
+    "kids",
+    "nursery rhyme",
+    "juvenile",
+    "children",
+    "family",
+    "disney",
+    "educational",
+    "singalong",
+    "cartoon",
+    "kid"
+   ]
+  },
+  {
+   "id": "special.comedy",
+   "family": "special",
+   "caption": "comedy, spoken timing, novelty sound",
+   "aliases": [
+    "comedy",
+    "novelty",
+    "stand-up",
+    "parody",
+    "sketch",
+    "spoof",
+    "satire"
+   ]
+  },
+  {
+   "id": "special.a-cappella",
+   "family": "special",
+   "caption": "a cappella, unaccompanied vocal harmony, percussive mouth",
+   "aliases": [
+    "a cappella",
+    "vocal group",
+    "barbershop"
+   ]
+  },
+  {
+   "id": "special.cabaret",
+   "family": "special",
+   "caption": "cabaret, intimate vocal, smoky piano room",
+   "aliases": [
+    "cabaret",
+    "torch",
+    "burlesque"
+   ]
+  },
+  {
+   "id": "special.brass-band",
+   "family": "special",
+   "caption": "brass band, parade march, mellophone section",
+   "aliases": [
+    "brass band",
+    "drum corps"
+   ]
+  },
+  {
+   "id": "special.christmas",
+   "family": "special",
+   "caption": "christmas, sleigh bell and choir, festive",
+   "aliases": [
+    "christmas",
+    "xmas",
+    "holiday",
+    "carol",
+    "holiday pop",
+    "advent"
+   ]
+  },
+  {
+   "id": "special.children-song",
+   "family": "special",
+   "caption": "children song, simple repetitive and playful and educational",
+   "aliases": [
+    "children song",
+    "nursery",
+    "kid",
+    "juvenile",
+    "singalong",
+    "lullaby"
+   ]
+  },
+  {
+   "id": "special.comedy-rock",
+   "family": "special",
+   "caption": "comedy rock, novelty riff and absurd lyric and tight",
+   "aliases": [
+    "comedy rock",
+    "parody",
+    "novelty",
+    "weird al",
+    "satire",
+    "sketch",
+    "spoof",
+    "stand-up"
+   ]
+  },
+  {
+   "id": "special.spoken-word",
+   "family": "special",
+   "caption": "spoken word, poetic reading over minimal bed",
+   "aliases": [
+    "spoken word",
+    "audio book",
+    "poetry",
+    "speech",
+    "documentary",
+    "field recording?"
+   ]
+  },
+  {
+   "id": "special.new-age-special",
+   "family": "special",
+   "caption": "new age healing, spa music, chakra, relaxation",
+   "aliases": [
+    "new age special",
+    "relaxation",
+    "healing",
+    "spa",
+    "sound bath",
+    "solfeggio",
+    "binaural"
+   ]
+  },
+  {
+   "id": "soundfx.sound-effects",
+   "family": "soundfx",
+   "caption": "sound effects",
+   "aliases": [
+    "sound effects",
+    "sfx",
+    "fx",
+    "efx",
+    "sound effects",
+    "sound effect",
+    "sound",
+    "sound clip",
+    "sound bites",
+    "general",
+    "effects",
+    "soundscapes",
+    "field recording",
+    "atmospheric noise"
+   ]
+  }
+ ],
+ "alias_map": {
+  "classic rock": "rock.classic-rock",
+  "classic": "rock.classic-rock",
+  "rock classics": "rock.classic-rock",
+  "old rock": "rock.classic-rock",
+  "album rock": "rock.album-rock",
+  "southern rock": "rock.southern-rock",
+  "south rock": "rock.southern-rock",
+  "blues-rock": "rock.blues-rock",
+  "blues rock": "rock.blues-rock",
+  "blues/rock": "rock.blues-rock",
+  "folk-rock": "rock.folk-rock",
+  "folk rock": "rock.folk-rock",
+  "folk/rock": "rock.folk-rock",
+  "psychedelic rock": "rock.psychedelic-rock",
+  "psychedelic": "rock.psychedelic-rock",
+  "psych": "rock.psychedelic-rock",
+  "psych rock": "rock.psychedelic-rock",
+  "glam rock": "rock.glam-rock",
+  "glam": "rock.glam-rock",
+  "glitter rock": "rock.glam-rock",
+  "arena rock": "rock.arena-rock",
+  "stadium rock": "rock.arena-rock",
+  "heartland rock": "rock.heartland-rock",
+  "progressive rock": "rock.progressive-rock",
+  "prog rock": "rock.progressive-rock",
+  "progressive": "rock.progressive-rock",
+  "post-rock": "rock.post-rock",
+  "post rock": "rock.post-rock",
+  "experimental rock": "rock.experimental-rock",
+  "experimental": "rock.experimental-rock",
+  "soft rock": "rock.soft-rock",
+  "yacht rock": "rock.soft-rock",
+  "pub rock": "rock.pub-rock",
+  "desert rock": "rock.desert-rock",
+  "stoner rock": "rock.desert-rock",
+  "desert": "rock.desert-rock",
+  "garage rock": "rock.garage-rock",
+  "garage": "rock.garage-rock",
+  "garage punk": "rock.garage-rock",
+  "instrumental rock": "rock.instrumental-rock",
+  "math rock": "rock.math-rock",
+  "country rock": "rock.country-rock",
+  "country-rock": "rock.country-rock",
+  "chillwave": "rock.chillwave",
+  "pop rock": "rock.pop-rock",
+  "pop-rock": "rock.pop-rock",
+  "power pop": "rock.pop-rock",
+  "hard rock": "rock.hard-rock",
+  "hard-rock": "rock.hard-rock",
+  "harrdcore? none": "rock.hard-rock",
+  "surf rock": "rock.surf-rock",
+  "surf": "rock.surf-rock",
+  "beach music": "rock.surf-rock",
+  "beach": "rock.surf-rock",
+  "britpop": "rock.britpop",
+  "brit pop": "rock.britpop",
+  "british pop": "rock.britpop",
+  "space rock": "rock.space-rock",
+  "krautrock": "rock.krautrock",
+  "proto-punk": "rock.proto-punk",
+  "proto punk": "rock.proto-punk",
+  "piano rock": "rock.piano-rock",
+  "boogie rock": "rock.boogie-rock",
+  "alternative rock": "alt.alternative-rock",
+  "alternative": "alt.alternative-rock",
+  "alt rock": "alt.alternative-rock",
+  "alt. rock": "alt.alternative-rock",
+  "alternrock": "alt.alternative-rock",
+  "general alternative": "alt.alternative-rock",
+  "modern rock": "alt.alternative-rock",
+  "modern rock / alternative": "alt.alternative-rock",
+  "alternative & punk": "alt.alternative-rock",
+  "alternativo": "alt.alternative-rock",
+  "grunge": "alt.grunge",
+  "seattle grunge": "alt.grunge",
+  "post-grunge": "alt.post-grunge",
+  "post grunge": "alt.post-grunge",
+  "new wave": "alt.new-wave",
+  "newwave": "alt.new-wave",
+  "synthpop": "alt.synthpop",
+  "synth pop": "alt.synthpop",
+  "electropop": "alt.synthpop",
+  "gothic rock": "alt.gothic-rock",
+  "gothic": "alt.gothic-rock",
+  "goth rock": "alt.gothic-rock",
+  "shoegaze": "alt.shoegaze",
+  "post-punk": "alt.post-punk",
+  "post punk": "alt.post-punk",
+  "indie rock": "alt.indie-rock",
+  "indie": "alt.indie-rock",
+  "indie/alternative": "alt.indie-rock",
+  "indie pop": "alt.indie-pop",
+  "twee pop": "alt.indie-pop",
+  "twee": "alt.indie-pop",
+  "emo": "alt.emo",
+  "emo rock": "alt.emo",
+  "screamo": "alt.emo",
+  "art rock": "alt.art-rock",
+  "dark wave": "alt.dark-wave",
+  "darkwave": "alt.dark-wave",
+  "dream pop": "alt.dream-pop",
+  "dreampop": "alt.dream-pop",
+  "noise rock": "alt.noise-rock",
+  "alternative pop": "alt.alternative-pop",
+  "alt pop": "alt.alternative-pop",
+  "trip hop": "alt.trip-hop",
+  "trip-hop": "alt.trip-hop",
+  "jangle pop": "alt.jangle-pop",
+  "jangle": "alt.jangle-pop",
+  "noise pop": "alt.noise-pop",
+  "post-punk revival": "alt.post-punk-revival",
+  "new rock": "alt.post-punk-revival",
+  "indian rock": "alt.post-punk-revival",
+  "gothic metal": "alt.gothic-metal",
+  "gothic/alternativo": "alt.gothic-metal",
+  "gothic rock/alternativo": "alt.gothic-metal",
+  "dark cabaret": "alt.dark-cabaret",
+  "cabaret gothic": "alt.dark-cabaret",
+  "ethereal wave": "alt.ethereal-wave",
+  "4ad": "alt.ethereal-wave",
+  "indie electronic": "alt.indie-electronic",
+  "electropunk": "alt.indie-electronic",
+  "indietronica": "alt.indie-electronic",
+  "punk rock": "punk.punk-rock",
+  "punk": "punk.punk-rock",
+  "general punk": "punk.punk-rock",
+  "punk/alt": "punk.punk-rock",
+  "pop punk": "punk.pop-punk",
+  "pop-punk": "punk.pop-punk",
+  "hardcore punk": "punk.hardcore-punk",
+  "hardcore": "punk.hardcore-punk",
+  "hc punk": "punk.hardcore-punk",
+  "skate punk": "punk.skate-punk",
+  "melodic hardcore": "punk.skate-punk",
+  "anarcho punk": "punk.anarcho-punk",
+  "folk punk": "punk.folk-punk",
+  "punk blues": "punk.punk-blues",
+  "riot grrrl": "punk.riot-grrrl",
+  "horror punk": "punk.horror-punk",
+  "psychobilly": "punk.psychobilly",
+  "street punk": "punk.street-punk",
+  "oi": "punk.street-punk",
+  "oi!": "punk.street-punk",
+  "crust punk": "punk.crust-punk",
+  "crust": "punk.crust-punk",
+  "d-beat": "punk.d-beat",
+  "d beat": "punk.d-beat",
+  "powerviolence": "punk.powerviolence",
+  "pv": "punk.powerviolence",
+  "dance-punk": "punk.dance-punk",
+  "disko punk": "punk.dance-punk",
+  "queercore": "punk.queercore",
+  "heavy metal": "metal.heavy-metal",
+  "metal": "metal.heavy-metal",
+  "classic metal": "metal.heavy-metal",
+  "general metal": "metal.heavy-metal",
+  "thrash metal": "metal.thrash-metal",
+  "thrash": "metal.thrash-metal",
+  "death metal": "metal.death-metal",
+  "death": "metal.death-metal",
+  "black metal": "metal.black-metal",
+  "black": "metal.black-metal",
+  "doom metal": "metal.doom-metal",
+  "doom": "metal.doom-metal",
+  "power metal": "metal.power-metal",
+  "power": "metal.power-metal",
+  "speed metal": "metal.speed-metal",
+  "progressive metal": "metal.progressive-metal",
+  "prog metal": "metal.progressive-metal",
+  "nu metal": "metal.nu-metal",
+  "nu-metal": "metal.nu-metal",
+  "metalcore": "metal.metalcore",
+  "metal-core": "metal.metalcore",
+  "deathcore": "metal.deathcore",
+  "symphonic metal": "metal.symphonic-metal",
+  "symphonic": "metal.symphonic-metal",
+  "folk metal": "metal.folk-metal",
+  "celtic metal": "metal.folk-metal",
+  "sludge metal": "metal.sludge-metal",
+  "sludge": "metal.sludge-metal",
+  "stoner metal": "metal.stoner-metal",
+  "groove metal": "metal.groove-metal",
+  "groove": "metal.groove-metal",
+  "djent": "metal.djent",
+  "hair metal": "metal.hair-metal",
+  "glam metal": "metal.hair-metal",
+  "extreme metal": "metal.extreme-metal",
+  "viking metal": "metal.viking-metal",
+  "viking": "metal.viking-metal",
+  "pagan metal": "metal.pagan-metal",
+  "pagan": "metal.pagan-metal",
+  "unblack metal": "metal.unblack-metal",
+  "depressive black metal": "metal.depressive-black-metal",
+  "dsbm": "metal.depressive-black-metal",
+  "atmospheric black metal": "metal.atmospheric-black-metal",
+  "atmospheric black": "metal.atmospheric-black-metal",
+  "post-metal": "metal.atmospheric-black-metal",
+  "blackgaze": "metal.atmospheric-black-metal",
+  "technical death metal": "metal.technical-death-metal",
+  "tech death": "metal.technical-death-metal",
+  "progressive death": "metal.technical-death-metal",
+  "melodic death metal": "metal.melodic-death-metal",
+  "melodeath": "metal.melodic-death-metal",
+  "gothenburg": "metal.melodic-death-metal",
+  "symphonic black": "metal.symphonic-black",
+  "mathcore": "metal.mathcore",
+  "noisegrind": "metal.mathcore",
+  "grindcore": "metal.mathcore",
+  "crossover thrash": "metal.crossover-thrash",
+  "crossover": "metal.crossover-thrash",
+  "war metal": "metal.war-metal",
+  "epic metal": "metal.epic-metal",
+  "hip hop": "hiphop.hip-hop",
+  "rap": "hiphop.hip-hop",
+  "hip-hop": "hiphop.hip-hop",
+  "hip hop & rap": "hiphop.hip-hop",
+  "rap & hip-hop": "hiphop.hip-hop",
+  "rap & hip hop": "hiphop.hip-hop",
+  "hip hop/rap": "hiphop.hip-hop",
+  "rap/hip hop": "hiphop.hip-hop",
+  "general hip-hop": "hiphop.hip-hop",
+  "hip - hop": "hiphop.hip-hop",
+  "rap hip hop": "hiphop.hip-hop",
+  "alternative hip hop": "hiphop.hip-hop",
+  "underground hip-hop": "hiphop.hip-hop",
+  "rap alternativo": "hiphop.hip-hop",
+  "trap": "hiphop.trap",
+  "trap rap": "hiphop.trap",
+  "southern trap": "hiphop.trap",
+  "gangsta rap": "hiphop.gangsta-rap",
+  "gangsta": "hiphop.gangsta-rap",
+  "reality rap": "hiphop.gangsta-rap",
+  "g-funk": "hiphop.g-funk",
+  "west coast": "hiphop.g-funk",
+  "westcoast": "hiphop.g-funk",
+  "boom bap": "hiphop.boom-bap",
+  "east coast rap": "hiphop.boom-bap",
+  "eastcoast": "hiphop.boom-bap",
+  "conscious hip hop": "hiphop.conscious-hip-hop",
+  "political hip hop": "hiphop.conscious-hip-hop",
+  "conscious rap": "hiphop.conscious-hip-hop",
+  "southern hip hop": "hiphop.southern-hip-hop",
+  "dirty south": "hiphop.southern-hip-hop",
+  "south rap": "hiphop.southern-hip-hop",
+  "crunk": "hiphop.crunk",
+  "miami bass": "hiphop.miami-bass",
+  "horrorcore": "hiphop.horrorcore",
+  "old school hip hop": "hiphop.old-school-hip-hop",
+  "old school": "hiphop.old-school-hip-hop",
+  "80s rap": "hiphop.old-school-hip-hop",
+  "cloud rap": "hiphop.cloud-rap",
+  "cloud": "hiphop.cloud-rap",
+  "phonk": "hiphop.phonk",
+  "pop rap": "hiphop.pop-rap",
+  "rap/pop": "hiphop.pop-rap",
+  "rap/pop & hip-hop": "hiphop.pop-rap",
+  "experimental hip hop": "hiphop.experimental-hip-hop",
+  "abstract hip hop": "hiphop.experimental-hip-hop",
+  "instrumental hip hop": "hiphop.instrumental-hip-hop",
+  "beats": "hiphop.instrumental-hip-hop",
+  "chicano rap": "hiphop.chicano-rap",
+  "jazz rap": "hiphop.jazz-rap",
+  "jazz hop": "hiphop.jazz-rap",
+  "grime": "hiphop.grime",
+  "uk grime": "hiphop.grime",
+  "eskers": "hiphop.grime",
+  "drill": "hiphop.drill",
+  "uk drill": "hiphop.drill",
+  "brooklyn drill": "hiphop.drill",
+  "chicago drill": "hiphop.drill",
+  "hyphy": "hiphop.hyphy",
+  "bay area rap": "hiphop.hyphy",
+  "crunkcore": "hiphop.crunkcore",
+  "rage music": "hiphop.crunkcore",
+  "snap music": "hiphop.snap-music",
+  "crank that": "hiphop.snap-music",
+  "memphis rap": "hiphop.Memphis-rap",
+  "memphis": "hiphop.Memphis-rap",
+  "phonk raw": "hiphop.Memphis-rap",
+  "bounce": "hiphop.bounce",
+  "bouncing": "hiphop.bounce",
+  "sissy bounce": "hiphop.bounce",
+  "turntablism": "hiphop.turntablism",
+  "dj battle": "hiphop.turntablism",
+  "instrumental rap": "hiphop.turntablism",
+  "country rap": "hiphop.country-rap",
+  "hick hop": "hiphop.country-rap",
+  "underground rap": "hiphop.underground-rap",
+  "indie rap": "hiphop.underground-rap",
+  "conscious": "hiphop.underground-rap",
+  "hip hop rap": "hiphop.underground-rap",
+  "r&b": "rnb_soul.r&b",
+  "rnb": "rnb_soul.r&b",
+  "r & b": "rnb_soul.r&b",
+  "rhythm and blues": "rnb_soul.r&b",
+  "urban": "rnb_soul.r&b",
+  "r&b/rap": "rnb_soul.r&b",
+  "rap/r&b": "rnb_soul.r&b",
+  "urban contemporary": "rnb_soul.r&b",
+  "soul": "rnb_soul.soul",
+  "motown": "rnb_soul.soul",
+  "northern soul": "rnb_soul.soul",
+  "southern soul": "rnb_soul.soul",
+  "deep soul": "rnb_soul.soul",
+  "funk": "rnb_soul.funk",
+  "p-funk": "rnb_soul.funk",
+  "neo soul": "rnb_soul.neo-soul",
+  "neo-soul": "rnb_soul.neo-soul",
+  "smooth soul": "rnb_soul.smooth-soul",
+  "disco soul": "rnb_soul.disco-soul",
+  "philly soul": "rnb_soul.disco-soul",
+  "quiet storm": "rnb_soul.quiet-storm",
+  "new jack swing": "rnb_soul.new-jack-swing",
+  "jack swing": "rnb_soul.new-jack-swing",
+  "blues soul": "rnb_soul.blues-soul",
+  "modern r&b": "rnb_soul.modern-r&b",
+  "alternative r&b": "rnb_soul.modern-r&b",
+  "alt r&b": "rnb_soul.modern-r&b",
+  "boogie": "rnb_soul.boogie",
+  "post-disco": "rnb_soul.boogie",
+  "flex": "rnb_soul.boogie",
+  "go-go": "rnb_soul.go-go",
+  "go go": "rnb_soul.go-go",
+  "funk rock": "rnb_soul.funk-rock",
+  "funk metal": "rnb_soul.funk-rock",
+  "funk/rap": "rnb_soul.funk-rock",
+  "modern soul": "rnb_soul.modern-soul",
+  "retro soul": "rnb_soul.modern-soul",
+  "indie soul": "rnb_soul.modern-soul",
+  "motown soul": "rnb_soul.Motown",
+  "soul blues": "rnb_soul.soul-blues",
+  "pop": "pop.pop",
+  "general pop": "pop.pop",
+  "pop/pop": "pop.pop",
+  "top 40": "pop.pop",
+  "chart": "pop.pop",
+  "j-pop": "pop.pop",
+  "k-pop": "pop.pop",
+  "korean pop": "pop.pop",
+  "japanese pop": "pop.pop",
+  "latin pop": "pop.pop",
+  "francophone pop": "pop.pop",
+  "autre": "pop.pop",
+  "synth-pop": "pop.synthpop",
+  "dance-pop": "pop.dance-pop",
+  "disco-pop": "pop.dance-pop",
+  "teen pop": "pop.teen-pop",
+  "bubblegum": "pop.bubblegum",
+  "adult contemporary": "pop.adult-contemporary",
+  "easy listening": "pop.adult-contemporary",
+  "aci": "pop.adult-contemporary",
+  "contemporary": "pop.adult-contemporary",
+  "mood music": "pop.adult-contemporary",
+  "lite": "pop.adult-contemporary",
+  "art pop": "pop.art-pop",
+  "baroque pop": "pop.baroque-pop",
+  "sunshine pop": "pop.sunshine-pop",
+  "bedroom pop": "pop.bedroom-pop",
+  "country pop": "pop.country-pop",
+  "pop/country": "pop.country-pop",
+  "country/pop": "pop.country-pop",
+  "electro-pop": "pop.electropop",
+  "folk pop": "pop.folk-pop",
+  "pop folk": "pop.folk-pop",
+  "folk-pop": "pop.folk-pop",
+  "indie folk pop": "pop.folk-pop",
+  "vocal": "pop.vocal",
+  "vocal jazz": "pop.vocal",
+  "oldies": "pop.oldies",
+  "golden oldies": "pop.oldies",
+  "doo-wop": "pop.doo-wop",
+  "euro pop": "pop.euro-pop",
+  "eurodance": "pop.euro-pop",
+  "euro-dance": "pop.euro-pop",
+  "euro": "pop.euro-pop",
+  "euro house": "pop.euro-pop",
+  "power ballad": "pop.power-ballad",
+  "ballad": "pop.power-ballad",
+  "show pop": "pop.show-pop",
+  "city pop": "pop.city-pop",
+  "japanese pop funk": "pop.city-pop",
+  "sophisti-pop": "pop.sophisti-pop",
+  "hyperpop": "pop.hyperpop",
+  "future pop": "pop.hyperpop",
+  "digicore": "pop.hyperpop",
+  "y\u00e9-y\u00e9": "pop.y\u00e9-y\u00e9",
+  "ye ye": "pop.y\u00e9-y\u00e9",
+  "francophone": "pop.y\u00e9-y\u00e9",
+  "sunshine": "pop.sunshine",
+  "space age pop": "pop.space-age-pop",
+  "exotica": "pop.space-age-pop",
+  "protest pop": "pop.protest-pop",
+  "activist pop": "pop.protest-pop",
+  "new romance": "pop.new-romance",
+  "new romantic": "pop.new-romance",
+  "romantic": "pop.new-romance",
+  "synthwave pop": "pop.synthwave-pop",
+  "retropop": "pop.synthwave-pop",
+  "country": "country.country",
+  "general country": "country.country",
+  "country/general": "country.country",
+  "contemporary country": "country.contemporary-country",
+  "pop country": "country.contemporary-country",
+  "bro country": "country.contemporary-country",
+  "classic country": "country.classic-country",
+  "traditional country": "country.classic-country",
+  "hillbilly": "country.classic-country",
+  "outlaw country": "country.outlaw-country",
+  "outlaw": "country.outlaw-country",
+  "honky tonk": "country.honky-tonk",
+  "honky-tonk": "country.honky-tonk",
+  "southern country rock": "country.country-rock",
+  "red dirt": "country.country-rock",
+  "texas country": "country.country-rock",
+  "americana": "country.country-rock",
+  "bluegrass": "country.bluegrass",
+  "grass": "country.bluegrass",
+  "newgrass": "country.bluegrass",
+  "progressive bluegrass": "country.bluegrass",
+  "mtn jam": "country.bluegrass",
+  "alt country": "country.alt-country",
+  "alt-country": "country.alt-country",
+  "alternative country": "country.alt-country",
+  "cowpunk": "country.alt-country",
+  "western swing": "country.western-swing",
+  "western": "country.western-swing",
+  "country gospel": "country.country-gospel",
+  "christian country": "country.country-gospel",
+  "country/spiritual": "country.country-gospel",
+  "cowball": "country.cowball",
+  "singing cowboy": "country.cowball",
+  "western/country": "country.cowball",
+  "countrypolitan": "country.countrypolitan",
+  "polished country": "country.countrypolitan",
+  "bakersfield sound": "country.bakersfield-sound",
+  "rockabilly": "country.rockabilly",
+  "rocka billy": "country.rockabilly",
+  "neo-rockabilly": "country.rockabilly",
+  "psychobilly country": "country.rockabilly",
+  "nashville sound": "country.nashville-sound",
+  "countrypolitan classic": "country.nashville-sound",
+  "cowgirl": "country.cowgirl",
+  "country boogie": "country.country-boogie",
+  "two bit country": "country.country-boogie",
+  "western swing two beat": "country.country-boogie",
+  "appalachian": "country.appalachian",
+  "mountain": "country.appalachian",
+  "old time": "country.appalachian",
+  "progressive country": "country.progressive-country",
+  "texas/red dirt": "country.progressive-country",
+  "okie": "country.progressive-country",
+  "ouija": "country.progressive-country",
+  "redneck": "country.outlaw",
+  "rebel": "country.outlaw",
+  "folk": "folk.folk",
+  "contemporary folk": "folk.folk",
+  "general folk": "folk.folk",
+  "modern folk": "folk.folk",
+  "protest folk": "folk.folk",
+  "acoustic": "folk.acoustic",
+  "singer-songwriter": "folk.singer-songwriter",
+  "songwriter": "folk.singer-songwriter",
+  "rootworks": "folk.americana",
+  "no amplicana": "folk.americana",
+  "indie folk": "folk.indie-folk",
+  "folk indie": "folk.indie-folk",
+  "celtic folk": "folk.celtic-folk",
+  "celtic": "folk.celtic-folk",
+  "irish": "folk.celtic-folk",
+  "scottish": "folk.celtic-folk",
+  "celtic/new age": "folk.celtic-folk",
+  "celtic punk": "folk.celtic-folk",
+  "world folk": "folk.world-folk",
+  "international folk": "folk.world-folk",
+  "native americana": "folk.world-folk",
+  "progressive folk": "folk.progressive-folk",
+  "folk prog": "folk.progressive-folk",
+  "old-time": "folk.old-time",
+  "oldtime": "folk.old-time",
+  "string band": "folk.old-time",
+  "mountain string": "folk.old-time",
+  "anti-folk": "folk.anti-folk",
+  "anar-folk": "folk.anti-folk",
+  "unfolk": "folk.anti-folk",
+  "freak folk": "folk.freak-folk",
+  "freakfolk": "folk.freak-folk",
+  "new weird america": "folk.freak-folk",
+  "british folk": "folk.british-folk",
+  "electric folk": "folk.british-folk",
+  "folk punk? no": "folk.british-folk",
+  "folk baroque": "folk.british-folk",
+  "murder ballad": "folk.murder-ballad",
+  "dark folk": "folk.murder-ballad",
+  "apocalyptic folk": "folk.murder-ballad",
+  "neofolk": "folk.murder-ballad",
+  "sea shanty": "folk.sea-shanty",
+  "shanty": "folk.sea-shanty",
+  "folk chant": "folk.sea-shanty",
+  "protest song": "folk.protest-song",
+  "activist": "folk.protest-song",
+  "worker song": "folk.protest-song",
+  "new acoustic": "folk.new-acoustic",
+  "acoustic shred": "folk.new-acoustic",
+  "percussive acoustic": "folk.new-acoustic",
+  "blues": "blues.blues",
+  "general blues": "blues.blues",
+  "contemporary blues": "blues.blues",
+  "modern blues": "blues.blues",
+  "electric blues": "blues.blues",
+  "urban blues": "blues.blues",
+  "delta blues": "blues.delta-blues",
+  "country blues": "blues.delta-blues",
+  "acoustic blues": "blues.delta-blues",
+  "pre-war blues": "blues.delta-blues",
+  "chicago blues": "blues.chicago-blues",
+  "city blues": "blues.chicago-blues",
+  "texas blues": "blues.texas-blues",
+  "swamp blues": "blues.texas-blues",
+  "gospel blues": "blues.gospel-blues",
+  "jump blues": "blues.jump-blues",
+  "jump": "blues.jump-blues",
+  "british blues": "blues.british-blues",
+  "harmonica blues": "blues.harmonica-blues",
+  "harp blues": "blues.harmonica-blues",
+  "blues harp": "blues.harmonica-blues",
+  "acid blues": "blues.acid-blues",
+  "psych blues": "blues.acid-blues",
+  "blues rock revival": "blues.acid-blues",
+  "prewar blues": "blues.country-blues",
+  "pedlers": "blues.country-blues",
+  "boogie blues": "blues.boogie-blues",
+  "desert blues": "blues.desert-blues",
+  "tuareg": "blues.desert-blues",
+  "assouf": "blues.desert-blues",
+  "sahara blues": "blues.desert-blues",
+  "world blues": "blues.desert-blues",
+  "frat rock": "blues.frat-rock",
+  "college rock blues": "blues.frat-rock",
+  "jazz": "jazz.jazz",
+  "general jazz": "jazz.jazz",
+  "modern jazz": "jazz.jazz",
+  "jazz & blues": "jazz.jazz",
+  "jazz/vocal": "jazz.jazz",
+  "jazz/funk": "jazz.jazz",
+  "jazz/folk": "jazz.jazz",
+  "smooth jazz": "jazz.jazz",
+  "contemporary jazz": "jazz.jazz",
+  "modern creative jazz": "jazz.jazz",
+  "jazz instrumental": "jazz.jazz",
+  "jazz & instrumental": "jazz.jazz",
+  "jazz vocal": "jazz.jazz",
+  "cool jazz": "jazz.cool-jazz",
+  "west coast jazz": "jazz.cool-jazz",
+  "cool": "jazz.cool-jazz",
+  "bebop": "jazz.bebop",
+  "bop": "jazz.bebop",
+  "hard bop": "jazz.hard-bop",
+  "free jazz": "jazz.free-jazz",
+  "avant-garde jazz": "jazz.free-jazz",
+  "creative music": "jazz.free-jazz",
+  "jazz fusion": "jazz.jazz-fusion",
+  "fusion": "jazz.jazz-fusion",
+  "jazz rock": "jazz.jazz-fusion",
+  "quiet storm jazz": "jazz.smooth-jazz",
+  "big band": "jazz.big-band",
+  "swing": "jazz.big-band",
+  "swing jazz": "jazz.big-band",
+  "dance band": "jazz.big-band",
+  "jazz/big band": "jazz.big-band",
+  "lindy": "jazz.big-band",
+  "torch songs": "jazz.vocal-jazz",
+  "latin jazz": "jazz.latin-jazz",
+  "cuban jazz": "jazz.latin-jazz",
+  "afro-cuban jazz": "jazz.latin-jazz",
+  "jazz/latin": "jazz.latin-jazz",
+  "gypsy jazz": "jazz.gypsy-jazz",
+  "django": "jazz.gypsy-jazz",
+  "jazz manouche": "jazz.gypsy-jazz",
+  "manouche": "jazz.gypsy-jazz",
+  "ragtime": "jazz.ragtime",
+  "trad jazz": "jazz.trad-jazz",
+  "dixieland": "jazz.trad-jazz",
+  "new orleans jazz": "jazz.trad-jazz",
+  "soul jazz": "jazz.soul-jazz",
+  "jazz-funk? no": "jazz.soul-jazz",
+  "third stream": "jazz.third-stream",
+  "jazz classical": "jazz.third-stream",
+  "symphonic jazz": "jazz.third-stream",
+  "post-bop": "jazz.post-bop",
+  "hard bop modern": "jazz.post-bop",
+  "straight-ahead": "jazz.straight-ahead",
+  "mainstream jazz": "jazz.straight-ahead",
+  "trad?": "jazz.straight-ahead",
+  "free jazz? already": "jazz.avant-garde-jazz",
+  "creative?": "jazz.avant-garde-jazz",
+  "stride": "jazz.stride",
+  "piano stride": "jazz.stride",
+  "honky tonk piano": "jazz.stride",
+  "nu jazz": "jazz.nu-jazz",
+  "jazztronica": "jazz.nu-jazz",
+  "club jazz": "jazz.nu-jazz",
+  "torch": "jazz.jazz-vocal",
+  "jazz metal": "jazz.jazz-metal",
+  "jazzcore": "jazz.jazz-metal",
+  "free improvisation": "jazz.free-improvisation",
+  "no new music": "jazz.free-improvisation",
+  "atmospheric free": "jazz.free-improvisation",
+  "gospel": "gospel.gospel",
+  "religious": "gospel.gospel",
+  "black gospel": "gospel.gospel",
+  "southern gospel": "gospel.gospel",
+  "praise": "gospel.gospel",
+  "worship": "gospel.gospel",
+  "spiritual": "gospel.gospel",
+  "gospel & christian": "gospel.gospel",
+  "gospel/religious": "gospel.gospel",
+  "traditional gospel": "gospel.gospel",
+  "gospel reggae": "gospel.gospel",
+  "christian": "gospel.christian",
+  "ccm": "gospel.christian",
+  "contemporary christian": "gospel.christian",
+  "christian contemporary": "gospel.christian",
+  "christian rock": "gospel.christian-rock",
+  "christian metal": "gospel.christian-metal",
+  "christian punk": "gospel.christian-punk",
+  "praise & worship": "gospel.worship",
+  "negro spiritual": "gospel.spiritual",
+  "inspirational": "gospel.inspirational",
+  "spoken": "gospel.inspirational",
+  "religous": "gospel.inspirational",
+  "urban gospel": "gospel.urban-gospel",
+  "black urban gospel": "gospel.urban-gospel",
+  "gospel rap": "gospel.urban-gospel",
+  "praise and worship rap": "gospel.urban-gospel",
+  "praise and worship": "gospel.praise",
+  "praise/worship": "gospel.praise",
+  "ccm worship": "gospel.praise",
+  "christian alternative worship": "gospel.praise",
+  "gospel choir": "gospel.praise",
+  "choir": "gospel.praise",
+  "redemption": "gospel.redemption",
+  "christian rap": "gospel.redemption",
+  "christian metal? already": "gospel.redemption",
+  "gospel r&b": "gospel.redemption",
+  "psalm": "gospel.psalm",
+  "chant": "gospel.psalm",
+  "gregorian": "gospel.psalm",
+  "sacred choral": "gospel.psalm",
+  "orthodox chant": "gospel.psalm",
+  "byzantine": "gospel.psalm",
+  "electronica": "electronic.electronica",
+  "electronic": "electronic.electronica",
+  "electro": "electronic.electronica",
+  "electronica/dance": "electronic.electronica",
+  "electronica & dance": "electronic.electronica",
+  "general electro": "electronic.electronica",
+  "techno/electronica": "electronic.electronica",
+  "dub/electronica": "electronic.electronica",
+  "idm": "electronic.electronica",
+  "house": "electronic.house",
+  "deep house": "electronic.house",
+  "tech house": "electronic.house",
+  "garage house": "electronic.house",
+  "classic house": "electronic.house",
+  "funky house": "electronic.house",
+  "jazz house": "electronic.house",
+  "hard house": "electronic.house",
+  "acid house": "electronic.house",
+  "general house": "electronic.house",
+  "dj house": "electronic.house",
+  "techno": "electronic.techno",
+  "detroit techno": "electronic.techno",
+  "minimal techno": "electronic.techno",
+  "euro-techno": "electronic.techno",
+  "eu techno": "electronic.techno",
+  "trance": "electronic.trance",
+  "uplifting trance": "electronic.trance",
+  "vocal trance": "electronic.trance",
+  "goa": "electronic.trance",
+  "progressive trance": "electronic.trance",
+  "synthwave": "electronic.synthwave",
+  "retrowave": "electronic.synthwave",
+  "outrun": "electronic.synthwave",
+  "ambient electronic": "electronic.ambient-electronic",
+  "ambient": "electronic.ambient-electronic",
+  "atmospheric": "electronic.ambient-electronic",
+  "space music": "electronic.ambient-electronic",
+  "new age": "electronic.ambient-electronic",
+  "newage": "electronic.ambient-electronic",
+  "meditation": "electronic.ambient-electronic",
+  "relaxation": "electronic.ambient-electronic",
+  "healing": "electronic.ambient-electronic",
+  "nature": "electronic.ambient-electronic",
+  "solo new age piano": "electronic.ambient-electronic",
+  "solo instrumental new age piano": "electronic.ambient-electronic",
+  "instrumental": "electronic.ambient-electronic",
+  "drum and bass": "electronic.drum-and-bass",
+  "dnb": "electronic.drum-and-bass",
+  "jungle": "electronic.drum-and-bass",
+  "intelligent dnb": "electronic.drum-and-bass",
+  "dubstep": "electronic.dubstep",
+  "dub": "electronic.dubstep",
+  "dub/reggae": "electronic.dubstep",
+  "trance/dub": "electronic.dubstep",
+  "industrial": "electronic.industrial",
+  "industrial/rock": "electronic.industrial",
+  "industrial/electronic": "electronic.industrial",
+  "ebm": "electronic.industrial",
+  "industrial metal": "electronic.industrial",
+  "aggrotech": "electronic.industrial",
+  "breakbeat": "electronic.breakbeat",
+  "big beat": "electronic.breakbeat",
+  "nu skool": "electronic.breakbeat",
+  "hardstyle": "electronic.hardstyle",
+  "raw style": "electronic.hardstyle",
+  "italo disco": "electronic.italo-disco",
+  "disco": "electronic.italo-disco",
+  "nu disco": "electronic.italo-disco",
+  "french house": "electronic.italo-disco",
+  "disco/pop": "electronic.italo-disco",
+  "reggaeton": "electronic.italo-disco",
+  "latin": "electronic.italo-disco",
+  "latin/electronica": "electronic.italo-disco",
+  "electroclash": "electronic.electro",
+  "electroidm": "electronic.electro",
+  "chipwave": "electronic.chipwave",
+  "8-bit": "electronic.chipwave",
+  "chiptune": "electronic.chipwave",
+  "future funk": "electronic.future-funk",
+  "vaporwave": "electronic.future-funk",
+  "tropical": "electronic.future-funk",
+  "lounge": "electronic.lounge",
+  "lounge electronic": "electronic.lounge",
+  "vapor": "electronic.vapor",
+  "vapor soul": "electronic.vapor",
+  "fucked-up": "electronic.vapor",
+  "spa": "electronic.new-age",
+  "solo piano new age": "electronic.new-age",
+  "electro-industrial": "electronic.electro-industrial",
+  "industrial techno": "electronic.electro-industrial",
+  "uk garage": "electronic.uk-garage",
+  "2-step": "electronic.uk-garage",
+  "two-step": "electronic.uk-garage",
+  "speed garage": "electronic.uk-garage",
+  "ukf": "electronic.uk-garage",
+  "grime instrumental": "electronic.grime-instrumental",
+  "grimetime": "electronic.grime-instrumental",
+  "gabber": "electronic.gabber",
+  "happy hardcore": "electronic.gabber",
+  "hands up": "electronic.gabber",
+  "dub techno": "electronic.dub-techno",
+  "dubhouse": "electronic.dub-techno",
+  "acid techno": "electronic.acid-techno",
+  "acid": "electronic.acid-techno",
+  "tech trance": "electronic.tech-trance",
+  "psytrance": "electronic.psytrance",
+  "psy": "electronic.psytrance",
+  "goa trance": "electronic.psytrance",
+  "full on": "electronic.psytrance",
+  "darkpsy": "electronic.psytrance",
+  "hi-tech": "electronic.psytrance",
+  "dream trance": "electronic.dream-trance",
+  "future bass": "electronic.future-bass",
+  "melodic bass": "electronic.future-bass",
+  "witch house": "electronic.witch-house",
+  "trauma wave": "electronic.witch-house",
+  "dark ambient": "electronic.dark-ambient",
+  "drone": "electronic.dark-ambient",
+  "isolationist drone": "electronic.dark-ambient",
+  "power electronics": "electronic.dark-ambient",
+  "death industrial": "electronic.dark-ambient",
+  "minimal": "electronic.minimal",
+  "minimal tech": "electronic.minimal",
+  "electro funk": "electronic.electro-funk",
+  "bootleg": "electronic.electro-funk",
+  "bmore": "electronic.electro-funk",
+  "nortec": "electronic.nortec",
+  "norte\u00f1o electronic": "electronic.nortec",
+  "corridos tumbados? no that latin": "electronic.nortec",
+  "moombahton": "electronic.moombahton",
+  "reggaeton? no": "electronic.moombahton",
+  "chillstep": "electronic.chillstep",
+  "liquid": "electronic.chillstep",
+  "reggae": "world.reggae",
+  "reggae & dub": "world.reggae",
+  "dancehall": "world.reggae",
+  "ska": "world.reggae",
+  "roots reggae": "world.reggae",
+  "lovers rock": "world.reggae",
+  "soul reggae": "world.reggae",
+  "caribbean": "world.reggae",
+  "ska punk": "world.reggae",
+  "ska/jazz": "world.reggae",
+  "jamaican": "world.reggae",
+  "afrobeat": "world.afrobeat",
+  "african": "world.afrobeat",
+  "west african": "world.afrobeat",
+  "african/latin": "world.afrobeat",
+  "afro-funk": "world.afrobeat",
+  "juju": "world.afrobeat",
+  "highlife": "world.afrobeat",
+  "salsa": "world.latin",
+  "merengue": "world.latin",
+  "bachata": "world.latin",
+  "cumbia": "world.latin",
+  "bossa nova": "world.latin",
+  "samba": "world.latin",
+  "latin/mexican": "world.latin",
+  "mexican": "world.latin",
+  "mariachi": "world.latin",
+  "norte\u00f1o": "world.latin",
+  "tejano": "world.latin",
+  "banda": "world.latin",
+  "ranchera": "world.latin",
+  "corrido": "world.latin",
+  "cuban": "world.latin",
+  "breton": "world.celtic",
+  "galician": "world.celtic",
+  "world/celtic": "world.celtic",
+  "middle eastern": "world.middle-eastern",
+  "arabic": "world.middle-eastern",
+  "turkish": "world.middle-eastern",
+  "persian": "world.middle-eastern",
+  "balkan": "world.middle-eastern",
+  "greek": "world.middle-eastern",
+  "klezmer": "world.middle-eastern",
+  "hasidic": "world.middle-eastern",
+  "jewish": "world.middle-eastern",
+  "east asian": "world.east-asian",
+  "japanese": "world.east-asian",
+  "koto": "world.east-asian",
+  "shakuhachi": "world.east-asian",
+  "enka": "world.east-asian",
+  "guo yu": "world.east-asian",
+  "asian": "world.east-asian",
+  "bollywood": "world.east-asian",
+  "indian": "world.east-asian",
+  "classical indian": "world.east-asian",
+  "bhangra": "world.east-asian",
+  "filipino": "world.east-asian",
+  "thai": "world.east-asian",
+  "vietnamese": "world.east-asian",
+  "nordic": "world.nordic",
+  "scandinavian": "world.nordic",
+  "nordic folk": "world.nordic",
+  "hawaiian": "world.hawaiian",
+  "island": "world.hawaiian",
+  "polynesian": "world.hawaiian",
+  "pacifika": "world.hawaiian",
+  "maori": "world.hawaiian",
+  "new zealand": "world.hawaiian",
+  "aussie": "world.hawaiian",
+  "australian": "world.hawaiian",
+  "outback": "world.hawaiian",
+  "tango": "world.tango",
+  "fado": "world.tango",
+  "flamenco": "world.flamenco",
+  "cante": "world.flamenco",
+  "polka": "world.polka",
+  "german": "world.polka",
+  "accordion": "world.polka",
+  "zydeco": "world.polka",
+  "cajun": "world.polka",
+  "creole": "world.polka",
+  "french": "world.polka",
+  "blues world": "world.blues-world",
+  "world": "world.blues-world",
+  "international": "world.blues-world",
+  "worldbeats": "world.blues-world",
+  "world/funk": "world.blues-world",
+  "native american": "world.native-american",
+  "indigenous": "world.native-american",
+  "qawwali": "world.qawwali",
+  "sufi": "world.qawwali",
+  "sufi rock": "world.qawwali",
+  "gamelan": "world.gamelan",
+  "indonesian": "world.gamelan",
+  "kwaito": "world.kwaito",
+  "mbaqanga": "world.kwaito",
+  "mariachi? no": "world.kwaito",
+  "afrohouse": "world.kwaito",
+  "afro-house": "world.afro-house",
+  "tribal": "world.afro-house",
+  "desert blues? already": "world.afro-house",
+  "tuareg? already": "world.afro-house",
+  "mbalax": "world.mbalax",
+  "griot": "world.mbalax",
+  "jali": "world.mbalax",
+  "irish punk": "world.celtic-punk",
+  "dropkick": "world.celtic-punk",
+  "chutney": "world.chutney",
+  "soca": "world.chutney",
+  "calypso": "world.chutney",
+  "jewish? fam": "world.klezmer",
+  "portuguese": "world.fado",
+  "rebetiko": "world.rebetiko",
+  "balkan?": "world.rebetiko",
+  "tuvan": "world.tuvan",
+  "mongolian": "world.tuvan",
+  "nomad": "world.tuvan",
+  "celtic new age": "world.celtic-new-age",
+  "harp": "world.celtic-new-age",
+  "bard": "world.celtic-new-age",
+  "medieval": "world.celtic-new-age",
+  "renaissance": "world.celtic-new-age",
+  "early music": "world.celtic-new-age",
+  "conjunto": "world.norte\u00f1o",
+  "sierre\u00f1o": "world.norte\u00f1o",
+  "mpb": "world.bossa-nova",
+  "brazilian": "world.bossa-nova",
+  "forro": "world.bossa-nova",
+  "ax\u00e9": "world.bossa-nova",
+  "tropic\u00e1lia": "world.bossa-nova",
+  "tropicalia": "world.bossa-nova",
+  "classical": "score.classical",
+  "general classical": "score.classical",
+  "classicical": "score.classical",
+  "orchestral": "score.classical",
+  "chamber": "score.classical",
+  "baroque": "score.classical",
+  "impressionist": "score.classical",
+  "modern classical": "score.classical",
+  "contemporary classical": "score.classical",
+  "classical/avant-garde": "score.classical",
+  "opera": "score.classical",
+  "choral": "score.classical",
+  "sacred": "score.classical",
+  "classical guitar": "score.classical",
+  "piano": "score.classical",
+  "solo instrumental": "score.classical",
+  "solo piano": "score.classical",
+  "film score": "score.film-score",
+  "soundtrack": "score.film-score",
+  "score": "score.film-score",
+  "epic": "score.film-score",
+  "cinematic": "score.film-score",
+  "trailer": "score.film-score",
+  "score & soundtrack": "score.film-score",
+  "music/film score": "score.film-score",
+  "film music": "score.film-score",
+  "musical": "score.musical",
+  "broadway": "score.musical",
+  "show tunes": "score.musical",
+  "theatre": "score.musical",
+  "neoclassical": "score.neoclassical",
+  "modern drone": "score.neoclassical",
+  "contemporary instrumental": "score.neoclassical",
+  "vocal/classical": "score.opera",
+  "classical vocal": "score.opera",
+  "religious/classical": "score.opera",
+  "instrumental pop": "score.instrumental",
+  "instrumental jazz": "score.instrumental",
+  "instrumental folk": "score.instrumental",
+  "solo": "score.instrumental",
+  "no vocal": "score.instrumental",
+  "concert band": "score.concert-band",
+  "military": "score.concert-band",
+  "brass band": "score.concert-band",
+  "ceremonial": "score.concert-band",
+  "waltz": "score.waltz",
+  "viennese": "score.waltz",
+  "classical dance": "score.waltz",
+  "minimalism": "score.minimalism",
+  "phasic": "score.minimalism",
+  "post-minimal": "score.minimalism",
+  "neoclassical dark": "score.neoclassical-dark",
+  "darkwave classical": "score.neoclassical-dark",
+  "epic score": "score.epic-score",
+  "trailer music": "score.epic-score",
+  "two steps": "score.epic-score",
+  "imminent": "score.epic-score",
+  "extensive trailer": "score.epic-score",
+  "video game music": "score.video-game-music",
+  "game": "score.video-game-music",
+  "concert": "score.orchestral",
+  "score classical": "score.orchestral",
+  "string quartet": "score.chamber",
+  "baroque?": "score.chamber",
+  "new age piano": "score.solo-piano",
+  "modern piano": "score.solo-piano",
+  "contemporary piano": "score.solo-piano",
+  "neo classical piano": "score.solo-piano",
+  "piano instrumental": "score.solo-piano",
+  "opera aria": "score.opera-aria",
+  "vocal classical": "score.opera-aria",
+  "coloratura": "score.opera-aria",
+  "bel canto": "score.opera-aria",
+  "march": "score.march",
+  "parade": "score.march",
+  "sousa": "score.march",
+  "concerto": "score.concerto",
+  "romantic classical": "score.concerto",
+  "baroque classical": "score.concerto",
+  "classical era": "score.concerto",
+  "holiday": "special.holiday",
+  "christmas": "special.holiday",
+  "xmas": "special.holiday",
+  "seasonal": "special.holiday",
+  "valentine": "special.holiday",
+  "easter": "special.holiday",
+  "thanksgiving": "special.holiday",
+  "children": "special.children",
+  "kids": "special.children",
+  "nursery rhyme": "special.children",
+  "juvenile": "special.children",
+  "family": "special.children",
+  "disney": "special.children",
+  "educational": "special.children",
+  "singalong": "special.children",
+  "cartoon": "special.children",
+  "kid": "special.children",
+  "comedy": "special.comedy",
+  "novelty": "special.comedy",
+  "stand-up": "special.comedy",
+  "parody": "special.comedy",
+  "sketch": "special.comedy",
+  "spoof": "special.comedy",
+  "satire": "special.comedy",
+  "a cappella": "special.a-cappella",
+  "vocal group": "special.a-cappella",
+  "barbershop": "special.a-cappella",
+  "cabaret": "special.cabaret",
+  "burlesque": "special.cabaret",
+  "drum corps": "special.brass-band",
+  "carol": "special.christmas",
+  "holiday pop": "special.christmas",
+  "advent": "special.christmas",
+  "children song": "special.children-song",
+  "nursery": "special.children-song",
+  "lullaby": "special.children-song",
+  "comedy rock": "special.comedy-rock",
+  "weird al": "special.comedy-rock",
+  "spoken word": "special.spoken-word",
+  "audio book": "special.spoken-word",
+  "poetry": "special.spoken-word",
+  "speech": "special.spoken-word",
+  "documentary": "special.spoken-word",
+  "field recording?": "special.spoken-word",
+  "new age special": "special.new-age-special",
+  "sound bath": "special.new-age-special",
+  "solfeggio": "special.new-age-special",
+  "binaural": "special.new-age-special",
+  "sound effects": "soundfx.sound-effects",
+  "sfx": "soundfx.sound-effects",
+  "fx": "soundfx.sound-effects",
+  "efx": "soundfx.sound-effects",
+  "sound effect": "soundfx.sound-effects",
+  "sound": "soundfx.sound-effects",
+  "sound clip": "soundfx.sound-effects",
+  "sound bites": "soundfx.sound-effects",
+  "general": "soundfx.sound-effects",
+  "effects": "soundfx.sound-effects",
+  "soundscapes": "soundfx.sound-effects",
+  "field recording": "soundfx.sound-effects",
+  "atmospheric noise": "soundfx.sound-effects",
+  "rock": "FAM:rock",
+  "rock & roll": "FAM:rock",
+  "rock and roll": "FAM:rock",
+  "rock'n'roll": "FAM:rock",
+  "rock-n-roll": "FAM:rock",
+  "r&r": "FAM:rock",
+  "general rock": "FAM:rock",
+  "rock general": "FAM:rock",
+  "rock alternatives": "FAM:rock",
+  "alt": "FAM:alt",
+  "alternativo alternativo": "FAM:alt",
+  "alternativas": "FAM:alt",
+  "general alternativo": "FAM:alt",
+  "alternativo general": "FAM:alt",
+  "metal & rock": "FAM:metal",
+  "metal/rock": "FAM:metal",
+  "power/thrash": "FAM:metal",
+  "punk/alternativo": "FAM:punk",
+  "rap/hip-hop": "FAM:hiphop",
+  "hip pop": "FAM:hiphop",
+  "rap metal": "FAM:hiphop",
+  "rap/metal": "FAM:hiphop",
+  "rap rock": "FAM:hiphop",
+  "rap/rock": "FAM:hiphop",
+  "soul and r&b": "FAM:rnb_soul",
+  "soul & r&b": "FAM:rnb_soul",
+  "soul/r&b": "FAM:rnb_soul",
+  "r&b/hip-hop": "FAM:rnb_soul",
+  "pop & rock": "FAM:pop",
+  "pop/general": "FAM:pop",
+  "pop alternative": "FAM:pop",
+  "adult alternative": "FAM:pop",
+  "dance/pop": "FAM:pop",
+  "pop/punk": "FAM:pop",
+  "c-pop": "FAM:pop",
+  "pop & rap": "FAM:pop",
+  "pop metal": "FAM:pop",
+  "punk pop": "FAM:pop",
+  "alternative/pop": "FAM:pop",
+  "country & western": "FAM:country",
+  "country/western": "FAM:country",
+  "west/country": "FAM:country",
+  "country/folk": "FAM:country",
+  "folk/country": "FAM:country",
+  "country & bluegrass": "FAM:country",
+  "country & roots": "FAM:country",
+  "country alternative": "FAM:country",
+  "american country": "FAM:country",
+  "folk & acoustic": "FAM:folk",
+  "folk music": "FAM:folk",
+  "folk/world": "FAM:folk",
+  "world/folk": "FAM:folk",
+  "regional mexicano": "FAM:folk",
+  "blues & gospel": "FAM:blues",
+  "blues/funk": "FAM:blues",
+  "blues & jazz": "FAM:blues",
+  "jazz/blues": "FAM:blues",
+  "blues rock? already": "FAM:blues",
+  "blues & roots": "FAM:blues",
+  "blues/alternative": "FAM:blues",
+  "jazz & vocal": "FAM:jazz",
+  "jazz/spiritual": "FAM:jazz",
+  "jazz/rock": "FAM:jazz",
+  "jazz/soul": "FAM:jazz",
+  "jazz/pop": "FAM:jazz",
+  "jazz/rock & roll": "FAM:jazz",
+  "jazz/electronic": "FAM:jazz",
+  "jazz/gospel": "FAM:jazz",
+  "traditional jazz": "FAM:jazz",
+  "mainstream": "FAM:jazz",
+  "gospel & religious": "FAM:gospel",
+  "gospel & choirs": "FAM:gospel",
+  "christian & gospel": "FAM:gospel",
+  "christian/gospel": "FAM:gospel",
+  "gospel & inspirational": "FAM:gospel",
+  "gospel/christian": "FAM:gospel",
+  "gospel standard": "FAM:gospel",
+  "gospel & r&b": "FAM:gospel",
+  "r&b/gospel": "FAM:gospel",
+  "gospel & jazz": "FAM:gospel",
+  "jazz & gospel": "FAM:gospel",
+  "dj": "FAM:electronic",
+  "club/dance": "FAM:electronic",
+  "dance": "FAM:electronic",
+  "dance/electronic": "FAM:electronic",
+  "dance/club": "FAM:electronic",
+  "electronic/dance": "FAM:electronic",
+  "electronic / techno": "FAM:electronic",
+  "synth": "FAM:electronic",
+  "dj dance": "FAM:electronic",
+  "electro/indie": "FAM:electronic",
+  "dj electronica": "FAM:electronic",
+  "drum & bass": "FAM:electronic",
+  "drum'n'bass": "FAM:electronic",
+  "rave": "FAM:electronic",
+  "club": "FAM:electronic",
+  "dj set": "FAM:electronic",
+  "euro dance": "FAM:electronic",
+  "italo": "FAM:electronic",
+  "filter house": "FAM:electronic",
+  "prog house": "FAM:electronic",
+  "vocal house": "FAM:electronic",
+  "electro disco": "FAM:electronic",
+  "new disco": "FAM:electronic",
+  "freestyle": "FAM:electronic",
+  "booty": "FAM:electronic",
+  "reggaeton? latin": "FAM:electronic",
+  "club reggaeton": "FAM:electronic",
+  "worldmusic": "FAM:world",
+  "world/reggae": "FAM:world",
+  "reggae & world": "FAM:world",
+  "bossa": "FAM:world",
+  "afro": "FAM:world",
+  "celtic? folk": "FAM:world",
+  "celtic/world": "FAM:world",
+  "new age? electronic": "FAM:score",
+  "classical/pop": "FAM:classical",
+  "classical/crossover": "FAM:classical",
+  "classical crossover": "FAM:classical",
+  "symphony": "FAM:classical",
+  "new year": "FAM:special",
+  "valentines? no": "FAM:special",
+  "theatrical": "FAM:special",
+  "show": "FAM:special",
+  "unknown": "FAM:soundfx",
+  "misc": "FAM:soundfx",
+  "other": "FAM:soundfx",
+  "default": "FAM:soundfx",
+  "2004": "FAM:soundfx",
+  "sos": "FAM:soundfx",
+  "divers": "FAM:soundfx",
+  "genre": "FAM:soundfx",
+  "mp3 1": "FAM:soundfx",
+  "mp3": "FAM:soundfx",
+  "english music audio": "FAM:soundfx",
+  "soca artist drop": "FAM:soundfx",
+  "audiophile": "FAM:soundfx",
+  "untagged": "FAM:soundfx",
+  "no genre": "FAM:soundfx",
+  "n/a": "FAM:soundfx",
+  "na": "FAM:soundfx",
+  "none": "FAM:soundfx",
+  "misc sound effects": "FAM:soundfx",
+  "audio": "FAM:soundfx",
+  "audio grabber": "FAM:soundfx",
+  "general sound effects": "FAM:soundfx",
+  "soundscape": "FAM:soundfx"
+ },
+ "junk_genres": [
+  "mp3 1",
+  "mp3",
+  "other",
+  "unknown",
+  "general",
+  "genre",
+  "misc",
+  "default",
+  "2004",
+  "sos",
+  "english music audio",
+  "soca artist drop",
+  "divers",
+  "tous les styles",
+  "no genre",
+  "n/a",
+  "na",
+  "none",
+  "untagged",
+  "audiophile",
+  "test"
+ ],
+ "split_chars": [
+  " & ",
+  "/",
+  ",",
+  " and "
+ ]
+}

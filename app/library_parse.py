@@ -298,6 +298,9 @@ def enrich_recording(rec, path: Path, *, tags_reader: Callable[[Path], dict] | N
 
     if state == "suspect":
         rec.review_required = True
-    from .style_tags import apply_style_tags
-    apply_style_tags(rec)
+    try:
+        from .style_tags import apply_style_tags
+        apply_style_tags(rec)
+    except (OSError, ValueError):  # taxonomy asset unavailable (e.g. old bundle)
+        pass
     return state

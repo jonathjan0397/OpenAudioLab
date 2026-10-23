@@ -15,7 +15,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-_TAX_PATH = Path(__file__).parent / "data" / "style_taxonomy.json"
+_TAX_PATH = Path(__file__).parent / "style_data" / "style_taxonomy.json"
 _cache: dict | None = None
 
 

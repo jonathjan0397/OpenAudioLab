@@ -27,7 +27,7 @@ APP_DIR = Path(__file__).resolve().parents[1]
 def build_bundle(revision: str) -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
-        for path in sorted(APP_DIR.rglob("*.py")):
+        for path in sorted(list(APP_DIR.rglob("*.py")) + list(APP_DIR.rglob("*.json"))):
             if "__pycache__" in path.parts:
                 continue
             tar.add(path, arcname=f"app/{path.relative_to(APP_DIR).as_posix()}")
