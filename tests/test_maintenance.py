@@ -13,7 +13,8 @@ _SEQ = iter(range(1, 10000))
 
 
 def _attempt(client, *, state="running", with_node=None, stale_node=False):
-    from app.models import MlRecording, MlSource
+    from app.models import (Job, JobAttempt, MlRecording, MlSource, new_uuid,
+                            utcnow)
 
     db = client.app.state.db
     budget_id = f"b-{next(_SEQ)}"
