@@ -3598,6 +3598,9 @@ def admin_model_lab_dataset_create(body: MlDatasetCreate, request: Request) -> J
             ds = freeze_dataset(session, body.name, ids, kind=body.kind,
                                 allow_instrumental=body.allow_instrumental,
                                 allow_suspect=body.allow_suspect)
+            if body.style_tag:
+                ds.report_json = {**(ds.report_json or {}), "style_tag": body.style_tag}
+                session.commit()
         except ValueError as exc:
             raise ApiError(422, "DATASET_INVALID", str(exc)) from exc
         return JSONResponse({"id": ds.id, "name": ds.name, "kind": ds.kind,
@@ -3630,7 +3633,8 @@ def admin_model_lab_dataset_train(dataset_id: str, request: Request,
 
     body = body or {}
     recipe = {"wall_hours": body.get("wall_hours"), "epochs": body.get("epochs"),
-              "seed": body.get("seed"), "base_model": body.get("base_model")}
+              "seed": body.get("seed"), "base_model": body.get("base_model"),
+              "auto_eval": bool(body.get("auto_eval")) or None}
     recipe = {k: v for k, v in recipe.items() if v is not None}
     with request.app.state.db.session() as session:
         ds = session.get(MlDataset, dataset_id)

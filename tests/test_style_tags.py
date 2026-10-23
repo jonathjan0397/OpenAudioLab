@@ -147,3 +147,98 @@ def test_select_respects_artist_cap_and_decades(client) -> None:
         session.commit()
         picked = select_for_style_tag(session, "electronic.house", target=20, floor=5)
     assert len(picked) == 20  # single artist: cap ladder relaxes until target is met
+
+
+def test_eval_prompts_for_subgenre_siblings_and_control(client) -> None:
+    for _ in range(3):
+        _make(client, genre="Heavy Metal")
+    for _ in range(2):
+        _make(client, genre="Thrash")
+    _make(client, genre="Doom Metal")
+    client.post("/api/v1/admin/model-lab/restyle")
+    from app.style_tags import eval_prompts_for
+
+    with client.app.state.db.session() as session:
+        prompts = eval_prompts_for(session, "metal.heavy-metal", siblings=2)
+    names = [p["name"] for p in prompts]
+    assert names[0] == "metal-heavy-metal" and names[-1] == "control-neutral"
+    assert "metal-thrash-metal" in names  # densest sibling included
+    assert len(prompts) == 4
+
+
+def test_eval_prompts_family_level_expands(client) -> None:
+    for _ in range(4):
+        _make(client, genre="Bluegrass")
+    _make(client, genre="Outlaw Country")
+    client.post("/api/v1/admin/model-lab/restyle")
+    from app.style_tags import eval_prompts_for
+
+    with client.app.state.db.session() as session:
+        prompts = eval_prompts_for(session, "country")
+    assert prompts[0]["name"] == "country-bluegrass"  # densest in family leads
+
+
+def test_voice_eval_prompts_use_trained_lyrics() -> None:
+    from types import SimpleNamespace
+
+    from app.style_tags import voice_eval_prompts
+
+    ds = SimpleNamespace(manifest_json={"entries": [
+        {"caption": "Alabama - One", "lyrics": "trained line one"},
+        {"caption": "Alabama - Two", "lyrics": "trained line two"},
+        {"caption": "no lyrics"}]})
+    prompts = voice_eval_prompts(ds)
+    assert [p["name"] for p in prompts] == ["voice-trained-1", "voice-trained-2",
+                                            "control-instr"]
+    assert prompts[0]["lyrics"] == "trained line one"
+    assert prompts[2]["instrumental"] is True
+
+
+def test_chain_eval_job_queues_style_and_voice(client) -> None:
+    from types import SimpleNamespace
+
+    import app.training_worker as tw
+    from app.models import Job, MlDataset, MlSource, new_uuid
+
+    for _ in range(2):
+        _make(client, genre="Synthpop")
+    client.post("/api/v1/admin/model-lab/restyle")
+    with client.app.state.db.session() as session:
+        ds = MlDataset(id=new_uuid(), name="chain-s", kind="style", frozen_sha256="f",
+                       manifest_json={"entries": []},
+                       report_json={"style_tag": "alt.synthpop"})
+        session.add(ds)
+        session.commit()
+        ds_id = ds.id
+    w = SimpleNamespace(db=client.app.state.db, storage=client.app.state.storage,
+                        settings=client.app.state.settings)
+    job_id = tw.TrainingWorker._chain_eval_job(w, "bundle-123", ds_id)
+    assert job_id
+    from sqlalchemy import select as _sel
+    with client.app.state.db.session() as session:
+        job = session.execute(_sel(Job).where(Job.id == job_id)).scalar_one()
+        assert job.operation == "model_lab.eval"
+        names = [p["name"] for p in job.request_json["prompts"]]
+        assert names[0] == "alt-synthpop" and names[-1] == "control-neutral"
+
+
+def test_root_index_links_bundle_pages(tmp_path) -> None:
+    from app.review import build_review_page, write_root_index
+
+    for bid in ("b1", "b2"):
+        d = tmp_path / bid
+        d.mkdir()
+        (d / "baseline-x.mp3").write_bytes(b"a")
+        (d / "candidate-x.mp3").write_bytes(b"b")
+        build_review_page(d, bundle={"name": f"n-{bid}", "version": "v1", "kind": "adapter",
+                                     "base_model": "x", "sha256": "abc", "seed": 42,
+                                     "duration_seconds": 30},
+                          samples=[{"mode": "baseline", "prompt": "x", "caption": "c",
+                                    "file": "baseline-x.mp3", "bytes": 1, "sha256": "s"},
+                                   {"mode": "candidate", "prompt": "x", "caption": "c",
+                                    "file": "candidate-x.mp3", "bytes": 1, "sha256": "t"}],
+                          references=[])
+    root = write_root_index(tmp_path)
+    assert root and (tmp_path / "index.html").is_file()
+    text = Path(root).read_text()
+    assert "n-b1" in text and "b2/index.html" in text

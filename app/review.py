@@ -142,3 +142,33 @@ def build_review_page(dest: Path, *, bundle: dict, samples: list[dict],
     page = dest / "index.html"
     page.write_text("\n".join(lines), encoding="utf-8")
     return str(page)
+
+
+def write_root_index(root: Path) -> str | None:
+    """review/index.html: every bundle checkpoint, newest pages first-ish."""
+    if not root.is_dir():
+        return None
+    rows = []
+    for d in sorted(p for p in root.iterdir() if p.is_dir()):
+        page = d / "index.html"
+        if not page.is_file():
+            continue
+        try:
+            text = page.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        import re as _re
+        m = _re.search(r"<title>Review — ([^<]+)</title>", text)
+        name = m.group(1) if m else d.name
+        rows.append(f"<tr><td><a href='{d.name}/index.html'>{html.escape(name)}</a></td>"
+                    f"<td class='p'>{d.name}</td></tr>")
+    if not rows:
+        return None
+    doc = ("<!doctype html><html><head><meta charset='utf-8'>"
+           "<title>Training checkpoints — review index</title>"
+           f"<style>{_CSS}</style></head><body><h1>Training checkpoints</h1>"
+           "<div class='summary'>Each row links to a baseline-vs-candidate A/B set with "
+           "training references.</div><table><tr><th>Bundle</th><th>id</th></tr>"
+           + "".join(rows) + "</table></body></html>")
+    (root / "index.html").write_text(doc, encoding="utf-8")
+    return str(root / "index.html")

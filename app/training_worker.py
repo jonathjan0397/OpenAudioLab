@@ -847,12 +847,17 @@ class TrainingWorker:
                 result["reload"] = "ok"
             except EngineError as exc:
                 result["reload"] = f"failed: {exc}"
+        auto_eval = False
         with self.db.session() as session:
             attempt = session.get(MlTrainingAttempt, request.get("attempt_id"))
             dataset = session.get(MlDataset, attempt.dataset_id) if attempt else None
             if attempt is not None and dataset is not None:
                 bundle = register_trained_bundle(session, attempt, dataset, result)
                 result["bundle_id"] = bundle.id
+                auto_eval = bool((attempt.recipe_json or {}).get("auto_eval"))
+                dataset_id = dataset.id
+        if auto_eval and result.get("bundle_id"):
+            result["auto_eval_job"] = self._chain_eval_job(result["bundle_id"], dataset_id)
         if sample_path and Path(sample_path).is_file() and result.get("bundle_id") \
                 and self.settings.review_dir:
             from .review import review_bundle_dir
@@ -870,6 +875,39 @@ class TrainingWorker:
         _scrub(Path(self.settings.train_workdir)
                / f"ml-{str(request.get('attempt_id', ''))[:8]}")
 
+
+    def _chain_eval_job(self, bundle_id: str, dataset_id: str) -> str | None:
+        """Auto A/B after training: style tags get sibling-discrimination prompts,
+        voice datasets get trained-lyric + control prompts."""
+        import hashlib as _hl
+        import json
+
+        from .models import Job, MlDataset, new_uuid as _uuid
+        from .orchestration import enqueue
+
+        with self.db.session() as session:
+            ds = session.get(MlDataset, dataset_id)
+            if ds is None:
+                return None
+            if getattr(ds, "kind", "style") == "voice":
+                from .style_tags import voice_eval_prompts
+                prompts = voice_eval_prompts(ds)
+            else:
+                from .style_tags import eval_prompts_for
+                prompts = eval_prompts_for(session, (ds.report_json or {}).get("style_tag")
+                                           or "pop.pop")
+            request_json = {"bundle_id": bundle_id, "prompts": prompts, "seed": 42,
+                            "duration_seconds": 60}
+            job = Job(id=_uuid(), owner_id="model-lab", operation="model_lab.eval",
+                      model_id=self.settings.train_queue_model_id, model_revision="model-lab",
+                      status="queued", request_json=request_json,
+                      request_hash=_hl.sha256(json.dumps(request_json, sort_keys=True)
+                                              .encode()).hexdigest(),
+                      idempotency_key=f"ml-eval-auto-{bundle_id[:12]}")
+            session.add(job)
+            enqueue(session, job, self.settings)
+            session.commit()
+            return job.id
 
     def _release_node(self) -> None:
         """active -> cleanup -> shared_ready (no-op when not under contract)."""

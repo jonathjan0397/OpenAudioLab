@@ -227,3 +227,54 @@ def select_for_style_tag(session, tag: str, *, target: int = 200, floor: int = 4
             return picked
         ptr = {d: 0 for d in order}
     return picked
+
+
+NEUTRAL_CONTROL = {"name": "control-neutral",
+                   "caption": "instrumental control, neutral mood, balanced mix"}
+
+
+def _tag_counts(session) -> dict[str, int]:
+    from .models import MlRecording
+
+    counts: dict[str, int] = {}
+    for row in session.execute(select(MlRecording)).scalars():
+        for tag in row.families_json or []:
+            if "." in tag:
+                counts[tag] = counts.get(tag, 0) + 1
+    return counts
+
+
+def eval_prompts_for(session, tag: str, *, siblings: int = 2) -> list[dict]:
+    """A/B prompts for a checkpoint: the trained subgenre, its two densest
+    family siblings (in-family discrimination) and a neutral control."""
+    from .review import slug
+
+    subs = tx_by_id()
+    counts = _tag_counts(session)
+    fam = subs[tag]["family"] if tag in subs else tag
+    if tag in subs:
+        target = tag
+    else:  # family-level tag: densest subgenre within the family wins
+        kin = [s for s in subs if subs[s]["family"] == fam]
+        target = max(kin, key=lambda s: counts.get(s, 0), default=None)
+    prompts: list[dict] = []
+    if target:
+        prompts.append({"name": slug(target), "caption": subs[target]["caption"]})
+    kin = [s for s in subs if subs[s]["family"] == fam and s != target]
+    for s in sorted(kin, key=lambda x: -counts.get(x, 0))[:siblings]:
+        prompts.append({"name": slug(s), "caption": subs[s]["caption"]})
+    prompts.append(dict(NEUTRAL_CONTROL))
+    return prompts
+
+
+def voice_eval_prompts(dataset) -> list[dict]:
+    """Voice-chain prompts: two of the trained lyric passages + instrumental control."""
+    entries = [e for e in (dataset.manifest_json or {}).get("entries", [])
+               if (e.get("lyrics") or "").strip()][:2]
+    prompts = [{"name": f"voice-trained-{i + 1}",
+                "caption": (e.get("caption") or "vocal test"), "lyrics": e["lyrics"]}
+               for i, e in enumerate(entries)]
+    prompts.append({"name": "control-instr",
+                    "caption": "instrumental control, neutral mood, balanced mix",
+                    "instrumental": True})
+    return prompts
