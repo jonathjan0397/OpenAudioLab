@@ -1441,3 +1441,23 @@ Budget note: single 6-track voice run cost 0.0148 h compute — house-v1 scale
   (incident host still iptables-blocked, creds rotated).
 
 AWAITING OWNER APPROVAL: Wave 2 (next ~5k artists, alphabetical continuation).
+
+## 2026-10-23 — Batch 6.5 live: local A/B review page for the voice adapter
+
+- app/review.py (self-contained dark index.html: baseline/candidate rows per
+  prompt, training-reference excerpts trimmed with ffmpeg from the frozen
+  dataset's first two lyric-bearing tracks, acceptance-sample row).
+- Worker ops mirror eval clips + references into
+  /Cold-Archive/OAL-Model-Training-A1/review/<bundle>/ via
+  OAL_REVIEW_DIR=/opt/oal-review (gpu1 mount); train tail mirrors the
+  acceptance sample after bundle registration.
+- Caught live: PEFT /v1/lora/load needs the weights file named
+  adapter_model.safetensors inside the dir — with model.safetensors HF fell
+  back to treating the path as a hub repo id (first eval attempt failed;
+  fixed 7500513, re-run succeeded).
+- Review folder permissions: worker container writes as root; review dirs set
+  0777 so the owner can manage clips; occasional chown suffices.
+- Live proof: 4 prompts x baseline/candidate + 2 references + acceptance
+  sample + index.html rendered for alabama-poid-voice-v1-adapter
+  (4917e9f3-…); MlEvaluation(kind=ab, pending verdict) recorded; owner verdict
+  buttons in console Bundles tab (Listening panel).
