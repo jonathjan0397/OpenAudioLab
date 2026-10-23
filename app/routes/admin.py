@@ -3025,9 +3025,18 @@ def admin_model_lab_bundle_eval(bundle_id: str, body: MlEvalBody,
 
     settings = request.app.state.settings
     with request.app.state.db.session() as session:
-        if session.get(MlModelBundle, bundle_id) is None:
+        bundle = session.get(MlModelBundle, bundle_id)
+        if bundle is None:
             raise ApiError(404, "NOT_FOUND", "bundle not found")
-        request_json = {"bundle_id": bundle_id, "prompts": body.prompts, "seed": body.seed,
+        prompts = body.prompts
+        if not prompts:
+            from ..models import MlDataset
+            from ..style_tags import eval_prompts_for, voice_eval_prompts
+            ds = session.get(MlDataset, (bundle.bundle_json or {}).get("dataset_id"))
+            if ds is not None:
+                prompts = (voice_eval_prompts(ds) if getattr(ds, "kind", "style") == "voice"
+                           else eval_prompts_for(session, (ds.report_json or {}).get("style_tag")))
+        request_json = {"bundle_id": bundle_id, "prompts": prompts, "seed": body.seed,
                         "duration_seconds": body.duration_seconds}
         job = Job(id=_uuid(), owner_id="model-lab", operation="model_lab.eval",
                   model_id=settings.train_queue_model_id, model_revision="model-lab",
