@@ -1173,7 +1173,7 @@ class TrainingWorker:
             return
         lora_dir = work / "lora"
         lora_dir.mkdir(parents=True, exist_ok=True)
-        (lora_dir / "model.safetensors").write_bytes(bytes(body))
+        (lora_dir / "adapter_model.safetensors").write_bytes(bytes(body))
         cfg_key = artifact_key.rsplit("/", 1)[0] + "/adapter_config.json"
         try:
             (lora_dir / "adapter_config.json").write_bytes(self.storage.get(cfg_key).body)
