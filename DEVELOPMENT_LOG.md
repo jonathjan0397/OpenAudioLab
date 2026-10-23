@@ -1512,3 +1512,24 @@ Final state: catalog 10,049 (9,959 parsed); 3,701 site lyrics + 11 sidecar +
 cooling) — retried per-selection on demand from now on. Queue: empty.
 Waves held at owner's choice (Wave 3 on hold). Released:
 alabama-poid-voice-v1-adapter @ default channel, canary 10%.
+
+## 2026-10-23 — Batch S shipped + STYLE WAVE-1 running (8 genre adapters)
+
+- Batch S: eval prompt chooser (trained subgenre + 2 densest siblings + neutral
+  control), voice datasets chain trained-lyric prompts, auto_eval flag threads
+  train->eval durably, style_tag persisted in dataset report, root review
+  index. 492 tests green; worker refresh DEFERRED while the wave trains (the
+  deployed bundle already contains the chain: bundle 09c741d shipped before
+  enqueue).
+- Restyle of the 10,049-rec catalog: 5,446 subgenre-tagged, 3,888 family-only,
+  384 junk, 9 unresolved. Top-8 by the 40% sub-vs-family rule: rock (family),
+  pop.pop, country.country, alt.alternative-rock, hiphop.hip-hop, rnb_soul
+  (family), electronic (family), metal.heavy-metal.
+- 8 datasets built via the new builder (200/200/200/200/200/200/200/196
+  picks, approve+blanket-rights applied, ~1,596 approvals + ~3,192 rights
+  rows); budget raised to 48 h (owner-authorized local compute, $0 cash).
+- First live finding: pop preprocess hit 23 undecodable sources mid-file —
+  the quick 60 s decode QC missed them; engine skipped and trained on 177.
+  Full-file decode audit running on the pop copy; plan: full-decode pass at
+  dataset BUILD time (selected ~200 tracks is cheap) so frozen manifests are
+  clean, plus stronger scan-time QC after this wave.
