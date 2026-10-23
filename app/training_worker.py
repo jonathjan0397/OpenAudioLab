@@ -853,6 +853,16 @@ class TrainingWorker:
             if attempt is not None and dataset is not None:
                 bundle = register_trained_bundle(session, attempt, dataset, result)
                 result["bundle_id"] = bundle.id
+        if sample_path and Path(sample_path).is_file() and result.get("bundle_id") \
+                and self.settings.review_dir:
+            from .review import review_bundle_dir
+
+            rv = review_bundle_dir(self.settings.review_dir, result["bundle_id"])
+            if rv is not None:
+                try:
+                    shutil.copy2(sample_path, rv / "acceptance-sample.mp3")
+                except OSError:
+                    pass
         complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
                          lease_token, ("train-result", json.dumps(result).encode()),
                          synthetic=False,
@@ -1145,6 +1155,7 @@ class TrainingWorker:
                              "BUNDLE_NOT_FOUND", "eval target bundle missing.")
                 return
             bundle_id, artifact_key, want_sha = bundle.id, bundle.artifact_key, bundle.sha256
+            bundle_name, bundle_version = bundle.name, bundle.version
         prompts = request.get("prompts") or [
             {"name": "neutral_summer", "caption": "bright summer afternoon, warm strings"},
             {"name": "neutral_midnight", "caption": "slow midnight ballad, sparse piano"},
@@ -1169,6 +1180,10 @@ class TrainingWorker:
         except Exception:
             pass  # engine rejects without config; candidate pass will fail loudly
         lora_path = lora_dir / "model.safetensors"
+        from .review import (build_review_page, review_bundle_dir, slug,
+                             write_reference_clips)
+
+        review_dest = review_bundle_dir(self.settings.review_dir, bundle_id)
         samples: list[dict] = []
         stop = threading.Event()
         lost = {"lease": False}
@@ -1205,10 +1220,15 @@ class TrainingWorker:
                     audio = self.gen_adapter.download(url)
                     key = f"ml/eval/{bundle_id}/{mode}-{p.get('name')}.mp3"
                     self.storage.put(key, audio)
-                    samples.append({"mode": mode, "prompt": p.get("name"),
-                                    "caption": p.get("caption"), "artifact_key": key,
-                                    "bytes": len(audio),
-                                    "sha256": _hl.sha256(audio).hexdigest()})
+                    entry = {"mode": mode, "prompt": p.get("name"),
+                             "caption": p.get("caption"), "artifact_key": key,
+                             "bytes": len(audio),
+                             "sha256": _hl.sha256(audio).hexdigest()}
+                    if review_dest is not None:
+                        fname = f"{mode}-{slug(str(p.get('name')))}.mp3"
+                        (review_dest / fname).write_bytes(audio)
+                        entry["file"] = fname
+                    samples.append(entry)
             with self.db.session() as session:
                 session.add(MlEvaluation(
                     id=new_uuid(), bundle_id=bundle_id, kind="ab",
@@ -1216,7 +1236,19 @@ class TrainingWorker:
                                  "base_model": self.settings.acestep_model,
                                  "samples": samples},
                     evaluator=None, verdict=None))
+                references = []
+                if review_dest is not None:
+                    b_row = session.get(MlModelBundle, bundle_id)
+                    references = write_reference_clips(session, b_row, review_dest)
                 session.commit()
+            if review_dest is not None:
+                build_review_page(review_dest,
+                                  bundle={"name": bundle_name, "version": bundle_version,
+                                          "kind": "adapter", "base_model":
+                                              self.settings.acestep_model,
+                                          "sha256": want_sha, "seed": seed,
+                                          "duration_seconds": duration},
+                                  samples=samples, references=references)
         except EngineError as exc:
             fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
                          getattr(exc, "code", "EVAL_FAILED"), str(exc)[:280])

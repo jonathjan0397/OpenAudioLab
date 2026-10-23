@@ -59,6 +59,8 @@ docker run -d --name oal-worker-gpu1 --gpus all --restart unless-stopped \
   -v /mnt/oal-storage:/data/oal -v oal-acestep-cache-gpu1:/root/.cache \
   -v /mnt/truenas:/mnt/truenas:ro \
   -v /Cold-Archive/OAL-Model-Training-A1/scratch:/opt/acestep/training-data-gpu1 \
+  -v /Cold-Archive/OAL-Model-Training-A1/review:/opt/oal-review \
+  -e OAL_REVIEW_DIR=/opt/oal-review \
    "$IMAGE"
 
 # Drafting lyrics LLM (Qwen3-4B): its OWN CPU-only container on this host, kept OFF

@@ -170,6 +170,7 @@ class Settings(BaseSettings):
     model_lab_est_spend_usd: float = 0.25  # reservation estimate per attempt
     node_key: str = ""  # durable fleet-node identity (default: hostname)
     node_stale_seconds: int = 180
+    review_dir: str = ""  # local review landing zone on the training box (empty = off)
     musicbrainz_interval_seconds: float = 1.2
     lrclib_interval_seconds: float = 1.2  # supervisor heartbeat staleness
     byol_model_path: str = ""  # singer-identity encoder weights; empty = BYOL off

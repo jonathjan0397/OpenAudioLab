@@ -152,9 +152,14 @@ def test_vertical_slice_end_to_end(client, monkeypatch, tmp_path) -> None:
     export = tmp_path / "adapter.safetensors"
     export.write_bytes(b"weights")
     client.app.state.settings.model_lab_train_command = "echo train"
+    sample_file = tmp_path / "acc-sample.mp3"
+    sample_file.write_bytes(b"tiny-sample-audio")
+    client.app.state.settings.review_dir = str(tmp_path / "review")
     _FakeProc.stdout_line = ('{"artifact_key": "pending", "sha256": "ca' + "fe" * 31 +
-                             f'", "hours": 1.5, "spend_usd": 0.2, {ACC}, "export_path": '
-                             f'"{export}", "name": "slice-adapter"}}')
+                             f'", "hours": 1.5, "spend_usd": 0.2, '
+                             '"steps": 12, "acceptance": {"lora_load": true, "loadable": true, '
+                             f'"tensors": 8, "inference_bytes": 4200, "sample_path": "{sample_file}"}}, '
+                             f'"export_path": "{export}", "name": "slice-adapter"}}')
     monkeypatch.setattr(tw.subprocess, "Popen", _FakeProc)
     monkeypatch.setattr(tw.time, "sleep", lambda s: None)
     w = SimpleNamespace(db=client.app.state.db, storage=client.app.state.storage,
@@ -189,3 +194,4 @@ def test_vertical_slice_end_to_end(client, monkeypatch, tmp_path) -> None:
         assert budget.reserved_usd == 0.0
     assert client.app.state.storage.exists(bundle.artifact_key)
     assert client.app.state.storage.get(bundle.artifact_key).body == b"weights"
+    assert (tmp_path / "review" / bundle.id / "acceptance-sample.mp3").is_file()  # local review mirror

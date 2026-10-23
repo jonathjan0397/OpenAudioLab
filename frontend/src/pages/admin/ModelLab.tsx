@@ -25,6 +25,8 @@ interface Dataset { id: string; name: string; kind?: string; recording_count: nu
 interface Attempt { id: string; dataset_id: string; job_id: string | null; state: string; hours: number | null; spend_usd: number | null }
 interface Recipe { id: string; name: string; base_model: string; method: string; adapter_ids: string[] }
 interface Bundle { id: string; name: string; version: string; kind: string; base_model: string; state: string }
+interface EvalRow { id: string; kind: string; verdict: string | null; evaluator: string | null;
+  scores: { samples?: { mode: string; prompt: string; bytes: number }[] } }
 interface Channel { name: string; enabled: boolean; min_credits: number; bundle: { id: string; name: string; version: string; state: string } | null }
 interface BrowseEntry { name: string; path: string; is_dir: boolean; bytes: number | null; mtime: string | null; n_audio?: number }
 interface BrowseView { path: string; root: string; parent: string | null; entries: BrowseEntry[]; source?: string }
@@ -49,6 +51,7 @@ export default function ModelLabPage() {
   const [dsKind, setDsKind] = useState("style");
   const [dsAllowI, setDsAllowI] = useState(false);
   const [dsAllowS, setDsAllowS] = useState(false);
+  const [selBundle, setSelBundle] = useState<string | null>(null);
 
   const overview = useQuery({ queryKey: ["ml-overview"], queryFn: () => api.get<Overview>("/api/v1/admin/model-lab/overview"), enabled: tab === "Overview" });
   const sources = useQuery({ queryKey: ["ml-sources"], queryFn: () => api.get<{ sources: Source[] }>("/api/v1/admin/model-lab/sources"), enabled: tab === "Catalog" });
@@ -59,6 +62,11 @@ export default function ModelLabPage() {
   const budget = useQuery({ queryKey: ["ml-budget"], queryFn: () => api.get<Budget>("/api/v1/admin/model-lab/budget"), enabled: tab === "Training" });
   const recipes = useQuery({ queryKey: ["ml-recipes"], queryFn: () => api.get<{ recipes: Recipe[] }>("/api/v1/admin/model-lab/merge-recipes"), enabled: tab === "Merges" });
   const bundles = useQuery({ queryKey: ["ml-bundles"], queryFn: () => api.get<{ bundles: Bundle[] }>("/api/v1/admin/model-lab/bundles"), enabled: tab !== "Overview" && tab !== "Catalog" && tab !== "Recordings" && tab !== "Voice" && tab !== "Training" });
+  const evals = useQuery({
+    queryKey: ["ml-evals", selBundle],
+    queryFn: () => api.get<{ evaluations: EvalRow[] }>(`/api/v1/admin/model-lab/bundles/${selBundle}/evaluations`),
+    enabled: tab === "Bundles" && !!selBundle,
+  });
   const channels = useQuery({ queryKey: ["ml-channels"], queryFn: () => api.get<{ channels: Channel[] }>("/api/v1/admin/model-lab/release-channels"), enabled: tab === "Channels" });
 
   const batches = useQuery({
@@ -353,12 +361,38 @@ export default function ModelLabPage() {
               <td className="py-1">{b.name}</td><td>{b.version}</td><td>{b.kind}</td><td>{b.state}</td>
               <td className="space-x-1 whitespace-nowrap">
                 <button className={btn} onClick={() => act.mutate({ path: `/api/v1/admin/model-lab/bundles/${b.id}/eval-samples`, method: "post", body: {} })}>Eval A/B</button>
+                <button className={btn} onClick={() => setSelBundle(selBundle === b.id ? null : b.id)}>Listening</button>
                 <button className={btn} onClick={() => act.mutate({ path: `/api/v1/admin/model-lab/bundles/${b.id}/release`, method: "post" })}>Release</button>
                 <button className={btn} onClick={() => act.mutate({ path: `/api/v1/admin/model-lab/bundles/${b.id}/retire`, method: "post" })}>Retire</button>
               </td>
             </tr>
           ))}</tbody>
         </table>
+      )}
+
+      {tab === "Bundles" && selBundle && (
+        <div className="rounded border p-2 text-sm space-y-2">
+          <div className="text-xs opacity-70">Evaluations for bundle <span className="font-mono">{selBundle.slice(0, 8)}</span>
+            {" — "}clips land on the AI server at OAL-Model-Training-A1/review/{selBundle.slice(0, 8)}…/index.html</div>
+          <table className="w-full text-left text-xs">
+            <thead><tr className="border-b"><th className="py-1">Kind</th><th>Verdict</th><th>Evaluator</th><th>Samples</th></tr></thead>
+            <tbody>{(evals.data?.evaluations ?? []).map((e) => (
+              <tr key={e.id} className="border-b">
+                <td className="py-1">{e.kind}</td><td>{e.verdict ?? "pending"}</td><td>{e.evaluator ?? "—"}</td>
+                <td>{(e.scores?.samples ?? []).map((s) => `${s.mode}:${s.prompt}`).slice(0, 6).join(" ")}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+          <div className="flex gap-2">
+            {(["win", "pass", "lose", "fail"] as const).map((v) => (
+              <button key={v} className={btn} onClick={() => act.mutate({
+                path: `/api/v1/admin/model-lab/bundles/${selBundle}/evaluations`, method: "post",
+                body: { kind: "ab", verdict: v, evaluator: "owner" } })}>
+                Owner: {v}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
 
       {tab === "Channels" && (

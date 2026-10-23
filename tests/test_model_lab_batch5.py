@@ -173,6 +173,8 @@ def test_eval_generates_ab_samples_and_evaluation_row(client, tmp_path) -> None:
                                   sha256=hashlib.sha256(body).hexdigest(),
                                   bundle_json={}))
         session.commit()
+    rv_dir = tmp_path / "review"
+    client.app.state.settings.review_dir = str(rv_dir)
     r = client.post(f"/api/v1/admin/model-lab/bundles/{bundle_id}/eval-samples",
                     json={"prompts": [{"name": "p1", "caption": "test caption"}]})
     assert r.status_code == 202
@@ -191,6 +193,11 @@ def test_eval_generates_ab_samples_and_evaluation_row(client, tmp_path) -> None:
         got = client.app.state.storage.get(f"ml/eval/{bundle_id}/{mode}-p1.mp3")
         assert got.body == b"audio-payload" * 300
     assert "load" in adapter.calls and "unload" in adapter.calls
+    # local review landing zone
+    dest = rv_dir / bundle_id
+    assert (dest / "baseline-p1.mp3").is_file() and (dest / "candidate-p1.mp3").is_file()
+    page = (dest / "index.html").read_text()
+    assert "test caption" in page and "baseline-p1.mp3" in page and "candidate-p1.mp3" in page
 
 
 def test_eval_rejects_tampered_artifact(client, tmp_path) -> None:
