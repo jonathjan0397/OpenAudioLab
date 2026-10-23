@@ -85,7 +85,7 @@ def test_importer_manifest_supplier_claims(client, tmp_path, monkeypatch) -> Non
 
         rec = session.query(MlRecording).filter_by(source_id=src.id).first()
         assert rec.families_json[0] == "country_americana"  # supplier lane first
-            assert "country.country" in rec.families_json and "fam:country" in rec.families_json
+        assert "country.country" in rec.families_json and "fam:country" in rec.families_json
         claims = session.query(MlMetadataClaim).filter_by(recording_id=rec.id).all()
         assert {c.field for c in claims} == {"title", "artist", "genre"}
         assert all(c.provenance == "supplier" for c in claims)
