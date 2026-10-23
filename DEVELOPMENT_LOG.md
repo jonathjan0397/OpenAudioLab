@@ -1461,3 +1461,21 @@ AWAITING OWNER APPROVAL: Wave 2 (next ~5k artists, alphabetical continuation).
   sample + index.html rendered for alabama-poid-voice-v1-adapter
   (4917e9f3-…); MlEvaluation(kind=ab, pending verdict) recorded; owner verdict
   buttons in console Bundles tab (Listening panel).
+
+## 2026-10-23 — Vocal evals fixed and re-run (review page now sings)
+
+Owner flagged the first A/B set had no vocals: the eval op hardcoded
+instrumental=True (house A/B was a style-merge test). Now: per-prompt
+`instrumental`/`lyrics`; a voice-kind bundle auto-uses the exact lyrics the
+adapter trained from (frozen manifest; sha+char-count recorded, full lyric text
+never persisted in eval records); default clip length raised to 60s; review
+page shows vocals-vs-instrumental chips and relabels the acceptance sample as
+an integrity render. 479 tests green (2 new vocal-payload tests incl. style
+bundles staying instrumental).
+
+Live re-run on alabama-poid-voice-v1-adapter (seed 42):
+trained_goodbye + trained_gulf (trained lyrics), generalization (Anytime (I'm
+Your Man) — different album, never trained on), control_instr; 4 prompts x
+baseline/candidate x 60 s rendered on gpu1; review folder refreshed:
+OAL-Model-Training-A1/review/4917e9f3-…/index.html with references +
+acceptance row.
