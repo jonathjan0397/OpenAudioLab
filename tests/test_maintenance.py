@@ -27,18 +27,21 @@ def _attempt(client, *, state="running", with_node=None, stale_node=False):
                           review_status="approved", dataset_eligible=True)
         ds = MlDataset(id=new_uuid(), name="ds", frozen_sha256="f",
                        manifest_json={"entries": []})
-        job = Job(id=new_uuid(), owner_id="model-lab", operation="model_lab.train",
-                  model_id="training", model_revision="m", status="running",
-                  request_json={}, request_hash="h", idempotency_key=f"mt-{new_uuid()}")
-        session.add(job)
-        session.flush()
+        job_id = None
+        if with_node is not None:
+            job = Job(id=new_uuid(), owner_id="model-lab", operation="model_lab.train",
+                      model_id="training", model_revision="m", status="running",
+                      request_json={}, request_hash="h", idempotency_key=f"mt-{new_uuid()}")
+            session.add(job)
+            session.flush()
+            job_id = job.id
+            session.add(JobAttempt(id=new_uuid(), job_id=job_id, attempt_number=1,
+                                   worker_id="w-m", lease_token="t-m", status="running",
+                                   heartbeat_at=utcnow() if not stale_node
+                                   else utcnow() - timedelta(hours=2)))
         att = MlTrainingAttempt(id=new_uuid(), dataset_id=ds.id, budget_id=budget.id,
-                                job_id=job.id, state=state, reserved_usd=0.25,
+                                job_id=job_id, state=state, reserved_usd=0.25,
                                 created_at=utcnow() - timedelta(minutes=10))
-        session.add(JobAttempt(id=new_uuid(), job_id=job.id, attempt_number=1,
-                               worker_id="w-m", lease_token="t-m", status="running",
-                               heartbeat_at=utcnow() if not stale_node
-                               else utcnow() - timedelta(hours=2)))
         budget.reserved_usd = 0.25
         session.add_all([src, rec, ds, att])
         if with_node is not None:
