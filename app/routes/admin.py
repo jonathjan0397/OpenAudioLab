@@ -8,7 +8,7 @@ from datetime import timedelta
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, or_, select
 
 from ..errors import ApiError
@@ -2982,10 +2982,20 @@ class MlEnrichBody(BaseModel):
     wall_hours: float | None = Field(default=None, gt=0, le=48)
 
 
+def _valid_scales(v: list[float]) -> list[float]:
+    for x in v:
+        if not (0.05 <= float(x) <= 1.0):
+            raise ValueError("scales must be between 0.05 and 1.0")
+    return v
+
+
 class MlEvalBody(BaseModel):
     prompts: list[dict] = Field(default_factory=list, max_length=16)
     seed: int = 42
-    duration_seconds: int = Field(default=30, ge=10, le=120)
+    duration_seconds: int = Field(default=60, ge=10, le=120)
+    scales: list[float] = Field(default_factory=lambda: [1.0, 0.5], max_length=4)
+
+    _check_scales = field_validator("scales")(_valid_scales)
 
 
 @router.post("/admin/model-lab/enrich-selected")
@@ -3018,6 +3028,9 @@ class MlCompatProbe(BaseModel):
     prompts: list[dict] = Field(default_factory=list, max_length=16)
     seed: int = 42
     duration_seconds: int = Field(default=60, ge=10, le=120)
+    scales: list[float] = Field(default_factory=lambda: [1.0, 0.5], max_length=4)
+
+    _check_scales = field_validator("scales")(_valid_scales)
 
 
 @router.post("/admin/model-lab/bundles/{bundle_id}/compat-probe")
@@ -3036,7 +3049,7 @@ def admin_model_lab_bundle_compat_probe(bundle_id: str, body: MlCompatProbe,
             raise ApiError(404, "NOT_FOUND", "bundle not found")
         request_json = {"bundle_id": bundle_id, "target_model": body.target_model,
                         "prompts": body.prompts, "seed": body.seed,
-                        "duration_seconds": body.duration_seconds}
+                        "duration_seconds": body.duration_seconds, "scales": body.scales}
         job = Job(id=_uuid(), owner_id="model-lab", operation="model_lab.compat_eval",
                   model_id=settings.train_queue_model_id, model_revision="model-lab",
                   status="queued", request_json=request_json,

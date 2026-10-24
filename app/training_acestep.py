@@ -128,3 +128,14 @@ class AceStepTrainingAdapter:
     def set_use_lora(self, use_lora: bool) -> dict[str, Any]:
         response = self.transport.post_json("/v1/lora/toggle", {"use_lora": use_lora})
         return self._data(response)
+
+    def set_lora_scale(self, scale: float, adapter_name: str | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {"scale": float(scale)}
+        if adapter_name:
+            payload["adapter_name"] = adapter_name
+        return self._data(self.transport.post_json("/v1/lora/scale", payload))
+
+    def lora_status(self) -> dict[str, Any]:
+        raw = self.transport.get_json("/v1/lora/status") or {}
+        data = raw.get("data") if isinstance(raw.get("data"), dict) else raw
+        return data or {}

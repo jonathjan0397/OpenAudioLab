@@ -83,12 +83,22 @@ def write_reference_clips(session, bundle, dest: Path, *, ffmpeg_bin: str = "ffm
 def build_review_page(dest: Path, *, bundle: dict, samples: list[dict],
                       references: list[dict] | None = None) -> str:
     """(Re)write index.html for one bundle's review folder; returns its path."""
+    modes: list[str] = []
+    for s in samples:
+        if s.get("mode") not in modes:
+            modes.append(s.get("mode"))
+
+    def mlabel(m: str) -> str:
+        if m in ("baseline", "native"):
+            return "Baseline (no adapter)"
+        if m.startswith("c") and m[1:].isdigit():
+            return f"Candidate @ {int(m[1:]) / 100:.2f}"
+        return m
+
     prompts: dict[str, dict] = {}
     for s in samples:
         row = prompts.setdefault(s.get("prompt") or "p",
-                                 {"caption": s.get("caption") or "",
-                                  "instrumental": s.get("instrumental", True),
-                                  "lyrics_sha256": s.get("lyrics_sha256")})
+                                 {"caption": s.get("caption") or ""})
         row[s.get("mode") or "?"] = s
     acceptance = dest / "acceptance-sample.mp3"
 
@@ -107,7 +117,8 @@ def build_review_page(dest: Path, *, bundle: dict, samples: list[dict],
             f"{html.escape(str(bundle.get('duration_seconds', '')))}s clips · "
             "baseline = no adapter, candidate = adapter loaded (same seeds/prompts)")
     lines.append(f"<div class='summary'>{meta}</div>")
-    lines.append("<table><tr><th>Prompt</th><th>Baseline</th><th>Candidate</th></tr>")
+    lines.append("<table><tr><th>Prompt</th>"
+                 + "".join(f"<th>{html.escape(mlabel(m))}</th>" for m in modes) + "</tr>")
     if references:
         cells = "".join(
             f"<div class='m'>{html.escape(r['label'])}</div>"
@@ -123,21 +134,36 @@ def build_review_page(dest: Path, *, bundle: dict, samples: list[dict],
                      "src='acceptance-sample.mp3'></audio></td></tr>")
     for name, row in sorted(prompts.items()):
         cells = []
-        for mode in ("baseline", "candidate"):
-            s = row.get(mode)
-            if s and (dest / str(s.get("file"))).is_file():
-                sha = str(s.get("sha256") or "")[:8]
-                kind = ("lyrics sha " + str(s.get("lyrics_sha256") or "")[:8]) \
-                    if not row.get("instrumental", True) else "instrumental"
-                cells.append(f"<div class='m'>{mode} · {kind} · {s.get('bytes', 0)} B "
-                             f"· sha {sha}</div>"
+        for mode in modes:
+            e = row.get(mode)
+            if isinstance(e, dict) and (dest / str(e.get("file"))).is_file():
+                sha = str(e.get("sha256") or "")[:8]
+                if e.get("lyrics_sha256"):
+                    kind = f"lyrics sha {str(e['lyrics_sha256'])[:8]}"
+                elif not e.get("instrumental", True):
+                    kind = "vocals"
+                else:
+                    kind = "instrumental"
+                meta = mlabel(mode)
+                if e.get("engine"):
+                    meta += f" · {e['engine']}"
+                if e.get("scale"):
+                    meta += f" · scale {e['scale']:.2f}"
+                est = e.get("engine_state") or {}
+                if est.get("active_adapter"):
+                    meta += f" · {est['active_adapter']}"
+                cells.append(f"<div class='m'>{html.escape(meta)} · {kind} · "
+                             f"{e.get('bytes', 0)} B · sha {sha}</div>"
                              f"<audio controls preload='none' "
-                             f"src='{html.escape(str(s['file']))}'></audio>")
+                             f"src='{html.escape(str(e['file']))}'></audio>")
             else:
                 cells.append("<span class='p'>missing</span>")
         cap = html.escape(str(row.get("caption") or ""))
-        lines.append(f"<tr><th>{html.escape(name)}<div class='p'>{cap}</div></th>"
-                     f"<td>{cells[0]}</td><td>{cells[1]}</td></tr>")
+        lsha = next((str(v.get("lyrics_sha256") or "")[:8] for v in row.values()
+                     if isinstance(v, dict) and v.get("lyrics_sha256")), "")
+        lmeta = (f"<div class='m'>lyrics sha {lsha}</div>" if lsha else "")
+        lines.append(f"<tr><th>{html.escape(name)}<div class='p'>{cap}</div>{lmeta}</th>"
+                     + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
     lines.append("</table></body></html>")
     page = dest / "index.html"
     page.write_text("\n".join(lines), encoding="utf-8")
@@ -172,3 +198,17 @@ def write_root_index(root: Path) -> str | None:
            + "".join(rows) + "</table></body></html>")
     (root / "index.html").write_text(doc, encoding="utf-8")
     return str(root / "index.html")
+
+
+def clear_clip_files(dest: Path) -> int:
+    """Drop clips from a previous render pass (keep references + acceptance)."""
+    removed = 0
+    for p in dest.glob("*.mp3"):
+        if p.name.startswith(("acceptance-", "reference-")):
+            continue
+        try:
+            p.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed

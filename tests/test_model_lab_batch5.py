@@ -34,6 +34,10 @@ class _FakeTrainingAdapter:
     def __init__(self, dataset_payload: dict) -> None:
         self.payload = dataset_payload
         self.calls: list[str] = []
+        self.use_lora = False
+        self.active = None
+        self.loaded = False
+        self.status_override: dict | None = None
 
     def ensure_model(self, model=None):
         self.calls.append("ensure")
@@ -57,9 +61,28 @@ class _FakeTrainingAdapter:
 
     def load_lora(self, path, name=None):
         self.calls.append("load")
+        self.loaded = True
+        self.active = name
+        self.use_lora = True
 
     def unload_lora(self):
         self.calls.append("unload")
+        self.loaded = False
+        self.active = None
+
+    def set_use_lora(self, value):
+        self.use_lora = bool(value)
+        return {"ok": True}
+
+    def set_lora_scale(self, scale, adapter_name=None):
+        self.calls.append(f"scale:{scale}")
+        return {"ok": True}
+
+    def lora_status(self):
+        if self.status_override is not None:
+            return dict(self.status_override)
+        return {"lora_loaded": self.loaded, "use_lora": self.use_lora,
+                "active_adapter": self.active, "lora_scale": 1.0}
 
 
 def _worker(client, adapter):
@@ -67,6 +90,9 @@ def _worker(client, adapter):
                         settings=client.app.state.settings, worker_id="w-b5",
                         adapter=adapter, gen_adapter=None)
     w._lease_beat = lambda *a: TrainingWorker._lease_beat(w, *a)
+    w._lora_passes = lambda req: TrainingWorker._lora_passes(w, req)
+    w._lora_pass_engage = lambda *a: TrainingWorker._lora_pass_engage(w, *a)
+    w._inert_guard = lambda samples: TrainingWorker._inert_guard(w, samples)
     return w
 
 
@@ -144,7 +170,10 @@ def test_enrich_never_overwrites_existing_lyrics(client, tmp_path) -> None:
 def _fake_gen(storage_ref):
     class _Gen:
         last_error = ""
-        payloads: list[dict] = []
+
+        def __init__(self):
+            self.payloads: list[dict] = []
+            self._n = 0
 
         def build_payload(self, **kw):
             self.payloads.append(dict(kw))
@@ -157,7 +186,8 @@ def _fake_gen(storage_ref):
             return "succeeded", [{"file": "/v1/audio?path=/x/1.mp3"}]
 
         def download(self, url):
-            return b"audio-payload" * 300
+            self._n += 1
+            return ("audio-payload-%06d" % self._n).encode() * 60
     return _Gen()
 
 
@@ -191,16 +221,19 @@ def test_eval_generates_ab_samples_and_evaluation_row(client, tmp_path) -> None:
         ev = session.query(MlEvaluation).filter(MlEvaluation.bundle_id == bundle_id).one()
         assert ev.kind == "ab" and ev.verdict is None
         modes = {s["mode"] for s in ev.scores_json["samples"]}
-        assert modes == {"baseline", "candidate"}
-    for mode in ("baseline", "candidate"):
+        assert modes == {"baseline", "c100", "c050"}
+    for mode in ("baseline", "c100", "c050"):
         got = client.app.state.storage.get(f"ml/eval/{bundle_id}/{mode}-p1.mp3")
-        assert got.body == b"audio-payload" * 300
-    assert "load" in adapter.calls and "unload" in adapter.calls
+        assert got.body
+    assert "load" in adapter.calls
+    assert any(c.startswith("scale:") for c in adapter.calls)
     # local review landing zone
     dest = rv_dir / bundle_id
-    assert (dest / "baseline-p1.mp3").is_file() and (dest / "candidate-p1.mp3").is_file()
+    assert (dest / "baseline-p1.mp3").is_file() and (dest / "c100-p1.mp3").is_file()
+    assert (dest / "c050-p1.mp3").is_file()
     page = (dest / "index.html").read_text()
-    assert "test caption" in page and "baseline-p1.mp3" in page and "candidate-p1.mp3" in page
+    assert "test caption" in page and "Candidate @ 1.00" in page
+    assert "Candidate @ 0.50" in page and "Baseline (no adapter)" in page
 
 
 def test_eval_rejects_tampered_artifact(client, tmp_path) -> None:
@@ -282,6 +315,9 @@ def test_eval_voice_bundle_sings_by_default(client, tmp_path) -> None:
     w._external_pass = lambda *a, **k: TrainingWorker._external_pass(w, *a, **k)
     w._verify_one = lambda *a, **k: TrainingWorker._verify_one(w, *a, **k)
     w._lyrics_one = lambda *a, **k: TrainingWorker._lyrics_one(w, *a, **k)
+    w._lora_passes = lambda req: TrainingWorker._lora_passes(w, req)
+    w._lora_pass_engage = lambda *a: TrainingWorker._lora_pass_engage(w, *a)
+    w._inert_guard = lambda samples: TrainingWorker._inert_guard(w, samples)
     gen = _fake_gen(None)
     w.gen_adapter = gen
     TrainingWorker._model_lab_eval(w, job_id, att, lease)
@@ -318,8 +354,102 @@ def test_eval_style_bundle_stays_instrumental(client, tmp_path) -> None:
     w._external_pass = lambda *a, **k: TrainingWorker._external_pass(w, *a, **k)
     w._verify_one = lambda *a, **k: TrainingWorker._verify_one(w, *a, **k)
     w._lyrics_one = lambda *a, **k: TrainingWorker._lyrics_one(w, *a, **k)
+    w._lora_passes = lambda req: TrainingWorker._lora_passes(w, req)
+    w._lora_pass_engage = lambda *a: TrainingWorker._lora_pass_engage(w, *a)
+    w._inert_guard = lambda samples: TrainingWorker._inert_guard(w, samples)
     gen = _fake_gen(None)
     w.gen_adapter = gen
     TrainingWorker._model_lab_eval(w, job_id, att, lease)
     assert gen.payloads and all(p["instrumental"] is True and p["lyrics"] is None
                                 for p in gen.payloads)
+
+
+def test_eval_inert_guard_fails_identical_candidates(client, tmp_path) -> None:
+    import app.training_worker as tw
+    from app.orchestration import claim_attempt
+
+    client.app.state.settings.train_workdir = str(tmp_path / "work")
+    body = b"lora-bytes"
+    key = "ml/adapters/att-inert/model.safetensors"
+    client.app.state.storage.put(key, body)
+    from app.models import Job, MlEvaluation, MlModelBundle, new_uuid
+    bundle_id = new_uuid()
+    with client.app.state.db.session() as session:
+        session.add(MlModelBundle(id=bundle_id, name="in-b", version="v1", kind="adapter",
+                                  base_model="acestep-v15-turbo", state="candidate",
+                                  artifact_key=key, sha256=hashlib.sha256(body).hexdigest(),
+                                  bundle_json={}))
+        session.commit()
+    r = client.post(f"/api/v1/admin/model-lab/bundles/{bundle_id}/eval-samples",
+                    json={"prompts": [{"name": "p1", "caption": "c", "instrumental": True}]})
+    job_id = r.json()["job_id"]
+    _, att, lease = claim_attempt(client.app.state.db, job_id, "w-b5")
+    adapter = _FakeTrainingAdapter({"samples": []})
+    w = SimpleNamespace(db=client.app.state.db, storage=client.app.state.storage,
+                        settings=client.app.state.settings, adapter=adapter, gen_adapter=None)
+    w._lease_beat = lambda *a: tw.TrainingWorker._lease_beat(w, *a)
+    w._lora_passes = lambda req: tw.TrainingWorker._lora_passes(w, req)
+    w._lora_pass_engage = lambda *a: tw.TrainingWorker._lora_pass_engage(w, *a)
+    w._inert_guard = lambda samples: tw.TrainingWorker._inert_guard(w, samples)
+
+    class _Same:
+        last_error = ""
+
+        def build_payload(self, **kw):
+            return dict(kw)
+
+        def submit(self, payload):
+            return SimpleNamespace(task_id="t-1")
+
+        def poll(self, task_id):
+            return "succeeded", [{"file": "/v1/audio?path=/x"}]
+
+        def download(self, url):
+            return b"identical-audio" * 300
+
+    w.gen_adapter = _Same()
+    tw.TrainingWorker._model_lab_eval(w, job_id, att, lease)
+    from sqlalchemy import select as _sel
+    with client.app.state.db.session() as session:
+        assert session.query(MlEvaluation).filter(
+            MlEvaluation.bundle_id == bundle_id).count() == 0
+        job = session.execute(_sel(Job).where(Job.id == job_id)).scalar_one()
+        assert job.status == "failed" and job.error_code == "ADAPTER_INERT"
+
+
+def test_eval_contamination_guard(client, tmp_path) -> None:
+    import app.training_worker as tw
+    from app.orchestration import claim_attempt
+
+    client.app.state.settings.train_workdir = str(tmp_path / "work2")
+    body = b"lora-bytes"
+    key = "ml/adapters/att-cont/model.safetensors"
+    client.app.state.storage.put(key, body)
+    from app.models import Job, MlModelBundle, new_uuid
+    bundle_id = new_uuid()
+    with client.app.state.db.session() as session:
+        session.add(MlModelBundle(id=bundle_id, name="ct-b", version="v1", kind="adapter",
+                                  base_model="acestep-v15-turbo", state="candidate",
+                                  artifact_key=key, sha256=hashlib.sha256(body).hexdigest(),
+                                  bundle_json={}))
+        session.commit()
+    r = client.post(f"/api/v1/admin/model-lab/bundles/{bundle_id}/eval-samples",
+                    json={"prompts": [{"name": "p1", "caption": "c", "instrumental": True}]})
+    job_id = r.json()["job_id"]
+    _, att, lease = claim_attempt(client.app.state.db, job_id, "w-b5")
+    adapter = _FakeTrainingAdapter({"samples": []})
+    adapter.status_override = {"lora_loaded": True, "use_lora": True,
+                               "active_adapter": "someone-elses-adapter", "lora_scale": 1.0}
+    w = SimpleNamespace(db=client.app.state.db, storage=client.app.state.storage,
+                        settings=client.app.state.settings, adapter=adapter, gen_adapter=None)
+    w._lease_beat = lambda *a: tw.TrainingWorker._lease_beat(w, *a)
+    w._lora_passes = lambda req: tw.TrainingWorker._lora_passes(w, req)
+    w._lora_pass_engage = lambda *a: tw.TrainingWorker._lora_pass_engage(w, *a)
+    w._inert_guard = lambda samples: tw.TrainingWorker._inert_guard(w, samples)
+    gen = _fake_gen(None)
+    w.gen_adapter = gen
+    tw.TrainingWorker._model_lab_eval(w, job_id, att, lease)
+    from sqlalchemy import select as _sel
+    with client.app.state.db.session() as session:
+        job = session.execute(_sel(Job).where(Job.id == job_id)).scalar_one()
+        assert job.status == "failed" and job.error_code == "LORA_CONTAMINATED"

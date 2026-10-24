@@ -91,6 +91,9 @@ def _fake_engine(tw_module, monkeypatch, target_ok=True):
     class _A:
         def __init__(self):
             self.models = []
+            self.use_lora = False
+            self.active = None
+            self.loaded = False
 
         def ensure_model(self, model=None):
             self.models.append(model)
@@ -99,9 +102,24 @@ def _fake_engine(tw_module, monkeypatch, target_ok=True):
 
         def load_lora(self, path, name=None):
             self.models.append(f"load:{name}")
+            self.loaded = True
+            self.active = name
+            self.use_lora = True
 
         def unload_lora(self):
             self.models.append("unload")
+            self.loaded = False
+            self.active = None
+
+        def set_use_lora(self, value):
+            self.use_lora = bool(value)
+
+        def set_lora_scale(self, scale, adapter_name=None):
+            self.models.append(f"scale:{scale}")
+
+        def lora_status(self):
+            return {"lora_loaded": self.loaded, "use_lora": self.use_lora,
+                    "active_adapter": self.active, "lora_scale": 1.0}
 
     class _Gen:
         last_error = ""
@@ -116,7 +134,9 @@ def _fake_engine(tw_module, monkeypatch, target_ok=True):
             return "succeeded", [{"file": "/v1/audio?path=/x/1.mp3"}]
 
         def download(self, url):
-            return b"compat-audio" * 200
+            _seq[0] += 1
+            return ("compat-audio-%06d" % _seq[0]).encode() * 60
+    _seq = [0]
     return _A(), _Gen()
 
 
@@ -139,6 +159,9 @@ def test_compat_probe_flow(client, tmp_path, monkeypatch) -> None:
                         settings=client.app.state.settings, worker_id="w-ct",
                         adapter=a, gen_adapter=gen)
     w._lease_beat = lambda *args: tw.TrainingWorker._lease_beat(w, *args)
+    w._lora_passes = lambda req: tw.TrainingWorker._lora_passes(w, req)
+    w._lora_pass_engage = lambda *a: tw.TrainingWorker._lora_pass_engage(w, *a)
+    w._inert_guard = lambda samples: tw.TrainingWorker._inert_guard(w, samples)
     tw.TrainingWorker._model_lab_compat(w, job_id, att, lease)
     assert "acestep-v15-sft" in a.models
     assert any(m.startswith("load:compat-") for m in a.models)
@@ -147,12 +170,12 @@ def test_compat_probe_flow(client, tmp_path, monkeypatch) -> None:
         b = session.get(MlModelBundle, bid)
         assert b.bundle_json["compat"]["acestep-v15-sft"] == "rendered_pending_review"
     dest = tmp_path / "review" / bid
-    assert (dest / "compat-acestep-v15-sft-native-probe1.mp3").is_file()
-    assert (dest / "compat-acestep-v15-sft-adapted-probe1.mp3").is_file()
+    assert (dest / "compat-acestep-v15-sft-baseline-probe1.mp3").is_file()
+    assert (dest / "compat-acestep-v15-sft-c100-probe1.mp3").is_file()
     assert (dest / "index.html").is_file()
     page = (dest / "index.html").read_text()
-    assert "compat-acestep-v15-sft-native-probe1.mp3" in page
-    assert "compat-acestep-v15-sft-adapted-probe1.mp3" in page
+    assert "compat-acestep-v15-sft-baseline-probe1.mp3" in page
+    assert "compat-acestep-v15-sft-c100-probe1.mp3" in page
 
 
 def test_compat_stamp_verdicts(client) -> None:

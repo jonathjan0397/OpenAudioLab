@@ -1175,6 +1175,48 @@ class TrainingWorker:
                          synthetic=False,
                          engine_result={"enrich": {**counts, "lm_revision": lm_revision}})
 
+    def _lora_passes(self, request: dict) -> list[tuple[str, float | None]]:
+        """Render passes: neutral baseline + one per requested scale."""
+        scales = [float(x) for x in (request.get("scales") or [1.0, 0.5])][:4]
+        return [("baseline", None)] + [(f"c{int(round(s * 100)):03d}", s) for s in scales]
+
+    def _lora_pass_engage(self, adapter, lora_dir, adapter_name: str, scale: float | None,
+                          loaded: bool) -> tuple[bool, dict]:
+        """Set engine state for one pass and PROVE it via /v1/lora/status."""
+        from .engine_acestep import EngineError
+
+        try:
+            if scale is None:
+                adapter.set_use_lora(False)
+                state = adapter.lora_status()
+            else:
+                if not loaded:
+                    adapter.load_lora(str(lora_dir), adapter_name)
+                    loaded = True
+                adapter.set_use_lora(True)
+                adapter.set_lora_scale(scale, adapter_name)
+                state = adapter.lora_status()
+                if state.get("lora_loaded") and state.get("active_adapter") \
+                        and state["active_adapter"] != adapter_name:
+                    raise EngineError(
+                        "LORA_CONTAMINATED",
+                        f"active adapter is {state['active_adapter']!r}, not {adapter_name!r}")
+                if not state.get("use_lora"):
+                    raise EngineError("LORA_CONTAMINATED", "use_lora toggle did not engage")
+        except EngineError as exc:
+            raise EngineError(getattr(exc, "code", "LORA_CONTROL_FAILED"),
+                              str(getattr(exc, "message", exc))) from exc
+        return loaded, state
+
+    def _inert_guard(self, samples: list[dict]) -> None:
+        from .engine_acestep import EngineError
+
+        base = {e["prompt"]: e["sha256"] for e in samples if e["mode"] == "baseline"}
+        cands = [e for e in samples if e["mode"] != "baseline"]
+        if cands and all(base.get(e["prompt"]) == e["sha256"] for e in cands):
+            raise EngineError("ADAPTER_INERT",
+                              "every candidate clip is byte-identical to its baseline")
+
     def _model_lab_eval(self, job_id: str, attempt_id: str, lease_token: str) -> None:
         """Fixed-prompt A/B samples for a candidate bundle (owner listening gate).
 
@@ -1233,10 +1275,12 @@ class TrainingWorker:
             (lora_dir / "adapter_config.json").write_bytes(self.storage.get(cfg_key).body)
         except Exception:
             pass  # engine rejects without config; candidate pass will fail loudly
-        from .review import (build_review_page, review_bundle_dir, slug,
-                             write_reference_clips)
+        from .review import (build_review_page, clear_clip_files, review_bundle_dir,
+                             slug, write_reference_clips)
 
         review_dest = review_bundle_dir(self.settings.review_dir, bundle_id)
+        if review_dest is not None:
+            clear_clip_files(review_dest)
         samples: list[dict] = []
         stop = threading.Event()
         lost = {"lease": False}
@@ -1244,14 +1288,11 @@ class TrainingWorker:
                          daemon=True).start()
         try:
             self.adapter.ensure_model(self.settings.acestep_model)
-            for mode in ("baseline", "candidate"):
-                if mode == "candidate":
-                    self.adapter.load_lora(str(lora_dir), f"ml-{bundle_id[:8]}")
-                else:
-                    try:
-                        self.adapter.unload_lora()
-                    except EngineError:
-                        pass  # fresh engine has no backup to restore
+            adapter_name = f"ml-{bundle_id[:8]}"
+            loaded = False
+            for mode, scale in self._lora_passes(request):
+                loaded, engine_state = self._lora_pass_engage(
+                    self.adapter, lora_dir, adapter_name, scale, loaded)
                 for p in prompts:
                     lyr = str(p.get("lyrics") or "").strip() or None
                     instr = False if lyr else bool(p.get("instrumental", True))
@@ -1278,9 +1319,13 @@ class TrainingWorker:
                     audio = self.gen_adapter.download(url)
                     key = f"ml/eval/{bundle_id}/{mode}-{p.get('name')}.mp3"
                     self.storage.put(key, audio)
-                    entry = {"mode": mode, "prompt": p.get("name"),
+                    entry = {"mode": mode, "scale": scale or 0.0,
+                             "prompt": p.get("name"),
                              "caption": p.get("caption"), "artifact_key": key,
                              "bytes": len(audio), "instrumental": instr,
+                             "engine_state": {k: engine_state.get(k) for k in
+                                              ("lora_loaded", "use_lora", "active_adapter",
+                                               "lora_scale") if k in engine_state},
                              "sha256": _hl.sha256(audio).hexdigest()}
                     if lyr:  # never persist full lyric text in job payloads
                         entry["lyrics_chars"] = len(lyr)
@@ -1290,6 +1335,7 @@ class TrainingWorker:
                         (review_dest / fname).write_bytes(audio)
                         entry["file"] = fname
                     samples.append(entry)
+            self._inert_guard(samples)
             with self.db.session() as session:
                 session.add(MlEvaluation(
                     id=new_uuid(), bundle_id=bundle_id, kind="ab",
@@ -1379,6 +1425,9 @@ class TrainingWorker:
         except Exception:
             pass
         review_dest = review_bundle_dir(self.settings.review_dir, bundle_id)
+        if review_dest is not None:
+            from .review import clear_clip_files
+            clear_clip_files(review_dest)
         samples: list[dict] = []
         stop = threading.Event()
         lost = {"lease": False}
@@ -1387,18 +1436,10 @@ class TrainingWorker:
         adapter_name = f"compat-{bundle_id[:8]}-{slug(target)}"
         try:
             self.adapter.ensure_model(target)
-            for mode in ("native", "adapted"):
-                if mode == "adapted":
-                    try:
-                        self.adapter.unload_lora()
-                    except EngineError:
-                        pass
-                    self.adapter.load_lora(str(lora_dir), adapter_name)
-                else:
-                    try:
-                        self.adapter.unload_lora()
-                    except EngineError:
-                        pass
+            loaded = False
+            for mode, scale in self._lora_passes(request):
+                loaded, engine_state = self._lora_pass_engage(
+                    self.adapter, lora_dir, adapter_name, scale, loaded)
                 for p in prompts:
                     lyr = str(p.get("lyrics") or "").strip() or None
                     instr = False if lyr else bool(p.get("instrumental", True))
@@ -1426,16 +1467,19 @@ class TrainingWorker:
                     fname = f"compat-{slug(target)}-{mode}-{slug(str(p.get('name')))}.mp3"
                     key = f"ml/eval/{bundle_id}/{fname}"
                     self.storage.put(key, audio)
-                    entry = {"mode": "baseline" if mode == "native" else "candidate",
-                             "engine_mode": mode, "engine": target,
-                             "prompt": p.get("name"),
+                    entry = {"mode": mode, "scale": scale or 0.0,
+                             "engine": target, "prompt": p.get("name"),
                              "caption": p.get("caption"), "artifact_key": key,
                              "bytes": len(audio), "sha256": _hl.sha256(audio).hexdigest(),
+                             "engine_state": {k: engine_state.get(k) for k in
+                                              ("lora_loaded", "use_lora", "active_adapter",
+                                               "lora_scale") if k in engine_state},
                              "instrumental": instr}
                     if review_dest is not None:
                         (review_dest / fname).write_bytes(audio)
                         entry["file"] = fname
                     samples.append(entry)
+            self._inert_guard(samples)
             with self.db.session() as session:
                 b = session.get(MlModelBundle, bundle_id)
                 bj = dict(b.bundle_json or {})
