@@ -280,3 +280,39 @@ def voice_eval_prompts(dataset) -> list[dict]:
                     "caption": "instrumental control, neutral mood, balanced mix",
                     "instrumental": True})
     return prompts
+
+
+def vocal_prompts_for(session, dataset, tag: str, *, exclude_shas: set[str] | None = None
+                      ) -> list[dict]:
+    """Vocal test prompts for a style set: one lyric the adapter trained on,
+    one same-tag catalog lyric it never saw. Empty list when nothing qualifies.
+    """
+    from .models import MlRecording
+
+    entries = sorted((dataset.manifest_json or {}).get("entries", []),
+                     key=lambda e: e.get("sha256") or "")
+    trained = next((e for e in entries if (e.get("lyrics") or "").strip()), None)
+    prompts: list[dict] = []
+    fam = tx_by_id().get(tag, {}).get("family") if tag else None
+    if trained:
+        prompts.append({"name": "vocal-trained",
+                        "caption": (trained.get("caption") or "vocal test")
+                                   + ", lead vocal",
+                        "lyrics": trained["lyrics"]})
+    unseen = None
+    if tag:
+        taken = exclude_shas if exclude_shas is not None else {e.get("sha256") for e in entries}
+        for r in session.execute(select(MlRecording)).scalars():
+            if not (r.lyrics_text or "").strip() or r.sha256 in taken:
+                continue
+            tags = r.families_json or []
+            if tag in tags or (fam and (f"fam:{fam}" in tags
+                                        or any(t.startswith(fam + ".") for t in tags))):
+                unseen = r
+                break
+        if unseen is not None:
+            sub = tx_by_id().get(tag, {})
+            cap = sub.get("caption") or (f"{fam} style" if fam else "vocal test")
+            prompts.append({"name": "vocal-unseen", "caption": cap + ", lead vocal",
+                            "lyrics": unseen.lyrics_text})
+    return prompts

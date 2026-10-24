@@ -242,3 +242,47 @@ def test_root_index_links_bundle_pages(tmp_path) -> None:
     assert root and (tmp_path / "index.html").is_file()
     text = Path(root).read_text()
     assert "n-b1" in text and "b2/index.html" in text
+
+
+def test_vocal_prompts_trained_and_unseen(client) -> None:
+    from app.models import MlDataset, MlRecording, MlSource, new_uuid
+    from app.style_tags import vocal_prompts_for
+
+    for i in range(3):
+        _make(client, genre="Country", title=f"Pool {i}")
+    client.post("/api/v1/admin/model-lab/restyle")
+    with client.app.state.db.session() as session:
+        recs = list(session.execute(
+            __import__("sqlalchemy").select(MlRecording)
+            .where(MlRecording.title.isnot(None))).scalars())
+        for r in recs:
+            r.lyrics_text = f"train lyric body {r.title}\nline two"
+        session.commit()
+        ds = MlDataset(id=new_uuid(), name="vp-ds", kind="style", frozen_sha256="f",
+                       manifest_json={"entries": [
+                           {"sha256": "a" * 64, "path": "/x/one.mp3",
+                            "caption": "modern country, telecaster twang",
+                            "lyrics": "the very lyric the adapter sang on"}]},
+                       report_json={"style_tag": "country.country"})
+        session.add(ds)
+        session.commit()
+        prompts = vocal_prompts_for(session, ds, "country.country")
+    kinds = [p["name"] for p in prompts]
+    assert "vocal-trained" in kinds and "vocal-unseen" in kinds
+    trained = next(p for p in prompts if p["name"] == "vocal-trained")
+    assert trained["lyrics"] == "the very lyric the adapter sang on"
+    unseen = next(p for p in prompts if p["name"] == "vocal-unseen")
+    assert "the very lyric" not in unseen["lyrics"]  # never-trained text
+
+
+def test_vocal_prompts_empty_when_no_lyrics(client) -> None:
+    from app.models import MlDataset, new_uuid
+    from app.style_tags import vocal_prompts_for
+
+    with client.app.state.db.session() as session:
+        ds = MlDataset(id=new_uuid(), name="vp-none", kind="style", frozen_sha256="f",
+                       manifest_json={"entries": [{"sha256": "z", "path": "/x"}]},
+                       report_json={"style_tag": "jazz.bebop"})
+        session.add(ds)
+        session.commit()
+        assert vocal_prompts_for(session, ds, "jazz.bebop") == []

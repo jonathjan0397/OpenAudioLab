@@ -3106,11 +3106,17 @@ def admin_model_lab_bundle_eval(bundle_id: str, body: MlEvalBody,
         prompts = body.prompts
         if not prompts:
             from ..models import MlDataset
-            from ..style_tags import eval_prompts_for, voice_eval_prompts
+            from ..style_tags import (eval_prompts_for, vocal_prompts_for,
+                                      voice_eval_prompts)
             ds = session.get(MlDataset, (bundle.bundle_json or {}).get("dataset_id"))
             if ds is not None:
-                prompts = (voice_eval_prompts(ds) if getattr(ds, "kind", "style") == "voice"
-                           else eval_prompts_for(session, (ds.report_json or {}).get("style_tag")))
+                if getattr(ds, "kind", "style") == "voice":
+                    prompts = voice_eval_prompts(ds)
+                else:
+                    tag = (ds.report_json or {}).get("style_tag")
+                    prompts = eval_prompts_for(session, tag)
+                    if tag:
+                        prompts = prompts + vocal_prompts_for(session, ds, tag)
         request_json = {"bundle_id": bundle_id, "prompts": prompts, "seed": body.seed,
                         "duration_seconds": body.duration_seconds}
         job = Job(id=_uuid(), owner_id="model-lab", operation="model_lab.eval",
