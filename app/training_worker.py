@@ -1435,7 +1435,7 @@ class TrainingWorker:
                          daemon=True).start()
         adapter_name = f"compat-{bundle_id[:8]}-{slug(target)}"
         try:
-            self.adapter.ensure_model(target)
+            self.adapter.reset_model(target)
             loaded = False
             for mode, scale in self._lora_passes(request):
                 loaded, engine_state = self._lora_pass_engage(
@@ -1503,6 +1503,11 @@ class TrainingWorker:
                 self.adapter.unload_lora()
             except Exception:
                 pass
+            try:  # restore the default base for every job behind us in the queue
+                self.adapter.reset_model(self.settings.acestep_model)
+            except Exception:
+                log.warning("engine base-model restore after compat failed; "
+                            "next ensure_model will re-init")
             shutil.rmtree(work, ignore_errors=True)
         complete_attempt(self.db, self.storage, self.settings, job_id, attempt_id,
                          lease_token, ("compat-summary", json.dumps(samples).encode()),

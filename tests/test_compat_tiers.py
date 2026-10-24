@@ -97,6 +97,12 @@ def _fake_engine(tw_module, monkeypatch, target_ok=True):
 
         def ensure_model(self, model=None):
             self.models.append(model)
+
+        def reset_model(self, model):
+            self.models.append(model)
+            self.loaded = False
+            self.active = None
+            return {}
             if model and "missing" in model:
                 raise tw_module.EngineError("ENGINE_FAIL", "no such checkpoint")
 

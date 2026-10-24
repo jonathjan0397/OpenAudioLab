@@ -17,6 +17,7 @@ from .engine_acestep import EngineError, HttpTransport
 class AceStepTrainingAdapter:
     def __init__(self, transport: HttpTransport) -> None:
         self.transport = transport
+        self._ensured_model: str | None = None
 
     @staticmethod
     def _data(response: dict[str, Any]) -> dict[str, Any]:
@@ -28,16 +29,39 @@ class AceStepTrainingAdapter:
         """The upstream server lazy-loads the DiT; preprocessing needs it.
 
         Re-initializing an already-loaded DiT doubles VRAM and OOMs on the
-        shared GPU, so probe lora status first (500/404 = not loaded).
+        shared GPU, so probe lora status first (500/404 = not loaded). Track
+        which checkpoint was last ensured: if the caller asks for a DIFFERENT
+        model (compat probe on SFT vs the turbo default), force a real init —
+        otherwise the status short-circuit would silently keep rendering on
+        the previous checkpoint.
         """
+        want = model or None
+        if want is not None and self._ensured_model not in (None, want):
+            response = self.transport.post_json("/v1/init", {"model": want})
+            data = self._data(response)
+            self._ensured_model = want
+            return data
         try:
             status = self.transport.get_json("/v1/lora/status")
         except EngineError:
             status = None
         if status is not None and status.get("code") == 200:
+            if want is not None:
+                self._ensured_model = want
             return status.get("data") or {}
         response = self.transport.post_json("/v1/init", {"model": model} if model else {})
-        return self._data(response)
+        data = self._data(response)
+        if want is not None:
+            self._ensured_model = want
+        return data
+
+    def reset_model(self, model: str) -> dict[str, Any]:
+        """Unconditional /v1/init: swap checkpoints and clear PEFT wrappers
+        (used after a compat probe to restore the default training base)."""
+        response = self.transport.post_json("/v1/init", {"model": model})
+        data = self._data(response)
+        self._ensured_model = model
+        return data
 
     def ensure_llm(self, lm_model_path: str | None = None) -> dict[str, Any]:
         """Initialize the 5Hz LM on the engine (needed by auto_label).

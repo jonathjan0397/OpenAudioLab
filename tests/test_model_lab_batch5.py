@@ -42,6 +42,9 @@ class _FakeTrainingAdapter:
     def ensure_model(self, model=None):
         self.calls.append("ensure")
 
+    def reset_model(self, model):
+        self.calls.append(f"reset:{model}")
+
     def ensure_llm(self, lm_model_path=None):
         self.calls.append("ensure_llm")
         return {"llm_initialized": True}
