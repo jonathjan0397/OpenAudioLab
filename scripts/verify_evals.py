@@ -34,8 +34,13 @@ def main() -> int:
     base = args.base + "/api/v1/admin/model-lab"
 
     bundles = get(base, key, "/bundles")["bundles"]
-    per_prompt = defaultdict(lambda: {"baseline": {}, "c100": {}, "c050": {}})
+    # In-run comparisons are byte-exact (same process, seconds apart). Across
+    # worker/engine restarts GPU kernels need not reproduce bit-identically, so
+    # cross-run baseline equality is reported as informational determinism only.
+    problems = []
+    determinism = defaultdict(set)
     checked = 0
+    runs = 0
     for b in bundles:
         if b["kind"] != "adapter":
             continue
@@ -43,28 +48,28 @@ def main() -> int:
         scored = [e for e in evs if e.get("scores", {}).get("samples")]
         if not scored:
             continue
+        runs += 1
         samples = scored[-1]["scores"]["samples"]
-        for s in samples:
-            mode = s.get("mode")
-            if mode not in ("baseline", "c100", "c050"):
+        by_prompt = defaultdict(dict)
+        for smp in samples:
+            if smp.get("mode") in ("baseline", "c100", "c050"):
+                by_prompt[smp.get("prompt")][smp["mode"]] = smp.get("sha256")
+                checked += 1
+        for prompt, modes in by_prompt.items():
+            base_sha = modes.get("baseline")
+            if base_sha is None:
                 continue
-            cell = f"{b['name']}@{s.get('engine', s.get('scale', ''))}"
-            per_prompt[(s.get("prompt"), scored[-1]["scores"].get("seed"))][mode][cell] = \
-                s.get("sha256")
-            checked += 1
-
-    problems = []
-    for (prompt, seed), by_mode in sorted(per_prompt.items(), key=lambda x: str(x[0])):
-        base_shas = set(by_mode["baseline"].values())
-        if len(base_shas) > 1:
-            problems.append(f"BASELINE_DRIFT {prompt!r} seed={seed}: {len(base_shas)} distinct")
-        for cand in ("c100", "c050"):
-            for cell, sha in by_mode[cand].items():
-                if base_shas and sha in base_shas:
-                    problems.append(f"ADAPTER_INERT {cell} {prompt!r}")
-            # (candidate-vs-candidate equality across bundles implies both silent,
-            # which the ADAPTER_INERT baseline-membership check already catches)
-    print(f"prompt-groups checked: {len(per_prompt)}  samples: {checked}")
+            determinism[prompt].add(base_sha)
+            for cand in ("c100", "c050"):
+                if cand in modes and modes[cand] == base_sha:
+                    problems.append(f"ADAPTER_INERT {b['name']} {prompt!r} @{cand}")
+                if cand in modes and modes[cand] is None:
+                    problems.append(f"MISSING {b['name']} {prompt!r} @{cand}")
+    multi = {p: len(v) for p, v in determinism.items() if len(v) > 1}
+    print(f"runs checked: {runs}  samples: {checked}")
+    print(f"cross-run baseline determinism: {len(determinism) - len(multi)}/"
+          f"{len(determinism)} prompts byte-stable across restarts"
+          + (f" (varied: {sorted(multi)[:6]}...)" if multi else ""))
     if problems:
         print("PROBLEMS:")
         for p in problems:

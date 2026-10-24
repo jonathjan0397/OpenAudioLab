@@ -1212,10 +1212,12 @@ class TrainingWorker:
         from .engine_acestep import EngineError
 
         base = {e["prompt"]: e["sha256"] for e in samples if e["mode"] == "baseline"}
-        cands = [e for e in samples if e["mode"] != "baseline"]
-        if cands and all(base.get(e["prompt"]) == e["sha256"] for e in cands):
-            raise EngineError("ADAPTER_INERT",
-                              "every candidate clip is byte-identical to its baseline")
+        for e in samples:
+            if e["mode"] != "baseline" and base.get(e["prompt"]) == e["sha256"]:
+                raise EngineError("ADAPTER_INERT",
+                                  f"{e['mode']} clip is byte-identical to baseline "
+                                  f"({e.get('prompt')}) — engine returned cached or "
+                                  "unadapted audio")
 
     def _model_lab_eval(self, job_id: str, attempt_id: str, lease_token: str) -> None:
         """Fixed-prompt A/B samples for a candidate bundle (owner listening gate).
@@ -1300,6 +1302,11 @@ class TrainingWorker:
                         music_description=str(p.get("caption") or ""), lyrics=lyr,
                         instrumental=instr, seed=seed, duration_seconds=duration,
                         thinking=False)
+                    # The engine dedups completed results by payload; LoRA state
+                    # is NOT reliably part of that key. global_caption is unused
+                    # by turbo/simple tasks, so it uniquely busts per-pass caches
+                    # without conditioning the audio.
+                    payload["global_caption"] = f"oal-ab {mode} {p.get('name')} {seed}"
                     sub = self.gen_adapter.submit(payload)
                     deadline = time.monotonic() + 600
                     state, items = "pending", None
@@ -1447,6 +1454,7 @@ class TrainingWorker:
                         music_description=str(p.get("caption") or ""), lyrics=lyr,
                         instrumental=instr, seed=seed, duration_seconds=duration,
                         thinking=False)
+                    payload["global_caption"] = f"oal-compat {target} {mode} {p.get('name')} {seed}"
                     sub = self.gen_adapter.submit(payload)
                     deadline = time.monotonic() + 600
                     state, items = "pending", None
