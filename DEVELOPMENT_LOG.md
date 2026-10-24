@@ -1602,3 +1602,25 @@ XL-1 (pinned backlog, owner decision):
   worker, 20-track VRAM/step probe (rank 32 + gradient checkpointing likely),
   record measured evidence in MODEL_POLICY, then per-keeper retrain + compat
   baselines. Datasets/rights/eval machinery carry over untouched.
+
+## 2026-10-23 — B3 shipped: scale-ladder evals + liveness guards; batch-2 launched
+
+- Eval/compat ops now render passes baseline(off) + c100 + c050 with an
+  activation protocol (use_lora toggle + per-adapter scale + GET
+  /v1/lora/status probe per pass). Guards fail loudly instead of lying:
+  LORA_CONTAMINATED (active adapter not ours or toggle refused),
+  ADAPTER_INERT (every candidate sha == its baseline). Trainer acceptance
+  renders with the adapter proven active (engine_state recorded).
+- Review pages rebuilt dynamically: Baseline | Candidate @1.00 | Candidate
+  @0.50 columns with per-cell engine state (active adapter, scale, sha);
+  stale clips cleared per pass; lyrics-sha chips preserved.
+- Root cause of the rock-identical/sha-chain evidence: multiple leaked
+  adapters leave the decoder PEFT-wrapped; later add_lora can skip backup
+  and silently not become active -> previous adapter's audio served as both
+  "baseline" and "candidate". The probe is the fix; clean engines (fresh
+  worker) plus toggle-off baselines make renders honest.
+- 502 tests green. Batch 1 re-render pass (9 adapters + pop->SFT compat)
+  and batch 2 training queued (blues 147, jazz 147, new-wave 65, folk 80,
+  hard-rock 66, gospel 67, electronica 71, ambient 82 tracks; blanket
+  rights + approvals applied at build). scripts/verify_evals.py performs the
+  cross-bundle SHA verification (baseline neutrality, candidate liveness).
