@@ -1671,3 +1671,18 @@ with per-pass engine_state (lora_loaded/use_lora/active/scale) recorded in
 each sample. Probe bundle (electronica) re-rendered: baseline/c100/c050 all
 distinct on every prompt. Full 16-bundle verified rerender now in queue;
 scripts/verify_evals.py enforces the per-run table after drain.
+
+## 2026-10-24 — B3 complete: 17/17 adapters have verified scale-ladder reviews
+
+Root-cause chain fully characterized live: (1) engine dedups completed results
+by payload, blind to LoRA state — defeated with per-pass global_caption nonce
+(unused by turbo/simple); (2) long-lived engines degrade until named
+scale(0.5) renders come out byte-identical to unadapted — the strict
+ADAPTER_INERT guard now rejects those runs and engine cycling (fresh worker)
+retries them; (3) training engine moved to its OWN GPU 1 (Strata on 2,
+hub generation on 0) ending the cross-engine VRAM contention that stalled the
+queue twice. Every one of the 17 adapter bundles (16 style + 1 voice) now has
+a rendered set where baseline / @1.0 / @0.5 are pairwise byte-distinct on
+every prompt, verified by scripts/verify_evals.py. Review pages:
+/Cold-Archive/OAL-Model-Training-A1/review/<bundle-id>/index.html (+ root
+index.html listing all).
