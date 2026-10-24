@@ -1686,3 +1686,34 @@ a rendered set where baseline / @1.0 / @0.5 are pairwise byte-distinct on
 every prompt, verified by scripts/verify_evals.py. Review pages:
 /Cold-Archive/OAL-Model-Training-A1/review/<bundle-id>/index.html (+ root
 index.html listing all).
+
+
+## 2026-10-24 — vocal ladders rendered on every style set; engine cycle
+budget tightened to one pass per restart.
+
+All 16 style bundles were re-rendered with the owner-requested vocal ladder:
+each set now carries `vocal-trained` (lyrics from the dataset) and
+`vocal-unseen` (same-tag catalog track never trained on) prompts in addition
+to the sub-genre/sibling/control rows, each judged at baseline / @1.0 / @0.5.
+scripts/verify_evals.py: 17 runs, 288 samples, "ALL CHECKS PASS: baselines
+neutral, candidates live, no chains". Cross-run baseline determinism is
+39/42 prompts byte-stable across engine restarts; the three vocal/control
+prompts vary run-to-run (sampling variance, not adapter state) and are
+judged within-run only.
+
+Findings and fixes this session: (1) the rerender driver polled
+`model-lab/jobs/{id}` — a route that does not exist; the SPA catch-all
+answers that path with an HTML 200, so the JSON parse failed and jobs
+looked pending forever. Job truth now comes from `GET /admin/jobs/{id}`
+(status/stage/error_code + event timeline). (2) Engine degradation was
+worse than the previous ~4-pass budget: after this morning's long session a
+fresh worker restart kept only the FIRST 18-render pass honest (rock clean,
+rnb_soul/electronic/hiphop all ADAPTER_INERT in ~100 s fail-fast on the very
+next pass). Policy is now ONE bundle per gpu1 container restart; under that
+policy all 16 bundles rendered clean on their first attempt. GPU 0 was
+untouched by these cycles and its worker's leftover drain flag was cleared
+(`/admin/workers/{id}/drain` toggles), returning it to normal site service.
+(3) The eval op rebuilt per-bundle review pages but only compat rebuilt the
+root index, so review/index.html went stale; the eval op now refreshes it
+too. Root page lists all 17 checkpoints:
+/Cold-Archive/OAL-Model-Training-A1/review/index.html.

@@ -1363,6 +1363,8 @@ class TrainingWorker:
                                           "sha256": want_sha, "seed": seed,
                                           "duration_seconds": duration},
                                   samples=samples, references=references)
+                from .review import write_root_index
+                write_root_index(review_dest.parent)
         except EngineError as exc:
             fail_attempt(self.db, self.settings, job_id, attempt_id, lease_token,
                          getattr(exc, "code", "EVAL_FAILED"), str(exc)[:280])
