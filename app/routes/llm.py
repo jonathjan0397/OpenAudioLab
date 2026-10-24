@@ -90,12 +90,31 @@ def llm_style_prompt(payload: StylePromptRequest, request: Request, owner_id: st
     settings = request.app.state.settings
     text = _ask(
         request,
-        STYLE_SYSTEM,
+        _style_system(request),
         payload.description,
         max_tokens=120 if settings.llm_thinking_style else 60,
         thinking=settings.llm_thinking_style,
     )
     return JSONResponse({"style_prompt": text})
+
+
+def _style_system(request: Request) -> str:
+    """STYLE_SYSTEM plus the canonical taxonomy keywords (kill-switch: SiteSetting
+    `style_keyword_prompt` = off). The list mirrors the public cheat sheet so any
+    keyword the LLM emits is engine-normalizable via resolve_style_text."""
+    base = STYLE_SYSTEM
+    try:
+        with request.app.state.db.session() as session:
+            row = session.get(SiteSetting, "style_keyword_prompt")
+        if row is not None and str(row.value or "").lower() in ("off", "false", "0"):
+            return base
+    except Exception:
+        pass
+    from ..style_tags import style_keyword_lines
+
+    return (base + " When one or more of these canonical style keywords fits the "
+            "request, use it verbatim (grouped by family below):\n"
+            + style_keyword_lines())
 
 
 class TitleRequest(StrictModel):

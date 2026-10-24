@@ -316,3 +316,109 @@ def vocal_prompts_for(session, dataset, tag: str, *, exclude_shas: set[str] | No
             prompts.append({"name": "vocal-unseen", "caption": cap + ", lead vocal",
                             "lyrics": unseen.lyrics_text})
     return prompts
+
+
+# ---------------------------------------------------------------------------
+# Generation-path vocabulary (public cheat sheet, style-prompt LLM, engine
+# caption folding). Pure functions of the frozen taxonomy file; no DB, no LLM.
+
+
+def subgenre_term(sub: dict) -> str:
+    """Copy-paste keyword for a subgenre: first alias, else the id suffix."""
+    aliases = sub.get("aliases") or []
+    if aliases:
+        return str(aliases[0])
+    return sub["id"].split(".")[-1].replace("-", " ")
+
+
+def cheat_sheet_categories() -> list[dict]:
+    """One {name, tags} section per taxonomy family, subgenres ordered by id."""
+    tx = taxonomy()
+    out: list[dict] = []
+    for fam in tx["families"]:
+        name = str(fam)
+        terms = [subgenre_term(s) for s in
+                 sorted((x for x in tx["subgenres"] if x["family"] == name),
+                        key=lambda s: s["id"])]
+        if terms:
+            out.append({"name": name.title(), "tags": terms})
+    return out
+
+
+def style_keyword_lines() -> str:
+    """Compact family -> keywords block for the style-prompt system message."""
+    lines: list[str] = []
+    for sect in cheat_sheet_categories():
+        lines.append(sect["name"].lower() + ": " + ", ".join(sect["tags"]))
+    return "\n".join(lines)
+
+
+_SLUG_ID = None
+
+
+def _slug_index() -> dict[str, str]:
+    global _SLUG_ID
+    if _SLUG_ID is None:
+        from .review import slug
+
+        _SLUG_ID = {slug(s["id"]): s["id"] for s in taxonomy()["subgenres"]}
+    return _SLUG_ID
+
+
+def trained_style_terms(names: list[str]) -> list[str]:
+    """User-facing keywords for `style-<slug(id)>-v1-adapter` bundle names."""
+    idx = _slug_index()
+    out: list[str] = []
+    for n in names:
+        core = str(n)
+        if core.startswith("style-"):
+            core = core[len("style-"):]
+        for suffix in ("-v1-adapter", "-adapter", "-v1"):
+            if core.endswith(suffix):
+                core = core[: -len(suffix)]
+                break
+        sub = idx.get(core)
+        term = (subgenre_term(tx_by_id()[sub]) if sub
+                else core.replace("-", " "))
+        if term and term not in out:
+            out.append(term)
+    return out
+
+
+def resolve_style_text(text: str | None) -> tuple[list[str], list[str]]:
+    """Split a free-form style prompt into canonical taxonomy captions plus
+    unmatched pass-through terms. Longest-window alias match per chunk; junk
+    words dropped; every input subgenre counted once. Deterministic, offline."""
+    tx = taxonomy()
+    amap, junk = tx["_amap"], tx["_junk"]
+    by_id = tx_by_id()
+    captions: list[str] = []
+    leftover: list[str] = []
+    seen: set[str] = set()
+    for chunk in split_genre(text or ""):
+        raw_words = chunk.split()
+        norm_words = [normalize(w) for w in raw_words]
+        i = 0
+        while i < len(norm_words):
+            hit = skip_end = None
+            for j in range(len(norm_words), i, -1):
+                frag = " ".join(norm_words[i:j])
+                if frag in amap:
+                    hit, skip_end = amap[frag], j
+                    break
+                if frag in junk:
+                    skip_end = j
+                    break
+            if hit:
+                if hit.startswith("FAM:"):
+                    fam_term = hit[4:].replace("-", " ")
+                    if hit not in seen:
+                        seen.add(hit)
+                        leftover.append(fam_term)
+                elif hit not in seen:
+                    seen.add(hit)
+                    captions.append(by_id[hit]["caption"])
+            elif not skip_end:
+                leftover.append(raw_words[i])
+            i = skip_end or i + 1
+    return captions, leftover

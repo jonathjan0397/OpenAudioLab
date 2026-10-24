@@ -124,11 +124,16 @@ The public `controls` map is validated against `app/registry.py::supported_contr
 equal what the adapter forwards. For `ace-step-1.5` (Turbo) the accepted+forwarded set is:
 `mood, gender, bpm, key_scale, time_signature, vocal_language, inference_steps,
 guidance_scale, variations`. `shift` is excluded and returns `CONTROL_UNSUPPORTED`
-on Turbo (it is base-family only). `mood` is consumed by the auto-LoRA matcher, and
-both `mood` and `gender` are folded into the resolved non-lyric caption so they
-actually reach the model. Free-text song **idea** and raw **style** are first-class
-request fields (`song_idea`, `style_prompt`) — never control-bag keys — and persist
-independently in the recipe for recreation. Control **values** are additionally range/
+on Turbo (it is base-family only). `mood` and `gender` are stamped on the finished
+asset's tag list (`orchestration.complete_generation`) for discovery — they do not
+mutate the engine prompt. The free-text song **idea** (`song_idea`) stays
+recipe/manifest metadata. The **style** lane (`style_prompt`) is folded into the
+engine caption at render time: `engine_worker._style_text_for` resolves it through
+the versioned taxonomy (`style_tags.resolve_style_text`), replacing matched aliases
+with canonical subgenre captions, passing unmatched words through, dropping junk
+tokens; the caption sent upstream is `music_description + ", " + resolved_style`
+trimmed to 2000 chars, and lyrics remain a separate untouched field. Control
+**values** are additionally range/
 type-validated (`CONTROL_INVALID`) so a slider can't ship an out-of-range number.
 
 ## Catalog `model_selection` path (multi-model, post-Phase3)

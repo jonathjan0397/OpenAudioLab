@@ -389,3 +389,37 @@ def test_premium_job_requeued_without_budget(client, orch) -> None:
     assert attempts == []  # attempt released, budget intact
     assert orch.dispatcher.publish_once() == 1
     assert orch.queue.depth("oal:queue:ace-step-1.5") == 1
+
+
+def test_payload_resolves_style_prompt_to_taxonomy_captions(orch) -> None:
+    # style_prompt reaches the engine caption normalized: matched aliases become
+    # their canonical subgenre captions, unknown words pass through verbatim.
+    from types import SimpleNamespace
+    worker = _worker(orch, FakeAdapter([]))
+    job = SimpleNamespace(
+        request_json={"music_description": "guitar song",
+                      "style_prompt": "classic rock, warm",
+                      "controls": {}},
+        lyrics=None, owner_id="usr_x",
+    )
+    style = worker._payload_for(job)["style"]
+    assert style is not None
+    assert style.startswith("classic rock, driving guitars, live drum feel, "
+                            "anthemic chorus")
+    assert style.endswith("warm")
+
+
+def test_payload_no_style_stays_none(orch) -> None:
+    from types import SimpleNamespace
+    worker = _worker(orch, FakeAdapter([]))
+    job = SimpleNamespace(
+        request_json={"music_description": "x", "controls": {}},
+        lyrics=None, owner_id="usr_x",
+    )
+    assert worker._payload_for(job)["style"] is None
+    blank = SimpleNamespace(
+        request_json={"music_description": "x", "style_prompt": "   ",
+                      "controls": {}},
+        lyrics=None, owner_id="usr_x",
+    )
+    assert worker._payload_for(blank)["style"] is None

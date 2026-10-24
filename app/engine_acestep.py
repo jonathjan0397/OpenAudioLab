@@ -129,11 +129,18 @@ class AceStepAdapter:
         source: dict[str, Any] | None = None,
         thinking: bool | None = None,
         lm_model_path: str | None = None,
+        style: str | None = None,
     ) -> dict[str, Any]:
         controls = controls or {}
         thinking_eff = self.thinking if thinking is None else bool(thinking)
+        prompt = music_description
+        if style:
+            # Owner-approved fold: taxonomy-resolved style keywords ride in the
+            # non-lyric caption. music_description leads; the combined field is
+            # hard-trimmed to the API's 2000-char caption budget.
+            prompt = f"{music_description}, {style}"[:2000]
         payload: dict[str, Any] = {
-            "prompt": music_description,
+            "prompt": prompt,
             "lyrics": "" if instrumental or lyrics is None else lyrics,
             "audio_format": "wav",
             "batch_size": 1,

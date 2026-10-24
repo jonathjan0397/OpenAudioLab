@@ -9,19 +9,33 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 from ..models import Asset
+from ..style_tags import cheat_sheet_categories, trained_style_terms
 from ..styles_data import ALL_CURATED_TAGS, CHEATSHEET
 
 router = APIRouter(tags=["styles"])
+
+
+def _trained_bundle_tags(session) -> list[str]:
+    """Keywords for released model-lab style adapters (voice bundles excluded)."""
+    from ..models import MlModelBundle
+
+    rows = list(session.execute(
+        select(MlModelBundle.name).where(MlModelBundle.state == "released")
+    ).scalars())
+    return trained_style_terms([n for n in rows if n.startswith("style-")])
 
 
 @router.get("/styles/cheatsheet")
 def styles_cheatsheet(request: Request) -> JSONResponse:
     with request.app.state.db.session() as session:
         lora_tags = _active_lora_tags(session)
+        trained = _trained_bundle_tags(session)
+    categories = [{"name": name, "tags": tags} for name, tags in CHEATSHEET.items()]
+    categories += cheat_sheet_categories()
     return JSONResponse(
         {
-            "categories": [{"name": name, "tags": tags} for name, tags in CHEATSHEET.items()],
-            "lora_tags": lora_tags,
+            "categories": categories,
+            "lora_tags": list(dict.fromkeys(trained + lora_tags)),
         }
     )
 
@@ -38,12 +52,14 @@ def styles_suggest(
     rng = random.Random(seed)
     with request.app.state.db.session() as session:
         lora_tags = _active_lora_tags(session)
+        trained = _trained_bundle_tags(session)
         trending = _trending_tags(session)
-    lora_set = set(lora_tags)
+    lora_set = set(lora_tags) | set(trained)
     trending_set = set(trending)
+    tax_terms = [t for sect in cheat_sheet_categories() for t in sect["tags"]]
     pool = [
         {"tag": t, "source": "lora" if t in lora_set else "trending" if t in trending_set else "curated"}
-        for t in dict.fromkeys(lora_tags + trending + ALL_CURATED_TAGS)
+        for t in dict.fromkeys(trained + lora_tags + trending + ALL_CURATED_TAGS + tax_terms)
     ]
     rng.shuffle(pool)
     return JSONResponse({"tags": pool[:limit]})

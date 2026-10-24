@@ -286,3 +286,33 @@ def test_vocal_prompts_empty_when_no_lyrics(client) -> None:
         session.add(ds)
         session.commit()
         assert vocal_prompts_for(session, ds, "jazz.bebop") == []
+
+
+def test_resolve_style_text_captions_junk_and_passthrough() -> None:
+    from app.style_tags import resolve_style_text
+
+    caps, left = resolve_style_text("classic rock, MP3 1, warm totallymadeup")
+    assert caps == ["classic rock, driving guitars, live drum feel, anthemic chorus"]
+    assert "MP3" not in " ".join(left) and "1" not in left  # junk dropped
+    assert "warm" in left and "totallymadeup" in left
+    assert resolve_style_text(None) == ([], [])
+    assert resolve_style_text("") == ([], [])
+    # dedupe: same subgenre twice through two aliases -> one caption
+    caps2, _ = resolve_style_text("classic rock, rock classics")
+    assert len(caps2) == 1
+
+
+def test_cheat_sheet_categories_and_trained_terms() -> None:
+    from app.style_tags import (cheat_sheet_categories, style_keyword_lines,
+                                trained_style_terms)
+
+    sects = cheat_sheet_categories()
+    assert len(sects) == 17
+    assert sum(len(s["tags"]) for s in sects) == 358
+    flat = [t for s in sects for t in s["tags"]]
+    assert "classic rock" in flat and "dream pop" in flat
+    assert trained_style_terms(["style-rock-hard-rock-v1-adapter",
+                                "style-pop-pop-v1-adapter"]) == ["hard rock", "pop"]
+    assert trained_style_terms(["style-not-a-thing-v1-adapter"]) == ["not a thing"]
+    assert len(style_keyword_lines()) > 2000
+    assert "rock:" in style_keyword_lines().lower()

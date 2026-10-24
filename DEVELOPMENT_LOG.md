@@ -1717,3 +1717,39 @@ untouched by these cycles and its worker's leftover drain flag was cleared
 root index, so review/index.html went stale; the eval op now refreshes it
 too. Root page lists all 17 checkpoints:
 /Cold-Archive/OAL-Model-Training-A1/review/index.html.
+
+
+## 2026-10-24 — style keyword coverage wired end-to-end: taxonomy -> cheat
+sheet -> style LLM -> engine caption.
+
+Coverage baseline (scripts/style_keyword_coverage.py, rerunnable): taxonomy
+358 subgenres / 1,175 normalized aliases / 17 families / 21 junk tokens; the
+public cheat sheet previously carried only the 96 hand-curated dimension tags
+(39 of them resolve to taxonomy aliases; the other 57 are intentional
+mood/era/instrument vocabulary). Released trained adapters were entirely
+absent from the sheet (`lora_tags` read only the legacy `Lora` table).
+
+Wiring now deployed: (1) `GET /styles/cheatsheet` serves the curated
+dimensions PLUS all 17 taxonomy family sections (358 copy-paste keywords,
+generated from `app/style_data/style_taxonomy.json` so there is one
+canonical vocabulary); `lora_tags` merges legacy tags with keywords derived
+from released model-lab style bundle names (voice bundles excluded by
+design). `/styles/suggest` draws from the same expanded pool. (2) The
+frontend's style assistant (`POST /llm/style-prompt`) now embeds the family
+keyword block (~4.5k chars) in its system message so the LLM composes from
+canonical terms; kill-switch SiteSetting `style_keyword_prompt=off`.
+(3) `style_prompt` finally reaches the model: engine_worker resolves it via
+`style_tags.resolve_style_text` (longest-window alias match -> canonical
+subgenre caption, unmatched words pass through, junk dropped, deduped) and
+`build_payload` folds the result into the non-lyric engine prompt as
+`music_description + ", " + resolved`, trimmed to 2000. No-style payloads
+are byte-identical to before (determinism/seed contracts unchanged), lyrics
+stay a separate verbatim field (invariant 1), and `song_idea` remains
+recipe-only metadata per owner decision. The stale parity-doc claim that
+mood/gender reach the caption was corrected: they are asset-tag metadata.
+
+Validation: 513 backend tests (9 new: resolver unit behavior, cheat-sheet
+sections + trained tags incl. cleanup, LLM system keyword injection + off
+switch, engine fold + no-style regression + 2000-cap trim, worker
+normalization); 17 frontend tests unchanged and green — Styles.tsx renders
+new categories without code changes.

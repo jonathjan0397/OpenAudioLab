@@ -431,7 +431,22 @@ class EngineWorker:
             source=self._source_for(job, request),
             thinking=thinking,
             lm_model_path=lm_model_path,
+            style=self._style_text_for(request),
         )
+
+    @staticmethod
+    def _style_text_for(request: dict) -> str | None:
+        """Fold the request's style_prompt into engine vocabulary: taxonomy
+        matches become their canonical captions, the rest passes through.
+        Lyrics are never involved here (separate field, verbatim invariant)."""
+        raw = str(request.get("style_prompt") or "").strip()
+        if not raw:
+            return None
+        from .style_tags import resolve_style_text
+
+        captions, leftover = resolve_style_text(raw)
+        parts = captions + [w for w in leftover if w.strip()]
+        return ", ".join(parts) if parts else None
 
     def _source_for(self, job: Job, request: dict) -> dict | None:
         """Map owner-validated source/task fields onto upstream REST names.

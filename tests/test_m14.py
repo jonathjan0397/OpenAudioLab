@@ -302,3 +302,67 @@ def test_title_asset_naming(client, orch) -> None:
             ).scalars()
         ]
     assert titles == ["Moonlit Road"]
+
+
+def test_cheatsheet_taxonomy_sections_and_trained_tags(client) -> None:
+    from app.models import MlModelBundle
+
+    with client.app.state.db.session() as session:
+        session.add(MlModelBundle(id="cs-pop-v1", name="style-pop-pop-v1-adapter",
+                                  version="v1", kind="adapter",
+                                  base_model="acestep-v15-turbo", state="released"))
+        session.add(MlModelBundle(id="cs-voice-v1",
+                                  name="alabama-poid-voice-v1-adapter",
+                                  version="v1", kind="adapter",
+                                  base_model="acestep-v15-turbo", state="released"))
+        session.commit()
+    body = client.get("/api/v1/styles/cheatsheet").json()
+    names = [c["name"] for c in body["categories"]]
+    assert {"Rock", "Electronic"} <= set(names)
+    assert sum(len(c["tags"]) for c in body["categories"]) >= 358
+    assert "pop" in body["lora_tags"]
+    assert "alabama poid voice" not in body["lora_tags"]
+    with client.app.state.db.session() as session:
+        for bid in ("cs-pop-v1", "cs-voice-v1"):
+            b = session.get(MlModelBundle, bid)
+            if b is not None:
+                session.delete(b)
+        session.commit()
+
+
+def test_llm_style_prompt_carries_taxonomy_keywords(client) -> None:
+    from app.llm import STYLE_SYSTEM
+    from app.models import SiteSetting
+
+    _seed_owner(client, "m14-stylekw@example.com", "m14stylekw")
+    captured: dict = {}
+
+    class Fake:
+        def chat(self, system, user, max_tokens=400, temperature=0.8,
+                 thinking=False):
+            captured["system"] = system
+            return "classic rock, anthemic chorus"
+
+    client.app.state.llm = Fake()
+    try:
+        response = client.post("/api/v1/llm/style-prompt",
+                               json={"description": "big guitar rock"})
+        assert response.status_code == 200
+        assert "classic rock" in captured["system"]
+        assert "Output only the style prompt" in captured["system"]
+        assert "canonical style keywords" in captured["system"]
+
+        with client.app.state.db.session() as session:
+            session.add(SiteSetting(key="style_keyword_prompt", value="off"))
+            session.commit()
+        response = client.post("/api/v1/llm/style-prompt",
+                               json={"description": "big guitar rock"})
+        assert response.status_code == 200
+        assert captured["system"] == STYLE_SYSTEM
+        with client.app.state.db.session() as session:
+            row = session.get(SiteSetting, "style_keyword_prompt")
+            if row is not None:
+                session.delete(row)
+            session.commit()
+    finally:
+        del client.app.state.llm

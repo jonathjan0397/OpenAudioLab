@@ -137,3 +137,26 @@ def test_payload_dit_only_disables_cot_and_thinking() -> None:
     assert payload["use_cot_language"] is False
     assert "lm_model_path" not in payload
     assert "use_adg" not in payload
+
+
+def test_payload_folds_style_caption_into_prompt() -> None:
+    adapter = AceStepAdapter(FakeTransport([]))
+    payload = adapter.build_payload("spacey synth led", None, True, None, 60,
+                                    style="dream pop, hazy synths")
+    assert payload["prompt"] == "spacey synth led, dream pop, hazy synths"
+    assert payload["lyrics"] == ""
+
+
+def test_payload_without_style_is_unchanged() -> None:
+    adapter = AceStepAdapter(FakeTransport([]))
+    plain = adapter.build_payload("x", None, True, None, None)
+    explicit_none = adapter.build_payload("x", None, True, None, None, style=None)
+    assert plain == explicit_none
+    assert plain["prompt"] == "x"
+
+
+def test_payload_style_trimmed_to_caption_budget() -> None:
+    adapter = AceStepAdapter(FakeTransport([]))
+    payload = adapter.build_payload("d" * 1990, None, True, None, None,
+                                    style="e" * 500)
+    assert payload["prompt"] == ("d" * 1990 + ", " + "e" * 500)[:2000]
