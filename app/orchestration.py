@@ -184,9 +184,13 @@ class Dispatcher:
             for record in rows:
                 # Baseline-first: keep the baseline queue filled up to `reserve`
                 # pending jobs; overflow goes to the burst tier (Vast only).
+                # Burst exists ONLY for model queues a Vast node can drain;
+                # training queues have no burst consumer, and routing stranded
+                # re-publishes there silently kills delivery.
+                burstable = "ace-step" in record.queue
                 target = (
                     record.queue
-                    if self.queue.depth(record.queue) < reserve
+                    if (not burstable or self.queue.depth(record.queue) < reserve)
                     else RedisQueue.burst_name(record.queue)
                 )
                 self.queue.publish(target, record.job_id)
