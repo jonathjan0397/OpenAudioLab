@@ -1654,3 +1654,20 @@ neutrality + candidate liveness once the pass drains.
   Strata stack keeps GPUs 1-2 and the engine holds ~14 GB only when loaded).
 Ops: both queues flushed (DB is authoritative, invariant 3), gpu1 refreshed,
 stranded dispatcher republish restored all deliveries — queue draining again.
+
+## 2026-10-24 — Scale-ladder defect isolated & mitigated; full verified rerender running
+
+Live engine isolation tests proved two independent hazards for A/B ladders:
+1) the engine dedups completed results by request payload (state-blind) —
+   identical caption+seed in later passes returns the earlier FILE
+   (proven: repeat render returned the same wav URL);
+2) in one session, a named scale(0.5) render came out byte-equal to the
+   lora-off render (engine scale quirk; clean-session repeats render 1.0 and
+   0.5 distinctly, so it is session/state dependent).
+Mitigations shipped (d3aedf4): every eval/compat render carries a unique
+global_caption nonce (unused by turbo/simple conditioning, busts the
+dedup), and the guard now fails on ANY candidate==baseline (ADAPTER_INERT),
+with per-pass engine_state (lora_loaded/use_lora/active/scale) recorded in
+each sample. Probe bundle (electronica) re-rendered: baseline/c100/c050 all
+distinct on every prompt. Full 16-bundle verified rerender now in queue;
+scripts/verify_evals.py enforces the per-run table after drain.
