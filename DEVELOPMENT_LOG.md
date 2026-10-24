@@ -1624,3 +1624,17 @@ XL-1 (pinned backlog, owner decision):
   hard-rock 66, gospel 67, electronica 71, ambient 82 tracks; blanket
   rights + approvals applied at build). scripts/verify_evals.py performs the
   cross-bundle SHA verification (baseline neutrality, candidate liveness).
+
+## 2026-10-23 — ensure_model checkpoint bug caught by B3's own guards
+
+During the re-render pass, 4 evals failed with the engine's "Base decoder
+backup not found" — root cause: ensure_model's lora/status short-circuit is
+checkpoint-blind, so after a compat probe switched the engine to SFT, later
+jobs kept the probe's model+PEFT wrapper and their loads collided. Fixed in
+7443e2e: the adapter now tracks which checkpoint was last ensured and forces
+/v1/init on a model change; compat probes reset the engine to the default base
+in finally. The B3 guards did their job — they failed loudly instead of
+publishing contaminated comparisons (the 17 succeeded renders predate the
+first probe and remain valid; the 4 affected bundles re-queued on clean code).
+Verification script scripts/verify_evals.py will prove cross-bundle baseline
+neutrality + candidate liveness once the pass drains.
