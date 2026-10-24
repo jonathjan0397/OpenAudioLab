@@ -1638,3 +1638,19 @@ publishing contaminated comparisons (the 17 succeeded renders predate the
 first probe and remain valid; the 4 affected bundles re-queued on clean code).
 Verification script scripts/verify_evals.py will prove cross-bundle baseline
 neutrality + candidate liveness once the pass drains.
+
+## 2026-10-23 — Delivery stall solved: burst-overflow bug + VRAM gate margin
+
+11 eval/train jobs sat 'queued' for ~40 min. Two compounding causes:
+- Dispatcher burst-overflow ("Vast only") applied to EVERY queue: while the
+  training main queue was deep, stranded-job re-publishes were routed to
+  oal:queue:training:burst — which no consumer reads — 19,026 messages and
+  growing in a dead queue (each stranded sweep re-fed the loop). Fixed in
+  86d1d78: only model queues ("ace-step" family, drainable by Vast burst
+  nodes) may overflow; training queues always publish to the plain queue.
+- The VRAM claim gate (10 GB floor) missed by 134 MB because the idle engine
+  stays resident between jobs on the shared GPU 0 (9.87 GB free < 10 GB).
+  Floor lowered to 8 GB (still above any real contention need given the
+  Strata stack keeps GPUs 1-2 and the engine holds ~14 GB only when loaded).
+Ops: both queues flushed (DB is authoritative, invariant 3), gpu1 refreshed,
+stranded dispatcher republish restored all deliveries — queue draining again.
