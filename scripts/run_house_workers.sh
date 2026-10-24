@@ -50,7 +50,7 @@ if [ "$TARGET" = "all" ] || [ "$TARGET" = "gpu1" ]; then
 docker rm -f oal-worker-gpu1 2>/dev/null || true
 
 docker run -d --name oal-worker-gpu1 --gpus all --restart unless-stopped \
-  -e CUDA_VISIBLE_DEVICES=0 \
+  -e CUDA_VISIBLE_DEVICES=1 \
   -e ACESTEP_API_HOST=0.0.0.0 -e ACESTEP_API_PORT=8001 -e ACESTEP_DEVICE=cuda:0 -e ACESTEP_INIT_LLM=true \
   -e ACESTEP_LM_BACKEND=pt -e ACESTEP_LM_MODEL_PATH=acestep-5Hz-lm-1.7B \
   -e OAL_ACESTEP_BASE_URL=http://127.0.0.1:8001 -e OAL_APP_DIR=/srv/openaudiolab/code \
@@ -59,7 +59,7 @@ docker run -d --name oal-worker-gpu1 --gpus all --restart unless-stopped \
   -e OAL_ENGINE_IDLE_STOP_SECONDS=600 -e OAL_REDIS_URL="$REDIS" -e OAL_SECRET_KEY="$SECRET" \
   -e OAL_STORAGE_BACKEND=local -e OAL_STORAGE_DIR=/data/oal \
   -e "OAL_TRUENAS_BROWSE_ROOT=/mnt/truenas/Media Library/Music" \
-  -e OAL_TRAIN_WORKDIR=/opt/acestep/training-data-gpu1 -e OAL_TRAIN_MIN_FREE_MB=8000 \
+  -e OAL_TRAIN_WORKDIR=/opt/acestep/training-data-gpu1 -e OAL_TRAIN_MIN_FREE_MB=14000 \
   -e OAL_TRAIN_HTTP_TIMEOUT_SECONDS=7200 -e OAL_ENGINE_AUTOSTART=0 \
   -e OAL_MODEL_LAB_TRAIN_COMMAND="python3 -m app.model_lab_trainer" \
   -e OAL_REVIEW_DIR=/opt/oal-review \
